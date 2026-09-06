@@ -46,10 +46,9 @@ export function AddEditDialog() {
   }
 
   return (
-    <div className="overlay" onMouseDown={closeDialog}>
+    <div className="overlay">
       <div
         className="modal dialog-wide"
-        onMouseDown={(e) => e.stopPropagation()}
         onKeyDown={(e) => {
           if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
             e.preventDefault()

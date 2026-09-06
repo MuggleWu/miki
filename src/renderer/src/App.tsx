@@ -1,10 +1,11 @@
-// App：tab 路由 + 全局快捷键（A/B/T，NF3 输入互斥）+ 主题（浅色默认）
+// App：tab 路由 + 全局快捷键（A/B/T/S/D，NF3 输入互斥）+ 主题（浅色默认）
 import { useEffect } from 'react'
 import { isTypingTarget, useApp } from './store'
 import { Home } from './home/Home'
 import { Study } from './study/Study'
 import { Browser } from './browser/Browser'
 import { Stats } from './stats/Stats'
+import { Settings } from './settings/Settings'
 import { AddEditDialog } from './components/AddEditDialog'
 
 export default function App() {
@@ -52,7 +53,7 @@ export default function App() {
         if (s.tab === 'study' && s.studyDeckId) {
           openBrowser(s.studyDeckId, s.studyCurrentCardId)
         } else {
-          openBrowser(null)
+          openBrowser() // 缺省：保留上次选中的牌组
         }
       } else if (key === 't') {
         e.preventDefault()
@@ -79,11 +80,14 @@ export default function App() {
         <button className={`tab ${tab === 'home' ? 'active' : ''}`} onClick={() => setTab('home')}>
           牌组
         </button>
-        <button className={`tab ${tab === 'browser' ? 'active' : ''}`} onClick={() => openBrowser(null)}>
+        <button className={`tab ${tab === 'browser' ? 'active' : ''}`} onClick={() => openBrowser()}>
           卡片库
         </button>
         <button className={`tab ${tab === 'stats' ? 'active' : ''}`} onClick={() => setTab('stats')}>
           统计
+        </button>
+        <button className={`tab ${tab === 'settings' ? 'active' : ''}`} onClick={() => setTab('settings')}>
+          设置
         </button>
         {decks.length === 0 && (
           <span style={{ color: 'var(--text-dim)', fontSize: 12 }}>
@@ -104,6 +108,7 @@ export default function App() {
         {tab === 'study' && <Study />}
         {tab === 'browser' && <Browser />}
         {tab === 'stats' && <Stats />}
+        {tab === 'settings' && <Settings />}
       </div>
 
       <AddEditDialog />

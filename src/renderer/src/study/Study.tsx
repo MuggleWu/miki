@@ -17,15 +17,18 @@ function fmtInterval(ms: number): string {
 export function Study() {
   const studyDeckId = useApp((s) => s.studyDeckId)
   const decks = useApp((s) => s.decks)
+  const config = useApp((s) => s.config)
   const openBrowser = useApp((s) => s.openBrowser)
   const openDialog = useApp((s) => s.openDialog)
   const setStudyCurrentCardId = useApp((s) => s.setStudyCurrentCardId)
 
   const [payload, setPayload] = useState<StudyPayload | null>(null)
   const [phase, setPhase] = useState<'question' | 'answer'>('question')
+  const [previewDue, setPreviewDue] = useState<number[]>([])
   const questionShownAt = useRef<number>(Date.now())
 
   const deck = decks.find((d) => d.id === studyDeckId)
+  const font = config?.study
 
   const refresh = useCallback(
     async (id: string) => {
@@ -41,6 +44,14 @@ export function Study() {
   useEffect(() => {
     if (studyDeckId) void refresh(studyDeckId)
   }, [studyDeckId, refresh])
+
+  // 评级按钮的下次到期预览（不落盘）
+  useEffect(() => {
+    setPreviewDue([])
+    if (payload?.card) {
+      void window.miki.previewIntervals(payload.card.id).then(setPreviewDue)
+    }
+  }, [payload?.card?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const answer = useCallback(
     async (rating: Rating) => {
@@ -110,8 +121,13 @@ export function Study() {
   }, [phase, answer, showAnswer, deleteCurrent, undo, payload, openDialog])
 
   const card = payload?.card
-  const nextDueLabel =
-    card?.fsrs && phase === 'answer' && card.fsrs.due > Date.now() ? fmtInterval(card.fsrs.due - Date.now()) : null
+
+  const fmtDuePreview = (due: number): string => {
+    const diff = due - Date.now()
+    if (diff <= 0) return '现在'
+    if (diff / 86_400_000 >= 31) return `+${(diff / (30.44 * 86_400_000)).toFixed(1)} 个月`
+    return `+${fmtInterval(diff)}`
+  }
 
   return (
     <div className="study">
@@ -134,7 +150,7 @@ export function Study() {
 
       {card && (
         <>
-          <div className="cardbox">
+          <div className="cardbox" style={{ fontFamily: font?.fontFamily || undefined, fontSize: font?.fontSize || undefined }}>
             <Md source={card.front} />
             {phase === 'answer' && (
               <>
@@ -146,8 +162,8 @@ export function Study() {
 
           {phase === 'question' && (
             <div className="ratebar">
-              <button className="primary" onClick={showAnswer} style={{ minWidth: 220 }}>
-                显示答案（<kbd className="kbd">空格</kbd>）
+              <button className="primary show-answer" onClick={showAnswer}>
+                显示答案
               </button>
             </div>
           )}
@@ -155,23 +171,30 @@ export function Study() {
           {phase === 'answer' && (
             <div className="ratebar">
               {([1, 2, 3, 4] as Rating[]).map((r) => (
-                <button key={r} className={`rate-${r} ${r === 3 ? 'primary' : ''}`} onClick={() => void answer(r)}>
-                  {RATING_LABEL[r]}
-                  <span className="hint">
+                <button key={r} className={`rate-card rate-${r}`} onClick={() => void answer(r)}>
+                  <span className="rate-top">
+                    {RATING_LABEL[r]}
                     <kbd className="kbd">{r}</kbd>
                   </span>
+                  <span className="rate-due">{previewDue[r - 1] ? fmtDuePreview(previewDue[r - 1]) : ' '}</span>
                 </button>
               ))}
             </div>
           )}
 
-          {phase === 'answer' && nextDueLabel && (
-            <div style={{ textAlign: 'center', color: 'var(--text-dim)', marginTop: 10 }}>
-              下次间隔约 {nextDueLabel}
-            </div>
-          )}
-
           <div style={{ display: 'flex', justifyContent: 'center', gap: 18, marginTop: 14, color: 'var(--text-dim)', fontSize: 12 }}>
+            {phase === 'question' ? (
+              <span>
+                <kbd className="kbd">空格</kbd> 显示答案
+              </span>
+            ) : (
+              <span>
+                <kbd className="kbd">1</kbd>
+                <kbd className="kbd">2</kbd>
+                <kbd className="kbd">3</kbd>
+                <kbd className="kbd">4</kbd> 评级
+              </span>
+            )}
             <span>
               <kbd className="kbd">A</kbd> 添加
             </span>

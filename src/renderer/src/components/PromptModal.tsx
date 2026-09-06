@@ -24,8 +24,8 @@ export function PromptModal(props: {
   }
 
   return (
-    <div className="overlay" onMouseDown={props.onClose}>
-      <div className="modal" onMouseDown={(e) => e.stopPropagation()}>
+    <div className="overlay">
+      <div className="modal">
         <h3>{props.title}</h3>
         <div className="form-row">
           <input
