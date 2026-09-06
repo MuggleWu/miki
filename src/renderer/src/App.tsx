@@ -21,6 +21,12 @@ export default function App() {
     void reload()
   }, [reload])
 
+  // 60 秒重取全局数据（牌组计数 / 今天已学），随时间推移保持各视图最新
+  useEffect(() => {
+    const t = setInterval(() => void reload(), 60_000)
+    return () => clearInterval(t)
+  }, [reload])
+
   // 主题：浅色默认（用户习惯），深色经 data-theme 覆盖
   useEffect(() => {
     document.documentElement.dataset.theme = config?.theme === 'dark' ? 'dark' : 'light'

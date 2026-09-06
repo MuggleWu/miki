@@ -176,6 +176,9 @@ export interface MikiConfig {
   browser: {
     columns: BrowserColumn[]
     sort: SortKey[]
+    /** 卡片库离开时的选中态：左树牌组 + 内容区主选中卡（跨启动恢复） */
+    selectedDeckId?: string | null
+    selectedCardId?: string | null
   }
 }
 

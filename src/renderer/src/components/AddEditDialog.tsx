@@ -1,5 +1,6 @@
 // 添加/编辑卡片弹窗（S3/S4）：正反面双栏 markdown 编辑 + 预览，cmd+enter 提交
-import { useEffect, useState } from 'react'
+// 添加模式提交后弹窗保留并清空输入（连续新增场景），Esc/取消才关闭
+import { useEffect, useRef, useState } from 'react'
 import { Md } from '../md'
 import { useApp } from '../store'
 
@@ -13,6 +14,7 @@ export function AddEditDialog() {
   const [front, setFront] = useState('')
   const [back, setBack] = useState('')
   const [loaded, setLoaded] = useState(false)
+  const frontRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
     if (!dialog) return
@@ -38,11 +40,15 @@ export function AddEditDialog() {
     if (dialog.mode === 'add') {
       if (!deckId) return
       await window.miki.addCard(deckId, front, back)
+      // 连续新增：保留弹窗，清空输入继续录下一张
+      setFront('')
+      setBack('')
+      frontRef.current?.focus()
     } else if (dialog.cardId) {
       await window.miki.updateCard(dialog.cardId, front, back)
+      closeDialog()
     }
     await reload()
-    closeDialog()
   }
 
   return (
@@ -78,6 +84,7 @@ export function AddEditDialog() {
                   <span>正面（Markdown）</span>
                 </div>
                 <textarea
+                  ref={frontRef}
                   autoFocus={dialog.mode === 'add'}
                   value={front}
                   onChange={(e) => setFront(e.target.value)}

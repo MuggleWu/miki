@@ -24,6 +24,8 @@ interface AppStore {
   /** 卡片库界面态：切走再切回保持原样（列配置/排序在 config 里持久化） */
   browserKeywords: string
   browserSelectedId: string | null
+  /** 首次 loadWorkspace 后从 config 恢复离开时的选中态（只执行一次） */
+  browserRestored: boolean
   /** 卡片库布局：左栏宽 / 表格宽（px），跨页保持 */
   browserSideWidth: number
   browserGridWidth: number | null
@@ -61,6 +63,7 @@ export const useApp = create<AppStore>((set) => ({
   browserFocusCardId: null,
   browserKeywords: '',
   browserSelectedId: null,
+  browserRestored: false,
   browserSideWidth: 220,
   browserGridWidth: null,
   browserColWidths: {},
@@ -71,13 +74,24 @@ export const useApp = create<AppStore>((set) => ({
 
   reload: async () => {
     const { decks, todayCount, config } = await window.miki.loadWorkspace()
-    set((s) => ({
-      decks,
-      todayCount,
-      config,
-      selectedDeckId:
-        s.selectedDeckId && decks.some((d) => d.id === s.selectedDeckId) ? s.selectedDeckId : decks[0]?.id ?? null
-    }))
+    set((s) => {
+      // 首次加载：恢复上次离开卡片库时的选中态（跨启动持久化在 config.browser）
+      const restore = s.browserRestored
+        ? {}
+        : {
+            browserDeckId: config.browser.selectedDeckId ?? null,
+            browserSelectedId: config.browser.selectedCardId ?? null,
+            browserRestored: true
+          }
+      return {
+        decks,
+        todayCount,
+        config,
+        selectedDeckId:
+          s.selectedDeckId && decks.some((d) => d.id === s.selectedDeckId) ? s.selectedDeckId : decks[0]?.id ?? null,
+        ...restore
+      }
+    })
   },
 
   setSelectedDeck: (id) => set({ selectedDeckId: id }),

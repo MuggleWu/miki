@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Md } from '../md'
 import { rotateSort } from '../../../core/query'
-import { useApp } from '../store'
-import { ColResizer, VResizer } from '../components/drag'
+import { isTypingTarget, useApp } from '../store'
+import { ColResizer, VResizer, isDragResizing } from '../components/drag'
 import type { BrowserColumn, CardRow, SortKey } from '../../../shared/types'
 
 const COLUMN_LABEL: Record<BrowserColumn, string> = {
@@ -74,6 +74,7 @@ export function Browser() {
   const colWidths = useApp((s) => s.browserColWidths)
   const setColWidth = useApp((s) => s.setBrowserColWidth)
   const openBrowser = useApp((s) => s.openBrowser)
+  const reload = useApp((s) => s.reload)
 
   const keywords = browserKeywords
   const [debouncedKw, setDebouncedKw] = useState(browserKeywords)
@@ -92,26 +93,35 @@ export function Browser() {
   })
   const [sort, setSort] = useState<SortKey[]>(config?.browser.sort ?? [{ col: 'updatedAt', asc: false }])
   const [colMenu, setColMenu] = useState<{ x: number; y: number } | null>(null)
+  /** 行右键菜单：ids = 操作对象集合（单卡或多选），mode='move' 时列出目标牌组 */
+  const [rowMenu, setRowMenu] = useState<{ x: number; y: number; ids: string[]; mode: 'root' | 'move' } | null>(null)
+  /** 多选集合（cmd/ctrl+点击、shift 范围、⌘A）；主选中始终是 selectedId */
+  const [selection, setSelection] = useState<string[]>([])
   const [editFront, setEditFront] = useState<string | null>(null)
   const [editBack, setEditBack] = useState<string | null>(null)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const searchRef = useRef<HTMLInputElement>(null)
 
-  // ⌘F：聚焦搜索框，已有内容时光标移到末尾
+  // ⌘F：聚焦搜索框（光标到末尾）；⌘A：全选当前视图卡片（输入框聚焦时不拦）
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f') {
+      if (!(e.metaKey || e.ctrlKey)) return
+      const k = e.key.toLowerCase()
+      if (k === 'f') {
         e.preventDefault()
         const el = searchRef.current
         if (el) {
           el.focus()
           el.setSelectionRange(el.value.length, el.value.length)
         }
+      } else if (k === 'a' && !isTypingTarget(e.target)) {
+        e.preventDefault()
+        setSelection(rows.map((r) => r.id))
       }
     }
     window.addEventListener('keydown', h)
     return () => window.removeEventListener('keydown', h)
-  }, [])
+  }, [rows])
 
   // 搜索防抖
   useEffect(() => {
@@ -130,6 +140,19 @@ export function Browser() {
     void query()
   }, [query, config])
 
+  // 60 秒重取当前视图：相对到期（「距现在」）随时间推移自动更新
+  useEffect(() => {
+    const t = setInterval(() => void query(), 60_000)
+    return () => clearInterval(t)
+  }, [query])
+
+  // 离开时选中态持久化（跨启动恢复）：左树牌组 + 内容区主选中卡
+  useEffect(() => {
+    void window.miki.saveConfig({
+      browser: { selectedDeckId: browserDeckId, selectedCardId: selectedId }
+    })
+  }, [browserDeckId, selectedId])
+
   // 外部焦点定位（学习页 B 键）
   useEffect(() => {
     if (browserFocusCardId) {
@@ -137,6 +160,56 @@ export function Browser() {
       openBrowser(browserDeckId, null)
     }
   }, [browserFocusCardId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ---------- 选中与多选 ----------
+
+  const selectOne = (id: string) => {
+    setSelectedId(id)
+    setSelection([id])
+  }
+
+  const toggleSelect = (id: string) => {
+    setSelection((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]))
+    setSelectedId(id)
+  }
+
+  const rangeSelect = (id: string) => {
+    const a = rows.findIndex((r) => r.id === selectedId)
+    const b = rows.findIndex((r) => r.id === id)
+    if (a < 0 || b < 0) {
+      selectOne(id)
+      return
+    }
+    const [lo, hi] = a < b ? [a, b] : [b, a]
+    setSelection(rows.slice(lo, hi + 1).map((r) => r.id))
+    setSelectedId(id)
+  }
+
+  const onRowClick = (e: React.MouseEvent, id: string) => {
+    if (e.metaKey || e.ctrlKey) toggleSelect(id)
+    else if (e.shiftKey) rangeSelect(id)
+    else selectOne(id)
+  }
+
+  const onRowContextMenu = (e: React.MouseEvent, id: string) => {
+    e.preventDefault()
+    if (!selection.includes(id)) selectOne(id)
+    setRowMenu({ x: e.clientX, y: e.clientY, ids: selection.includes(id) ? selection : [id], mode: 'root' })
+  }
+
+  /** 右键菜单动作：批量删除 / 重置进度 / 移动牌组，完成后清选中并刷新 */
+  const menuAction = async (act: 'delete' | 'reset' | 'move', targetDeckId?: string) => {
+    if (!rowMenu) return
+    const ids = rowMenu.ids
+    if (act === 'delete') for (const id of ids) await window.miki.deleteCard(id)
+    if (act === 'reset') await window.miki.resetProgress(ids)
+    if (act === 'move' && targetDeckId) await window.miki.moveCards(ids, targetDeckId)
+    setRowMenu(null)
+    setSelection([])
+    if (selectedId && ids.includes(selectedId)) setSelectedId(null)
+    await query()
+    await reload()
+  }
 
   const selected = useMemo(() => rows.find((r) => r.id === selectedId) ?? null, [rows, selectedId])
 
@@ -165,6 +238,8 @@ export function Browser() {
   )
 
   const onHeaderClick = (col: BrowserColumn) => {
+    // 列宽拖动结束时浏览器在 th 上派发的 click 不算排序点击
+    if (isDragResizing()) return
     const next = rotateSort(sort, col)
     setSort(next)
     void window.miki.saveBrowserConfig(columns, next)
@@ -212,7 +287,20 @@ export function Browser() {
   }
 
   return (
-    <div className="browser" onClick={() => setColMenu(null)}>
+    <div
+      className="browser"
+      onClick={() => {
+        setColMenu(null)
+        setRowMenu(null)
+      }}
+      onContextMenu={(e) => {
+        // 空白处右键只关菜单，不弹系统菜单
+        if ((e.target as HTMLElement).closest('tr') == null) {
+          e.preventDefault()
+          setRowMenu(null)
+        }
+      }}
+    >
       <div className="browser-side" style={{ width: sideWidth }}>
         <div
           className={`tree-item ${browserDeckId == null ? 'active' : ''}`}
@@ -287,7 +375,12 @@ export function Browser() {
                   </tr>
                 )}
                 {rows.map((row) => (
-                  <tr key={row.id} className={row.id === selectedId ? 'selected' : undefined} onClick={() => setSelectedId(row.id)}>
+                  <tr
+                    key={row.id}
+                    className={row.id === selectedId || selection.includes(row.id) ? 'selected' : undefined}
+                    onClick={(e) => onRowClick(e, row.id)}
+                    onContextMenu={(e) => onRowContextMenu(e, row.id)}
+                  >
                     {columns.map((col) => (
                       <td key={col}>{cell(row, col)}</td>
                     ))}
@@ -351,6 +444,37 @@ export function Browser() {
               {COLUMN_LABEL[col]}
             </label>
           ))}
+        </div>
+      )}
+
+      {rowMenu && (
+        <div
+          className="rowmenu"
+          style={{ left: Math.max(8, rowMenu.x - 60), top: rowMenu.y + 4 }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {rowMenu.mode === 'root' ? (
+            <>
+              <button onClick={() => setRowMenu({ ...rowMenu, mode: 'move' })}>
+                修改所属牌组{rowMenu.ids.length > 1 ? `（${rowMenu.ids.length} 张）` : ''}
+              </button>
+              {rowMenu.ids.length === 1 && <button onClick={() => void menuAction('reset')}>重置进度</button>}
+              <button className="danger" onClick={() => void menuAction('delete')}>
+                删除{rowMenu.ids.length > 1 ? `（${rowMenu.ids.length} 张）` : ''}
+              </button>
+            </>
+          ) : (
+            <>
+              {decks.map((d) => (
+                <button key={d.id} onClick={() => void menuAction('move', d.id)}>
+                  {d.name}
+                </button>
+              ))}
+              <button className="back" onClick={() => setRowMenu({ ...rowMenu, mode: 'root' })}>
+                ← 返回
+              </button>
+            </>
+          )}
         </div>
       )}
     </div>
