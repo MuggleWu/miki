@@ -218,3 +218,55 @@ describe('http api 牌组与卡片 CRUD', () => {
     expect(r.json).toHaveProperty('stateCounts')
   })
 })
+
+describe('端口被占用顺延后，Host 校验跟随实际监听端口', () => {
+  const OCCUPIED = 18478
+  let blocker: http.Server | null = null
+  let server2: http.Server | null = null
+  let tmp2 = ''
+
+  /** host 头由调用方指定，打探 health 的状态码 */
+  const probe = (port: number, host: string): Promise<number> =>
+    new Promise((resolve, reject) => {
+      const req = http.request(
+        { host: '127.0.0.1', port, path: '/api/health', method: 'GET', headers: { host } },
+        (res) => {
+          res.resume()
+          res.on('end', () => resolve(res.statusCode ?? 0))
+        }
+      )
+      req.on('error', reject)
+      req.end()
+    })
+
+  afterAll(async () => {
+    await new Promise<void>((resolve) => server2?.close(() => resolve()))
+    await new Promise<void>((resolve) => blocker?.close(() => resolve()))
+    fs.rmSync(tmp2, { recursive: true, force: true })
+  })
+
+  it('Host 用被占端口 403、用顺延后的实际端口 200', async () => {
+    blocker = http.createServer().listen(OCCUPIED, '127.0.0.1')
+    await new Promise<void>((resolve) => blocker!.once('listening', () => resolve()))
+    tmp2 = fs.mkdtempSync(path.join(os.tmpdir(), 'miki-api-port-'))
+    const ws2 = new WorkspaceService()
+    ws2.init(tmp2)
+    ws2.config.api.port = OCCUPIED
+    server2 = startApiServer(ws2)
+
+    // 等顺延监听成功（health 打探实际端口，最多 2s）
+    let ready = false
+    for (let i = 0; i < 20 && !ready; i++) {
+      try {
+        await probe(OCCUPIED + 1, `127.0.0.1:${OCCUPIED + 1}`)
+        ready = true
+      } catch {
+        await new Promise((r) => setTimeout(r, 100))
+      }
+    }
+    expect(ready).toBe(true)
+
+    expect(await probe(OCCUPIED + 1, `127.0.0.1:${OCCUPIED}`)).toBe(403) // 配置端口（已被占）不是合法 Host
+    expect(await probe(OCCUPIED + 1, `127.0.0.1:${OCCUPIED + 1}`)).toBe(200) // 实际监听端口放行
+  })
+})

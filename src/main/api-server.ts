@@ -221,9 +221,10 @@ export function startApiServer(ws: WorkspaceService): http.Server | null {
       res.end(JSON.stringify(payload))
     }
     try {
-      // 防 DNS rebinding：Host 只允许本机回环两种写法
+      // 防 DNS rebinding：Host 只允许本机回环两种写法；端口跟随实际监听端口（被占用顺延后 ≠ 配置端口）
       const host = (req.headers.host ?? '').toLowerCase()
-      if (host !== `127.0.0.1:${port}` && host !== `localhost:${port}`) {
+      const expectedPort = port + attempt
+      if (host !== `127.0.0.1:${expectedPort}` && host !== `localhost:${expectedPort}`) {
         return send(403, { error: 'Host 不允许' })
       }
       // 防浏览器跨站：任何带 Origin/Referer 的请求（正常 curl/脚本/AI 不带）一律拒绝
