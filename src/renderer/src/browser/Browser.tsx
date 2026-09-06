@@ -11,7 +11,8 @@ const COLUMN_LABEL: Record<BrowserColumn, string> = {
   front: '正面',
   deckName: '牌组',
   state: '状态',
-  due: '到期',
+  due: '距现在',
+  dueAbs: '到期时间',
   interval: '间隔',
   stability: '稳定性',
   difficulty: '难度',
@@ -25,7 +26,8 @@ const DEFAULT_COL_WIDTH: Record<BrowserColumn, number> = {
   front: 260,
   deckName: 120,
   state: 96,
-  due: 100,
+  due: 110,
+  dueAbs: 150,
   interval: 90,
   stability: 90,
   difficulty: 90,
@@ -52,6 +54,7 @@ function fmtDue(ms: number | null): string {
   if (diff <= 0) return '现在'
   const days = diff / 86_400_000
   if (days >= 1) return `${Math.ceil(days)} 天后`
+  if (diff < 3_600_000) return `${Math.max(1, Math.floor(diff / 60_000))} 分钟后`
   return `${Math.ceil(diff / 3_600_000)} 小时后`
 }
 
@@ -76,7 +79,17 @@ export function Browser() {
   const [debouncedKw, setDebouncedKw] = useState(browserKeywords)
   const [rows, setRows] = useState<CardRow[]>([])
   const [total, setTotal] = useState(0)
-  const [columns, setColumns] = useState<BrowserColumn[]>(config?.browser.columns ?? ['front', 'deckName', 'state', 'due', 'updatedAt'])
+  const [columns, setColumns] = useState<BrowserColumn[]>(() => {
+    // 老配置只有 due 列：在「距现在」后补「到期时间」，两个到期视图都可见
+    const saved = config?.browser.columns
+    if (!saved) return ['front', 'deckName', 'state', 'due', 'dueAbs', 'updatedAt']
+    if (saved.includes('due') && !saved.includes('dueAbs')) {
+      const next = [...saved]
+      next.splice(next.indexOf('due') + 1, 0, 'dueAbs')
+      return next
+    }
+    return saved
+  })
   const [sort, setSort] = useState<SortKey[]>(config?.browser.sort ?? [{ col: 'updatedAt', asc: false }])
   const [colMenu, setColMenu] = useState<{ x: number; y: number } | null>(null)
   const [editFront, setEditFront] = useState<string | null>(null)
@@ -179,6 +192,8 @@ export function Browser() {
         return row.suspended ? '⏸ 已暂停' : STATE_LABEL[row.state] ?? row.state
       case 'due':
         return row.suspended ? '—' : fmtDue(row.due)
+      case 'dueAbs':
+        return row.suspended ? '—' : fmtTime(row.due)
       case 'interval':
         return row.intervalDays != null ? `${row.intervalDays} 天` : '—'
       case 'stability':

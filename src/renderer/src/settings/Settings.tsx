@@ -30,7 +30,10 @@ export function Settings() {
     <div className="settings">
       <section className="settings-card">
         <h3>刷卡字体</h3>
-        <p className="settings-hint">作用于学习页的正面与反面内容区。</p>
+        <p className="settings-hint">
+          默认「系统默认」跟随系统字体（macOS：苹方 / SF Pro），与 Obsidian 默认字体一致；
+          默认字号 16px 同 Obsidian。作用于学习页的正面与反面内容区。
+        </p>
         <div className="settings-row">
           <label>
             字体

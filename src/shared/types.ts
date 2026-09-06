@@ -95,6 +95,7 @@ export type BrowserColumn =
   | 'deckName'
   | 'state'
   | 'due'
+  | 'dueAbs'
   | 'interval'
   | 'stability'
   | 'difficulty'
@@ -191,7 +192,7 @@ export const DEFAULT_CONFIG: Omit<MikiConfig, 'workspacePath'> = {
   maximumInterval: 36500,
   enableFuzzing: true,
   leechThreshold: 8,
-  study: { fontFamily: '', fontSize: 14 },
+  study: { fontFamily: '', fontSize: 16 },
   browser: {
     columns: ['front', 'deckName', 'state', 'due', 'updatedAt'],
     sort: [{ col: 'updatedAt', asc: false }]

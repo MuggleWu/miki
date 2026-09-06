@@ -72,6 +72,8 @@ function columnValue(card: Card, deckName: string, col: BrowserColumn): Comparab
       return displayState(card)
     case 'due':
       return card.fsrs?.due ?? null
+    case 'dueAbs':
+      return card.fsrs?.due ?? null
     case 'interval':
       return intervalDays(card)
     case 'stability':

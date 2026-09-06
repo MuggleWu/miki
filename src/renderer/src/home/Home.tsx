@@ -58,7 +58,9 @@ export function Home() {
               </td>
             </tr>
           )}
-          {decks.map((d) => (
+          {[...decks]
+            .sort((a, b) => a.name.localeCompare(b.name, 'zh', { numeric: true }))
+            .map((d) => (
             <tr
               key={d.id}
               className={d.id === selectedDeckId ? 'selected' : undefined}
