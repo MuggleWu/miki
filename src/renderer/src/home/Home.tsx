@@ -66,7 +66,8 @@ export function Home() {
       <div className="home-footer">
         <span>
           今天已学习 <b style={{ color: 'var(--text)' }}>{todayCount}</b> 张 · 快捷键：
-          <kbd className="kbd">A</kbd> 添加 · <kbd className="kbd">B</kbd> 卡片库 · <kbd className="kbd">T</kbd> 统计
+          <kbd className="kbd">S</kbd> 学习 · <kbd className="kbd">A</kbd> 添加 · <kbd className="kbd">B</kbd> 卡片库 ·{' '}
+          <kbd className="kbd">T</kbd> 统计 · <kbd className="kbd">D</kbd> 回首页
         </span>
         <button className="primary" onClick={() => setModal('create')}>
           创建牌组

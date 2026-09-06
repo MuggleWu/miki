@@ -37,6 +37,12 @@ export default function App() {
       if (isTypingTarget(e.target)) return
       const key = e.key.toLowerCase()
       const s = useApp.getState()
+      if (key === 'escape') {
+        if (s.dialog) s.closeDialog()
+        return
+      }
+      // 弹窗打开时屏蔽单字母快捷键，避免穿透操作背后的界面
+      if (s.dialog) return
       if (key === 'a') {
         e.preventDefault()
         const deckId = s.studyDeckId ?? s.selectedDeckId ?? s.decks[0]?.id ?? null
@@ -51,8 +57,15 @@ export default function App() {
       } else if (key === 't') {
         e.preventDefault()
         setTab('stats')
-      } else if (key === 'escape' && s.dialog) {
-        s.closeDialog()
+      } else if (key === 's' && s.tab === 'home') {
+        // 首页：S 进入默认牌组（当前选中，否则第一个）
+        e.preventDefault()
+        const deckId = s.selectedDeckId ?? s.decks[0]?.id
+        if (deckId) s.enterStudy(deckId)
+      } else if (key === 'd') {
+        // 任意位置：D 回到首页
+        e.preventDefault()
+        setTab('home')
       }
     }
     window.addEventListener('keydown', h)
