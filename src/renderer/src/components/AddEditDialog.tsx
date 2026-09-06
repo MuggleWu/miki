@@ -4,6 +4,74 @@ import { useEffect, useRef, useState } from 'react'
 import { Md } from '../md'
 import { useApp } from '../store'
 
+/** 选中区加粗开关键（⌘B）：算出替换范围/替换文本/新选区。纯函数便于测试 */
+export function boldSelection(
+  value: string,
+  start: number,
+  end: number
+): { text: string; replaceStart: number; replaceEnd: number; replacement: string; selStart: number; selEnd: number } {
+  const sel = value.slice(start, end)
+  // 无选区：光标处插入 ****，光标落中间
+  if (sel === '') {
+    return {
+      text: value.slice(0, start) + '****' + value.slice(end),
+      replaceStart: start,
+      replaceEnd: start,
+      replacement: '****',
+      selStart: start + 2,
+      selEnd: start + 2
+    }
+  }
+  // 选中内容自带 ** 对（含恰选中一个空 **）→ 去掉
+  if (sel === '**' || (sel.length >= 4 && sel.startsWith('**') && sel.endsWith('**'))) {
+    const inner = sel === '**' ? '' : sel.slice(2, -2)
+    return {
+      text: value.slice(0, start) + inner + value.slice(end),
+      replaceStart: start,
+      replaceEnd: end,
+      replacement: inner,
+      selStart: start,
+      selEnd: start + inner.length
+    }
+  }
+  // 选区紧贴外侧 ** 对 → 去掉外侧（选中的是不含星号的内容）
+  if (start >= 2 && value.slice(start - 2, start) === '**' && value.slice(end, end + 2) === '**') {
+    return {
+      text: value.slice(0, start - 2) + sel + value.slice(end + 2),
+      replaceStart: start - 2,
+      replaceEnd: end + 2,
+      replacement: sel,
+      selStart: start - 2,
+      selEnd: end - 2
+    }
+  }
+  // 普通选区：两侧包 **，选区保持在内层
+  return {
+    text: value.slice(0, start) + '**' + sel + '**' + value.slice(end),
+    replaceStart: start,
+    replaceEnd: end,
+    replacement: '**' + sel + '**',
+    selStart: start + 2,
+    selEnd: end + 2
+  }
+}
+
+/** 把 boldSelection 的结果应用到文本框：优先 execCommand（保留原生撤销栈，⌘Z 可回退），失败退回直改 */
+function applyBold(el: HTMLTextAreaElement, setText: (v: string) => void): void {
+  const { selectionStart: s, selectionEnd: e } = el
+  if (s == null || e == null) return
+  const r = boldSelection(el.value, s, e)
+  el.focus()
+  el.setSelectionRange(r.replaceStart, r.replaceEnd)
+  try {
+    document.execCommand('insertText', false, r.replacement)
+  } catch {
+    // 不支持时走下面的受控直改
+  }
+  setText(r.text) // execCommand 成功时与原生 input 事件同值（no-op），失败时兜底同步受控状态
+  requestAnimationFrame(() => el.setSelectionRange(r.selStart, r.selEnd))
+}
+
 export function AddEditDialog() {
   const dialog = useApp((s) => s.dialog)
   const decks = useApp((s) => s.decks)
@@ -58,6 +126,15 @@ export function AddEditDialog() {
       <div
         className="modal dialog-wide"
         onKeyDown={(e) => {
+          if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'b') {
+            // ⌘/Ctrl+B：选区加粗开关键（正反面输入框内）
+            const el = e.target instanceof HTMLTextAreaElement ? e.target : null
+            if (el) {
+              e.preventDefault()
+              applyBold(el, el === frontRef.current ? setFront : setBack)
+            }
+            return
+          }
           if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
             e.preventDefault()
             void submit()
@@ -126,7 +203,8 @@ export function AddEditDialog() {
         )}
         <div className="actions">
           <span style={{ color: 'var(--text-dim)', fontSize: 12, marginRight: 'auto', alignSelf: 'center' }}>
-            <kbd className="kbd">⌘</kbd> + <kbd className="kbd">↩</kbd> 提交 · <kbd className="kbd">esc</kbd> 关闭
+            <kbd className="kbd">⌘</kbd>+<kbd className="kbd">B</kbd> 加粗 · <kbd className="kbd">⌘</kbd>+
+            <kbd className="kbd">↩</kbd> 提交 · <kbd className="kbd">esc</kbd> 关闭
           </span>
           <button onClick={closeDialog}>取消</button>
           <button className="primary" onClick={() => void submit()}>
