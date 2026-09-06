@@ -171,18 +171,25 @@ describe('调度索引随机对拍', () => {
   })
 
   it('getStudy 幂等：连续调用返回同一张卡，未被消费', () => {
-    const w = newWs(tmp())
-    const d = w.addDeck('幂等组').id
-    const [a, b] = w.addCards(d, [
-      { front: '幂等A', back: '' },
-      { front: '幂等B', back: '' }
-    ])
-    expect(w.getStudy(d).card?.id).toBe(a.id)
-    expect(w.getStudy(d).card?.id).toBe(a.id)
-    w.answer(a.id, 3) // a 进入 learning（10 分钟内到期，due<=今日末）
-    const s = w.getStudy(d)
-    expect(s.card?.id).toBe(b.id) // learning 未到期不出，新卡 b 顶上
-    expect(w.getStudy(d).card?.id).toBe(b.id)
-    expect(w.getStudy(d).remaining).toBe(2) // b（新）+ a（learning 今日内）
+    // 固定上午时刻：+10min 学习步长不会跨午夜（真时钟在 23:50 后跑会因 due 落入明日而差 1）
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(new Date('2026-10-06T10:00:00'))
+      const w = newWs(tmp())
+      const d = w.addDeck('幂等组').id
+      const [a, b] = w.addCards(d, [
+        { front: '幂等A', back: '' },
+        { front: '幂等B', back: '' }
+      ])
+      expect(w.getStudy(d).card?.id).toBe(a.id)
+      expect(w.getStudy(d).card?.id).toBe(a.id)
+      w.answer(a.id, 3) // a 进入 learning（10 分钟内到期，due<=今日末）
+      const s = w.getStudy(d)
+      expect(s.card?.id).toBe(b.id) // learning 未到期不出，新卡 b 顶上
+      expect(w.getStudy(d).card?.id).toBe(b.id)
+      expect(w.getStudy(d).remaining).toBe(2) // b（新）+ a（learning 今日内）
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Md } from '../md'
 import { rotateSort } from '../../../core/query'
-import { isTypingTarget, useApp } from '../store'
+import { isTypingTarget, sortedDecks, useApp } from '../store'
 import { ColResizer, VResizer, isDragResizing } from '../components/drag'
 import type { BrowserColumn, CardRow, SortKey } from '../../../shared/types'
 
@@ -353,7 +353,7 @@ export function Browser() {
         >
           <span>全部牌组</span>
         </div>
-        {decks.map((d) => (
+        {sortedDecks(decks).map((d) => (
           <div key={d.id} className={`tree-item ${browserDeckId === d.id ? 'active' : ''}`} onClick={() => openBrowser(d.id)}>
             <span>{d.name}</span>
           </div>
@@ -522,7 +522,7 @@ export function Browser() {
             </>
           ) : (
             <>
-              {decks.map((d) => (
+              {sortedDecks(decks).map((d) => (
                 <button key={d.id} onClick={() => void menuAction('move', d.id)}>
                   {d.name}
                 </button>

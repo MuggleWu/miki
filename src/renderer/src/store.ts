@@ -120,6 +120,11 @@ export const useApp = create<AppStore>((set) => ({
     }))
 }))
 
+/** 牌组统一展示序：名称自然序（数字感知，`1 xxx` 排在 `2 xxx` 前）——首页表格与卡片库树/菜单共用 */
+export function sortedDecks(decks: DeckInfo[]): DeckInfo[] {
+  return [...decks].sort((a, b) => a.name.localeCompare(b.name, 'zh', { numeric: true }))
+}
+
 /** NF3：输入控件聚焦时单字母快捷键失效 */
 export function isTypingTarget(t: EventTarget | null): boolean {
   if (!(t instanceof HTMLElement)) return false

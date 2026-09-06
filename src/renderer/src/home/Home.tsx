@@ -1,6 +1,6 @@
 // 首页（H 域）：牌组表、选中态、行操作、今日统计、创建牌组；数字列宽可拖、三列徽章配色
 import { useState } from 'react'
-import { useApp } from '../store'
+import { sortedDecks, useApp } from '../store'
 import { PromptModal } from '../components/PromptModal'
 import { ColResizer } from '../components/drag'
 
@@ -58,9 +58,7 @@ export function Home() {
               </td>
             </tr>
           )}
-          {[...decks]
-            .sort((a, b) => a.name.localeCompare(b.name, 'zh', { numeric: true }))
-            .map((d) => (
+          {sortedDecks(decks).map((d) => (
             <tr
               key={d.id}
               className={d.id === selectedDeckId ? 'selected' : undefined}

@@ -1,7 +1,7 @@
 // 统计（T 域）：全部/某牌组 × 近一年/全部，五板块
 import { useEffect, useRef, useState } from 'react'
 import * as echarts from 'echarts'
-import { useApp } from '../store'
+import { sortedDecks, useApp } from '../store'
 import type { StatsPayload } from '../../../shared/types'
 
 function Chart(props: { option: echarts.EChartsOption }) {
@@ -123,7 +123,7 @@ export function Stats() {
       <div className="stats-toolbar">
         <select value={deckId ?? ''} onChange={(e) => setDeckId(e.target.value || null)}>
           <option value="">全部牌组</option>
-          {decks.map((d) => (
+          {sortedDecks(decks).map((d) => (
             <option key={d.id} value={d.id}>
               {d.name}
             </option>
