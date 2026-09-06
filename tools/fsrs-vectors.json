@@ -1,0 +1,861 @@
+{
+ "epoch_ms": 1788220800000.0,
+ "parameters": [
+  0.212,
+  1.2931,
+  2.3065,
+  8.2956,
+  6.4133,
+  0.8334,
+  3.0194,
+  0.001,
+  1.8722,
+  0.1666,
+  0.796,
+  1.4835,
+  0.0614,
+  0.2629,
+  1.6483,
+  0.6014,
+  1.8729,
+  0.5425,
+  0.0912,
+  0.0658,
+  0.1542
+ ],
+ "cases": [
+  {
+   "name": "new-r1#0",
+   "before": null,
+   "rating": 1,
+   "t": 1788220800000.0,
+   "after": {
+    "state": 1,
+    "step": 0,
+    "stability": 0.212,
+    "difficulty": 6.4133,
+    "due": 1788220860000.0,
+    "lastReview": 1788220800000.0
+   }
+  },
+  {
+   "name": "new-r2#1",
+   "before": null,
+   "rating": 2,
+   "t": 1788220800000.0,
+   "after": {
+    "state": 1,
+    "step": 0,
+    "stability": 1.2931,
+    "difficulty": 5.112170705601056,
+    "due": 1788221130000.0,
+    "lastReview": 1788220800000.0
+   }
+  },
+  {
+   "name": "new-r3#2",
+   "before": null,
+   "rating": 3,
+   "t": 1788220800000.0,
+   "after": {
+    "state": 1,
+    "step": 1,
+    "stability": 2.3065,
+    "difficulty": 2.118103970459016,
+    "due": 1788221400000.0,
+    "lastReview": 1788220800000.0
+   }
+  },
+  {
+   "name": "new-r4#3",
+   "before": null,
+   "rating": 4,
+   "t": 1788220800000.0,
+   "after": {
+    "state": 2,
+    "step": null,
+    "stability": 8.2956,
+    "difficulty": 1.0,
+    "due": 1788912000000.0,
+    "lastReview": 1788220800000.0
+   }
+  },
+  {
+   "name": "learn-chain-again-good-good#4",
+   "before": null,
+   "rating": 1,
+   "t": 1788220800000.0,
+   "after": {
+    "state": 1,
+    "step": 0,
+    "stability": 0.212,
+    "difficulty": 6.4133,
+    "due": 1788220860000.0,
+    "lastReview": 1788220800000.0
+   }
+  },
+  {
+   "name": "learn-chain-again-good-good#5",
+   "before": {
+    "state": 1,
+    "step": 0,
+    "stability": 0.212,
+    "difficulty": 6.4133,
+    "due": 1788220860000.0,
+    "lastReview": 1788220800000.0
+   },
+   "rating": 3,
+   "t": 1788220860000.0,
+   "after": {
+    "state": 1,
+    "step": 1,
+    "stability": 0.24668918777567272,
+    "difficulty": 6.402115069296838,
+    "due": 1788221460000.0,
+    "lastReview": 1788220860000.0
+   }
+  },
+  {
+   "name": "learn-chain-again-good-good#6",
+   "before": {
+    "state": 1,
+    "step": 1,
+    "stability": 0.24668918777567272,
+    "difficulty": 6.402115069296838,
+    "due": 1788221460000.0,
+    "lastReview": 1788220860000.0
+   },
+   "rating": 3,
+   "t": 1788221460000.0,
+   "after": {
+    "state": 2,
+    "step": null,
+    "stability": 0.2842063592758949,
+    "difficulty": 6.3909413235243795,
+    "due": 1788307860000.0,
+    "lastReview": 1788221460000.0
+   }
+  },
+  {
+   "name": "learn-chain-good-good-good#7",
+   "before": null,
+   "rating": 3,
+   "t": 1788220800000.0,
+   "after": {
+    "state": 1,
+    "step": 1,
+    "stability": 2.3065,
+    "difficulty": 2.118103970459016,
+    "due": 1788221400000.0,
+    "lastReview": 1788220800000.0
+   }
+  },
+  {
+   "name": "learn-chain-good-good-good#8",
+   "before": {
+    "state": 1,
+    "step": 1,
+    "stability": 2.3065,
+    "difficulty": 2.118103970459016,
+    "due": 1788221400000.0,
+    "lastReview": 1788220800000.0
+   },
+   "rating": 3,
+   "t": 1788221400000.0,
+   "after": {
+    "state": 2,
+    "step": null,
+    "stability": 2.3065,
+    "difficulty": 2.111214235785395,
+    "due": 1788394200000.0,
+    "lastReview": 1788221400000.0
+   }
+  },
+  {
+   "name": "learn-chain-good-good-good#9",
+   "before": {
+    "state": 2,
+    "step": null,
+    "stability": 2.3065,
+    "difficulty": 2.111214235785395,
+    "due": 1788394200000.0,
+    "lastReview": 1788221400000.0
+   },
+   "rating": 3,
+   "t": 1788480000000.0,
+   "after": {
+    "state": 2,
+    "step": null,
+    "stability": 10.971048263078135,
+    "difficulty": 2.1043313908464483,
+    "due": 1789430400000.0,
+    "lastReview": 1788480000000.0
+   }
+  },
+  {
+   "name": "learn-chain-easy#10",
+   "before": null,
+   "rating": 4,
+   "t": 1788220800000.0,
+   "after": {
+    "state": 2,
+    "step": null,
+    "stability": 8.2956,
+    "difficulty": 1.0,
+    "due": 1788912000000.0,
+    "lastReview": 1788220800000.0
+   }
+  },
+  {
+   "name": "learn-chain-easy#11",
+   "before": {
+    "state": 2,
+    "step": null,
+    "stability": 8.2956,
+    "difficulty": 1.0,
+    "due": 1788912000000.0,
+    "lastReview": 1788220800000.0
+   },
+   "rating": 3,
+   "t": 1788566400000.0,
+   "after": {
+    "state": 2,
+    "step": null,
+    "stability": 26.194800905837976,
+    "difficulty": 1.0,
+    "due": 1790812800000.0,
+    "lastReview": 1788566400000.0
+   }
+  },
+  {
+   "name": "learn-hard-grad#12",
+   "before": null,
+   "rating": 2,
+   "t": 1788220800000.0,
+   "after": {
+    "state": 1,
+    "step": 0,
+    "stability": 1.2931,
+    "difficulty": 5.112170705601056,
+    "due": 1788221130000.0,
+    "lastReview": 1788220800000.0
+   }
+  },
+  {
+   "name": "learn-hard-grad#13",
+   "before": {
+    "state": 1,
+    "step": 0,
+    "stability": 1.2931,
+    "difficulty": 5.112170705601056,
+    "due": 1788221130000.0,
+    "lastReview": 1788220800000.0
+   },
+   "rating": 3,
+   "t": 1788221400000.0,
+   "after": {
+    "state": 1,
+    "step": 1,
+    "stability": 1.3358997622047517,
+    "difficulty": 5.102286904192293,
+    "due": 1788222000000.0,
+    "lastReview": 1788221400000.0
+   }
+  },
+  {
+   "name": "learn-hard-grad#14",
+   "before": {
+    "state": 1,
+    "step": 1,
+    "stability": 1.3358997622047517,
+    "difficulty": 5.102286904192293,
+    "due": 1788222000000.0,
+    "lastReview": 1788221400000.0
+   },
+   "rating": 4,
+   "t": 1788393600000.0,
+   "after": {
+    "state": 2,
+    "step": null,
+    "stability": 7.453440233847973,
+    "difficulty": 3.4509277903004603,
+    "due": 1788998400000.0,
+    "lastReview": 1788393600000.0
+   }
+  },
+  {
+   "name": "review-again-relearn#15",
+   "before": null,
+   "rating": 3,
+   "t": 1788220800000.0,
+   "after": {
+    "state": 1,
+    "step": 1,
+    "stability": 2.3065,
+    "difficulty": 2.118103970459016,
+    "due": 1788221400000.0,
+    "lastReview": 1788220800000.0
+   }
+  },
+  {
+   "name": "review-again-relearn#16",
+   "before": {
+    "state": 1,
+    "step": 1,
+    "stability": 2.3065,
+    "difficulty": 2.118103970459016,
+    "due": 1788221400000.0,
+    "lastReview": 1788220800000.0
+   },
+   "rating": 3,
+   "t": 1788221400000.0,
+   "after": {
+    "state": 2,
+    "step": null,
+    "stability": 2.3065,
+    "difficulty": 2.111214235785395,
+    "due": 1788394200000.0,
+    "lastReview": 1788221400000.0
+   }
+  },
+  {
+   "name": "review-again-relearn#17",
+   "before": {
+    "state": 2,
+    "step": null,
+    "stability": 2.3065,
+    "difficulty": 2.111214235785395,
+    "due": 1788394200000.0,
+    "lastReview": 1788221400000.0
+   },
+   "rating": 1,
+   "t": 1788480000000.0,
+   "after": {
+    "state": 3,
+    "step": 0,
+    "stability": 0.6077016626638644,
+    "difficulty": 7.392238132342694,
+    "due": 1788480600000.0,
+    "lastReview": 1788480000000.0
+   }
+  },
+  {
+   "name": "review-again-relearn#18",
+   "before": {
+    "state": 3,
+    "step": 0,
+    "stability": 0.6077016626638644,
+    "difficulty": 7.392238132342694,
+    "due": 1788480600000.0,
+    "lastReview": 1788480000000.0
+   },
+   "rating": 3,
+   "t": 1788480600000.0,
+   "after": {
+    "state": 2,
+    "step": null,
+    "stability": 0.6597976257475758,
+    "difficulty": 7.38007426350719,
+    "due": 1788567000000.0,
+    "lastReview": 1788480600000.0
+   }
+  },
+  {
+   "name": "review-again-relearn#19",
+   "before": {
+    "state": 2,
+    "step": null,
+    "stability": 0.6597976257475758,
+    "difficulty": 7.38007426350719,
+    "due": 1788567000000.0,
+    "lastReview": 1788480600000.0
+   },
+   "rating": 3,
+   "t": 1789084800000.0,
+   "after": {
+    "state": 2,
+    "step": null,
+    "stability": 5.114789621459588,
+    "difficulty": 7.3679225585405215,
+    "due": 1789516800000.0,
+    "lastReview": 1789084800000.0
+   }
+  },
+  {
+   "name": "review-hard-good-easy#20",
+   "before": null,
+   "rating": 3,
+   "t": 1788220800000.0,
+   "after": {
+    "state": 1,
+    "step": 1,
+    "stability": 2.3065,
+    "difficulty": 2.118103970459016,
+    "due": 1788221400000.0,
+    "lastReview": 1788220800000.0
+   }
+  },
+  {
+   "name": "review-hard-good-easy#21",
+   "before": {
+    "state": 1,
+    "step": 1,
+    "stability": 2.3065,
+    "difficulty": 2.118103970459016,
+    "due": 1788221400000.0,
+    "lastReview": 1788220800000.0
+   },
+   "rating": 3,
+   "t": 1788221400000.0,
+   "after": {
+    "state": 2,
+    "step": null,
+    "stability": 2.3065,
+    "difficulty": 2.111214235785395,
+    "due": 1788394200000.0,
+    "lastReview": 1788221400000.0
+   }
+  },
+  {
+   "name": "review-hard-good-easy#22",
+   "before": {
+    "state": 2,
+    "step": null,
+    "stability": 2.3065,
+    "difficulty": 2.111214235785395,
+    "due": 1788394200000.0,
+    "lastReview": 1788221400000.0
+   },
+   "rating": 2,
+   "t": 1788393600000.0,
+   "after": {
+    "state": 2,
+    "step": null,
+    "stability": 5.321129419241061,
+    "difficulty": 4.748284761594571,
+    "due": 1788825600000.0,
+    "lastReview": 1788393600000.0
+   }
+  },
+  {
+   "name": "review-hard-good-easy#23",
+   "before": {
+    "state": 2,
+    "step": null,
+    "stability": 5.321129419241061,
+    "difficulty": 4.748284761594571,
+    "due": 1788825600000.0,
+    "lastReview": 1788393600000.0
+   },
+   "rating": 3,
+   "t": 1788912000000.0,
+   "after": {
+    "state": 2,
+    "step": null,
+    "stability": 20.0849449123067,
+    "difficulty": 4.738764846129815,
+    "due": 1790640000000.0,
+    "lastReview": 1788912000000.0
+   }
+  },
+  {
+   "name": "review-hard-good-easy#24",
+   "before": {
+    "state": 2,
+    "step": null,
+    "stability": 20.0849449123067,
+    "difficulty": 4.738764846129815,
+    "due": 1790640000000.0,
+    "lastReview": 1788912000000.0
+   },
+   "rating": 4,
+   "t": 1789948800000.0,
+   "after": {
+    "state": 2,
+    "step": null,
+    "stability": 72.24974122401272,
+    "difficulty": 2.965933600561408,
+    "due": 1796169600000.0,
+    "lastReview": 1789948800000.0
+   }
+  },
+  {
+   "name": "short-term-review#25",
+   "before": null,
+   "rating": 3,
+   "t": 1788220800000.0,
+   "after": {
+    "state": 1,
+    "step": 1,
+    "stability": 2.3065,
+    "difficulty": 2.118103970459016,
+    "due": 1788221400000.0,
+    "lastReview": 1788220800000.0
+   }
+  },
+  {
+   "name": "short-term-review#26",
+   "before": {
+    "state": 1,
+    "step": 1,
+    "stability": 2.3065,
+    "difficulty": 2.118103970459016,
+    "due": 1788221400000.0,
+    "lastReview": 1788220800000.0
+   },
+   "rating": 3,
+   "t": 1788221400000.0,
+   "after": {
+    "state": 2,
+    "step": null,
+    "stability": 2.3065,
+    "difficulty": 2.111214235785395,
+    "due": 1788394200000.0,
+    "lastReview": 1788221400000.0
+   }
+  },
+  {
+   "name": "short-term-review#27",
+   "before": {
+    "state": 2,
+    "step": null,
+    "stability": 2.3065,
+    "difficulty": 2.111214235785395,
+    "due": 1788394200000.0,
+    "lastReview": 1788221400000.0
+   },
+   "rating": 3,
+   "t": 1788307200000.0,
+   "after": {
+    "state": 2,
+    "step": null,
+    "stability": 2.3065,
+    "difficulty": 2.1043313908464483,
+    "due": 1788480000000.0,
+    "lastReview": 1788307200000.0
+   }
+  },
+  {
+   "name": "short-term-review#28",
+   "before": {
+    "state": 2,
+    "step": null,
+    "stability": 2.3065,
+    "difficulty": 2.1043313908464483,
+    "due": 1788480000000.0,
+    "lastReview": 1788307200000.0
+   },
+   "rating": 3,
+   "t": 1788314400000.0,
+   "after": {
+    "state": 2,
+    "step": null,
+    "stability": 2.3065,
+    "difficulty": 2.0974554287524403,
+    "due": 1788487200000.0,
+    "lastReview": 1788314400000.0
+   }
+  },
+  {
+   "name": "short-term-review#29",
+   "before": {
+    "state": 2,
+    "step": null,
+    "stability": 2.3065,
+    "difficulty": 2.0974554287524403,
+    "due": 1788487200000.0,
+    "lastReview": 1788314400000.0
+   },
+   "rating": 1,
+   "t": 1788325200000.0,
+   "after": {
+    "state": 3,
+    "step": 0,
+    "stability": 0.7750839828558984,
+    "difficulty": 7.387715706030851,
+    "due": 1788325800000.0,
+    "lastReview": 1788325200000.0
+   }
+  },
+  {
+   "name": "short-term-review#30",
+   "before": {
+    "state": 3,
+    "step": 0,
+    "stability": 0.7750839828558984,
+    "difficulty": 7.387715706030851,
+    "due": 1788325800000.0,
+    "lastReview": 1788325200000.0
+   },
+   "rating": 3,
+   "t": 1788325800000.0,
+   "after": {
+    "state": 2,
+    "step": null,
+    "stability": 0.8281648000472626,
+    "difficulty": 7.375556359621658,
+    "due": 1788412200000.0,
+    "lastReview": 1788325800000.0
+   }
+  },
+  {
+   "name": "learning-overdue#31",
+   "before": null,
+   "rating": 3,
+   "t": 1788220800000.0,
+   "after": {
+    "state": 1,
+    "step": 1,
+    "stability": 2.3065,
+    "difficulty": 2.118103970459016,
+    "due": 1788221400000.0,
+    "lastReview": 1788220800000.0
+   }
+  },
+  {
+   "name": "learning-overdue#32",
+   "before": {
+    "state": 1,
+    "step": 1,
+    "stability": 2.3065,
+    "difficulty": 2.118103970459016,
+    "due": 1788221400000.0,
+    "lastReview": 1788220800000.0
+   },
+   "rating": 1,
+   "t": 1788393600000.0,
+   "after": {
+    "state": 1,
+    "step": 0,
+    "stability": 0.6075801062519337,
+    "difficulty": 7.394502741279718,
+    "due": 1788393660000.0,
+    "lastReview": 1788393600000.0
+   }
+  },
+  {
+   "name": "learning-overdue#33",
+   "before": {
+    "state": 1,
+    "step": 0,
+    "stability": 0.6075801062519337,
+    "difficulty": 7.394502741279718,
+    "due": 1788393660000.0,
+    "lastReview": 1788393600000.0
+   },
+   "rating": 3,
+   "t": 1788394200000.0,
+   "after": {
+    "state": 1,
+    "step": 1,
+    "stability": 0.6596743320386499,
+    "difficulty": 7.382336607835277,
+    "due": 1788394800000.0,
+    "lastReview": 1788394200000.0
+   }
+  },
+  {
+   "name": "long-mixed#34",
+   "before": null,
+   "rating": 3,
+   "t": 1788220800000.0,
+   "after": {
+    "state": 1,
+    "step": 1,
+    "stability": 2.3065,
+    "difficulty": 2.118103970459016,
+    "due": 1788221400000.0,
+    "lastReview": 1788220800000.0
+   }
+  },
+  {
+   "name": "long-mixed#35",
+   "before": {
+    "state": 1,
+    "step": 1,
+    "stability": 2.3065,
+    "difficulty": 2.118103970459016,
+    "due": 1788221400000.0,
+    "lastReview": 1788220800000.0
+   },
+   "rating": 3,
+   "t": 1788221400000.0,
+   "after": {
+    "state": 2,
+    "step": null,
+    "stability": 2.3065,
+    "difficulty": 2.111214235785395,
+    "due": 1788394200000.0,
+    "lastReview": 1788221400000.0
+   }
+  },
+  {
+   "name": "long-mixed#36",
+   "before": {
+    "state": 2,
+    "step": null,
+    "stability": 2.3065,
+    "difficulty": 2.111214235785395,
+    "due": 1788394200000.0,
+    "lastReview": 1788221400000.0
+   },
+   "rating": 2,
+   "t": 1788307200000.0,
+   "after": {
+    "state": 2,
+    "step": null,
+    "stability": 2.3065,
+    "difficulty": 4.748284761594571,
+    "due": 1788480000000.0,
+    "lastReview": 1788307200000.0
+   }
+  },
+  {
+   "name": "long-mixed#37",
+   "before": {
+    "state": 2,
+    "step": null,
+    "stability": 2.3065,
+    "difficulty": 4.748284761594571,
+    "due": 1788480000000.0,
+    "lastReview": 1788307200000.0
+   },
+   "rating": 3,
+   "t": 1788739200000.0,
+   "after": {
+    "state": 2,
+    "step": null,
+    "stability": 13.470855520090806,
+    "difficulty": 4.738764846129815,
+    "due": 1789862400000.0,
+    "lastReview": 1788739200000.0
+   }
+  },
+  {
+   "name": "long-mixed#38",
+   "before": {
+    "state": 2,
+    "step": null,
+    "stability": 13.470855520090806,
+    "difficulty": 4.738764846129815,
+    "due": 1789862400000.0,
+    "lastReview": 1788739200000.0
+   },
+   "rating": 1,
+   "t": 1789948800000.0,
+   "after": {
+    "state": 3,
+    "step": 0,
+    "stability": 1.6269982584946845,
+    "difficulty": 8.255896150618755,
+    "due": 1789949400000.0,
+    "lastReview": 1789948800000.0
+   }
+  },
+  {
+   "name": "long-mixed#39",
+   "before": {
+    "state": 3,
+    "step": 0,
+    "stability": 1.6269982584946845,
+    "difficulty": 8.255896150618755,
+    "due": 1789949400000.0,
+    "lastReview": 1789948800000.0
+   },
+   "rating": 3,
+   "t": 1789949400000.0,
+   "after": {
+    "state": 2,
+    "step": null,
+    "stability": 1.6556364207838112,
+    "difficulty": 8.242868623764974,
+    "due": 1790122200000.0,
+    "lastReview": 1789949400000.0
+   }
+  },
+  {
+   "name": "long-mixed#40",
+   "before": {
+    "state": 2,
+    "step": null,
+    "stability": 1.6556364207838112,
+    "difficulty": 8.242868623764974,
+    "due": 1790122200000.0,
+    "lastReview": 1789949400000.0
+   },
+   "rating": 3,
+   "t": 1789257600000.0,
+   "after": {
+    "state": 2,
+    "step": null,
+    "stability": 1.6828454394546657,
+    "difficulty": 8.229854124438047,
+    "due": 1789430400000.0,
+    "lastReview": 1789257600000.0
+   }
+  },
+  {
+   "name": "long-mixed#41",
+   "before": {
+    "state": 2,
+    "step": null,
+    "stability": 1.6828454394546657,
+    "difficulty": 8.229854124438047,
+    "due": 1789430400000.0,
+    "lastReview": 1789257600000.0
+   },
+   "rating": 2,
+   "t": 1791676800000.0,
+   "after": {
+    "state": 2,
+    "step": null,
+    "stability": 7.154872182677959,
+    "difficulty": 8.810123048301012,
+    "due": 1792281600000.0,
+    "lastReview": 1791676800000.0
+   }
+  },
+  {
+   "name": "long-mixed#42",
+   "before": {
+    "state": 2,
+    "step": null,
+    "stability": 7.154872182677959,
+    "difficulty": 8.810123048301012,
+    "due": 1792281600000.0,
+    "lastReview": 1791676800000.0
+   },
+   "rating": 3,
+   "t": 1795996800000.0,
+   "after": {
+    "state": 2,
+    "step": null,
+    "stability": 24.91543333350724,
+    "difficulty": 8.796541294549549,
+    "due": 1798156800000.0,
+    "lastReview": 1795996800000.0
+   }
+  },
+  {
+   "name": "long-mixed#43",
+   "before": {
+    "state": 2,
+    "step": null,
+    "stability": 24.91543333350724,
+    "difficulty": 8.796541294549549,
+    "due": 1798156800000.0,
+    "lastReview": 1795996800000.0
+   },
+   "rating": 4,
+   "t": 1798588800000.0,
+   "after": {
+    "state": 2,
+    "step": null,
+    "stability": 61.83244835266898,
+    "difficulty": 8.379629845660519,
+    "due": 1803945600000.0,
+    "lastReview": 1798588800000.0
+   }
+  }
+ ]
+}
