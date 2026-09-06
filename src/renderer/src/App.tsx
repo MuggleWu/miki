@@ -17,9 +17,11 @@ export default function App() {
   const openBrowser = useApp((s) => s.openBrowser)
   const openDialog = useApp((s) => s.openDialog)
 
+  // 启动与每次切视图都重取全局数据（牌组计数 / 今天已学）：
+  // 学习页 ⌘D 删除、答题等操作只刷新本视图，不主动刷牌组列表——靠切视图即时刷新，不必等 60s 定时器
   useEffect(() => {
     void reload()
-  }, [reload])
+  }, [tab, reload])
 
   // 60 秒重取全局数据（牌组计数 / 今天已学），随时间推移保持各视图最新
   useEffect(() => {
