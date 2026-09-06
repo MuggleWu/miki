@@ -15,11 +15,11 @@ const noFuzz = { ...DEFAULT_FSRS_PARAMS, enableFuzzing: false }
 const sched = new FsrScheduler(noFuzz)
 
 function content(id: string, deckId = 'd1', createdAt = T0): CardContent {
-  return { id, front: `${id} front`, back: `${id} back`, createdAt, updatedAt: createdAt, deletedAt: null }
+  return { id, front: `${id} front`, back: `${id} back`, createdAt, updatedAt: createdAt, deletedAt: null, suspended: false }
 }
 
 function cardOf(id: string, deckId = 'd1', createdAt = T0): Card {
-  return { ...content(id, deckId, createdAt), deckId, fsrs: null, reps: 0, lapses: 0 }
+  return { ...content(id, deckId, createdAt), deckId, fsrs: null, reps: 0, lapses: 0, suspended: false }
 }
 
 function answerEv(seq: number, card: Card, rating: 1 | 2 | 3 | 4, t: number): ReviewEvent {
@@ -131,6 +131,19 @@ describe('queue（D3 不限额）', () => {
     const counts = deckCounts(cards, endOfToday.getTime())
     expect(counts).toEqual({ new: 1, learning: 1, review: 1 })
   })
+  it('suspended 卡不进队列与计数', () => {
+    const now = T0 + 120_000 // 学习卡 1min 后到期，此刻必然可刷
+    const endOfToday = new Date(T0); endOfToday.setHours(23, 59, 59, 999)
+    const pausedNew = { ...cardOf('p1'), suspended: true }
+    const pausedDue = { ...cardOf('p2'), suspended: true }
+    pausedDue.fsrs = { state: FSRS_STATE.Review, step: null, stability: 5, difficulty: 5, due: endOfToday.getTime(), lastReview: T0 - DAY }
+    const normal = cardOf('p3')
+    normal.fsrs = sched.review(null, 1, T0) // 1min 后到期
+    const cards = [pausedNew, pausedDue, normal]
+    expect(pickNext(cards, now)!.id).toBe('p3')
+    expect(remainingCount(cards, endOfToday.getTime())).toBe(1)
+    expect(deckCounts(cards, endOfToday.getTime())).toEqual({ new: 0, learning: 1, review: 0 })
+  })
 })
 
 describe('query', () => {
@@ -190,9 +203,12 @@ describe('query', () => {
     expect(row.state).toBe('review')
     expect(row.intervalDays).toBe(5)
     expect(row.deckName).toBe('牌组A')
+    expect(row.suspended).toBe(false)
     const newCard = toRow(cardOf('c10'), 'd')
     expect(newCard.state).toBe('new')
     expect(newCard.intervalDays).toBeNull()
+    const paused = toRow({ ...cardOf('c11'), suspended: true }, 'd')
+    expect(paused.suspended).toBe(true)
   })
 })
 

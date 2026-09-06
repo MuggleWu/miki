@@ -20,11 +20,11 @@ export function isReviewDue(card: Card, now: number): boolean {
   )
 }
 
-/** 取下一张卡：Learning 到期 → Review 到期 → New（各按 due/created 升序） */
+/** 取下一张卡：Learning 到期 → Review 到期 → New（各按 due/created 升序）；暂停卡不进队 */
 export function pickNext(cards: Card[], now: number): Card | null {
   let best: { rank: number; key: number; card: Card } | null = null
   for (const c of cards) {
-    if (c.deletedAt) continue
+    if (c.deletedAt || c.suspended) continue
     let rank: number
     let key: number
     if (isLearningDue(c, now)) {
@@ -46,11 +46,11 @@ export function pickNext(cards: Card[], now: number): Card | null {
   return best?.card ?? null
 }
 
-/** 队列剩余量：当日末前会出现的所有卡（到期复习/学习 + 新卡） */
+/** 队列剩余量：当日末前会出现的所有卡（到期复习/学习 + 新卡）；暂停卡不计 */
 export function remainingCount(cards: Card[], endOfToday: number): number {
   let n = 0
   for (const c of cards) {
-    if (c.deletedAt) continue
+    if (c.deletedAt || c.suspended) continue
     if (!c.fsrs) {
       n++
     } else if (c.fsrs.due <= endOfToday) {
@@ -60,11 +60,11 @@ export function remainingCount(cards: Card[], endOfToday: number): number {
   return n
 }
 
-/** 首页三列口径（需求 §4.3） */
+/** 首页三列口径（需求 §4.3）；暂停卡不计入 */
 export function deckCounts(cards: Card[], endOfToday: number): DeckCounts {
   const counts: DeckCounts = { new: 0, learning: 0, review: 0 }
   for (const c of cards) {
-    if (c.deletedAt) continue
+    if (c.deletedAt || c.suspended) continue
     if (!c.fsrs) {
       counts.new++
     } else if (c.fsrs.state === FSRS_STATE.Review) {

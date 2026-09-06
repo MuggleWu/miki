@@ -29,6 +29,7 @@ export function toRow(card: Card, deckName: string): CardRow {
     difficulty: card.fsrs?.difficulty ?? null,
     reps: card.reps,
     lapses: card.lapses,
+    suspended: card.suspended ?? false,
     createdAt: card.createdAt,
     updatedAt: card.updatedAt,
     deletedAt: card.deletedAt

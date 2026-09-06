@@ -44,6 +44,8 @@ export interface CardContent {
   createdAt: number
   updatedAt: number
   deletedAt: number | null
+  /** leech：重来次数达到阈值时自动暂停；暂停卡不进调度 due */
+  suspended: boolean
 }
 
 /** 内存中的完整卡（重放结果）；reps/lapses 由事件重放统计，不入文件 */
@@ -119,6 +121,7 @@ export interface CardRow {
   difficulty: number | null
   reps: number
   lapses: number
+  suspended: boolean
   createdAt: number
   updatedAt: number
   deletedAt: number | null
@@ -151,6 +154,12 @@ export interface StatsPayload {
 
 export type Theme = 'light' | 'dark'
 
+/** 刷卡界面的字体设置（fontFamily 空 = 跟随系统默认） */
+export interface StudyFont {
+  fontFamily: string
+  fontSize: number
+}
+
 export interface MikiConfig {
   workspacePath: string
   theme: Theme
@@ -160,6 +169,9 @@ export interface MikiConfig {
   relearningStepsSec: number[]
   maximumInterval: number
   enableFuzzing: boolean
+  /** leech 阈值：累计「重来」次数达到该值的卡自动暂停（0 = 关闭） */
+  leechThreshold: number
+  study: StudyFont
   browser: {
     columns: BrowserColumn[]
     sort: SortKey[]
@@ -178,6 +190,8 @@ export const DEFAULT_CONFIG: Omit<MikiConfig, 'workspacePath'> = {
   relearningStepsSec: [600],
   maximumInterval: 36500,
   enableFuzzing: true,
+  leechThreshold: 8,
+  study: { fontFamily: '', fontSize: 14 },
   browser: {
     columns: ['front', 'deckName', 'state', 'due', 'updatedAt'],
     sort: [{ col: 'updatedAt', asc: false }]

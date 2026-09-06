@@ -87,6 +87,11 @@ app.whenReady().then(() => {
     const file = path.join(ws.root, 'config.json')
     fs.writeFileSync(file, JSON.stringify(ws.config, null, 2), 'utf-8')
   })
+  ipcMain.handle(IPC.saveConfig, (_e, patch: Partial<MikiConfig>) => ws.saveConfig(patch))
+  ipcMain.handle(IPC.setCardSuspended, (_e, cardId: string, suspended: boolean) =>
+    ws.setCardSuspended(cardId, suspended)
+  )
+  ipcMain.handle(IPC.previewIntervals, (_e, cardId: string) => ws.previewIntervals(cardId))
 
   createWindow()
 

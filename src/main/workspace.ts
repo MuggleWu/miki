@@ -49,6 +49,8 @@ export class WorkspaceService {
   events: ReviewEvent[] = []
   private seq = 0
   private scheduler!: FsrScheduler
+  /** 预览专用（无 fuzz），评级按钮的到期提示用它保证展示稳定 */
+  private previewScheduler!: FsrScheduler
   /** 会话 undo 栈（D2：不跨会话） */
   private sessionOps: { seq: number; cardId: string }[] = []
 
@@ -75,14 +77,8 @@ export class WorkspaceService {
     fs.mkdirSync(path.join(this.root, 'cards'), { recursive: true })
     fs.mkdirSync(path.join(this.root, 'review-log'), { recursive: true })
     this.config = this.loadConfig(overrides)
-    this.scheduler = new FsrScheduler({
-      parameters: this.config.parameters,
-      desiredRetention: this.config.desiredRetention,
-      learningStepsSec: this.config.learningStepsSec,
-      relearningStepsSec: this.config.relearningStepsSec,
-      maximumInterval: this.config.maximumInterval,
-      enableFuzzing: this.config.enableFuzzing
-    })
+    this.scheduler = this.buildScheduler(this.config)
+    this.previewScheduler = this.buildScheduler(this.config, true)
     this.loadDecks()
     this.loadEvents()
     this.replayAll()
@@ -99,9 +95,48 @@ export class WorkspaceService {
         stored = {}
       }
     }
-    const config: MikiConfig = { ...DEFAULT_CONFIG, ...stored, ...overrides, workspacePath: this.root }
+    // study 嵌套字段单独合并，避免旧 config 整体覆盖默认值
+    const study = { ...DEFAULT_CONFIG.study, ...(stored.study ?? {}) }
+    const config: MikiConfig = {
+      ...DEFAULT_CONFIG,
+      ...stored,
+      ...overrides,
+      study,
+      workspacePath: this.root
+    }
     atomicWrite(file, JSON.stringify(config, null, 2))
     return config
+  }
+
+  private buildScheduler(cfg: MikiConfig, noFuzz = false): FsrScheduler {
+    return new FsrScheduler({
+      parameters: cfg.parameters,
+      desiredRetention: cfg.desiredRetention,
+      learningStepsSec: cfg.learningStepsSec,
+      relearningStepsSec: cfg.relearningStepsSec,
+      maximumInterval: cfg.maximumInterval,
+      enableFuzzing: noFuzz ? false : cfg.enableFuzzing
+    })
+  }
+
+  /** 合并保存设置并落盘；调度相关字段变化时重建调度器 */
+  saveConfig(patch: Partial<MikiConfig>): MikiConfig {
+    const study = { ...this.config.study, ...(patch.study ?? {}) }
+    Object.assign(this.config, patch, { study })
+    const scheduleKeys: (keyof MikiConfig)[] = [
+      'parameters',
+      'desiredRetention',
+      'learningStepsSec',
+      'relearningStepsSec',
+      'maximumInterval',
+      'enableFuzzing'
+    ]
+    if (scheduleKeys.some((k) => k in patch)) {
+      this.scheduler = this.buildScheduler(this.config)
+      this.previewScheduler = this.buildScheduler(this.config, true)
+    }
+    atomicWrite(path.join(this.root, 'config.json'), JSON.stringify(this.config, null, 2))
+    return this.config
   }
 
   private loadDecks(): void {
@@ -245,7 +280,15 @@ export class WorkspaceService {
 
   addCard(deckId: string, front: string, back: string): Card {
     const now = Date.now()
-    const content: CardContent = { id: randomUUID(), front, back, createdAt: now, updatedAt: now, deletedAt: null }
+    const content: CardContent = {
+      id: randomUUID(),
+      front,
+      back,
+      createdAt: now,
+      updatedAt: now,
+      deletedAt: null,
+      suspended: false
+    }
     const card: Card = { ...content, deckId, fsrs: null, reps: 0, lapses: 0 }
     this.cards.set(card.id, card)
     this.saveDeckCards(deckId)
@@ -258,6 +301,14 @@ export class WorkspaceService {
     card.front = front
     card.back = back
     card.updatedAt = Date.now()
+    this.saveDeckCards(card.deckId)
+    return card
+  }
+
+  setCardSuspended(cardId: string, suspended: boolean): Card | null {
+    const card = this.cards.get(cardId)
+    if (!card) return null
+    card.suspended = suspended
     this.saveDeckCards(card.deckId)
     return card
   }
@@ -322,8 +373,21 @@ export class WorkspaceService {
     card.fsrs = after
     card.reps++
     if (rating === 1) card.lapses++
+    // leech：累计重来次数达到阈值（>0 时启用）自动暂停，不再进入调度
+    if (this.config.leechThreshold > 0 && !card.suspended && card.lapses >= this.config.leechThreshold) {
+      card.suspended = true
+      this.saveDeckCards(card.deckId)
+    }
     this.sessionOps.push({ seq: ev.seq, cardId })
     return { answeredCardId: cardId, ...this.getStudy(card.deckId) }
+  }
+
+  /** 四档评级各自的下次到期预览（不落盘；关闭 fuzz 保证展示稳定） */
+  previewIntervals(cardId: string): number[] {
+    const card = this.cards.get(cardId)
+    if (!card) return [0, 0, 0, 0]
+    const now = Date.now()
+    return ([1, 2, 3, 4] as Rating[]).map((r) => this.previewScheduler.review(card.fsrs, r, now).due)
   }
 
   undo(): UndoResult {

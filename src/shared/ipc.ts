@@ -30,6 +30,11 @@ export interface MikiApi {
   getStats(params: StatsParams): Promise<StatsPayload>
   saveBrowserConfig(columns: string[], sort: unknown[]): Promise<void>
   saveTheme(theme: 'light' | 'dark'): Promise<void>
+  /** 设置页：合并保存配置（字体 / leech 等），返回新 config */
+  saveConfig(patch: Partial<MikiConfig>): Promise<MikiConfig>
+  setCardSuspended(cardId: string, suspended: boolean): Promise<Card | null>
+  /** 四档评级各自的下次到期预览（ms epoch；不落盘） */
+  previewIntervals(cardId: string): Promise<number[]>
 }
 
 export const IPC = {
@@ -47,5 +52,8 @@ export const IPC = {
   queryCards: 'miki:query-cards',
   getStats: 'miki:get-stats',
   saveBrowserConfig: 'miki:save-browser-config',
-  saveTheme: 'miki:save-theme'
+  saveTheme: 'miki:save-theme',
+  saveConfig: 'miki:save-config',
+  setCardSuspended: 'miki:set-card-suspended',
+  previewIntervals: 'miki:preview-intervals'
 } as const
