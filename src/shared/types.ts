@@ -56,6 +56,8 @@ export interface Card extends CardContent {
   fsrs: CardSnapshot | null // null = new
   reps: number
   lapses: number
+  /** 调度索引决胜序（= Map 插入序），非持久内存字段，落盘/重放不携带 */
+  tie?: number
 }
 
 export interface Deck {

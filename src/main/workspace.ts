@@ -20,13 +20,29 @@ import {
   type UndoResult
 } from '../shared/types'
 import { FsrScheduler, DEFAULT_FSRS_PARAMS } from '../core/fsrs'
-import { deckCounts, pickNext, remainingCount } from '../core/queue'
+import { MinHeap, type HeapEntry } from '../core/min-heap'
 import { replayCard } from '../core/replay'
 import { compareByKeys, displayState, filterByKeywords, toRow } from '../core/query'
 import type { MikiConfigPatch } from '../shared/ipc'
-import { computeStats, endOfLocalDay } from '../core/stats'
+import { computeStats, endOfLocalDay, localDateKey } from '../core/stats'
 
 const MONTH_MS = 31 * 86_400_000
+
+/** 牌组调度索引：due 最小堆 + 增量计数器，学习页/首页读 O(log n)（需求 §19 L1） */
+interface DeckIndex {
+  /** Learning/Relearning 态卡，key = due */
+  learning: MinHeap
+  /** Review 态卡，key = due */
+  review: MinHeap
+  /** 新卡，key = createdAt */
+  fresh: MinHeap
+  counts: {
+    new: number
+    learningAll: number
+    learningDueToday: number
+    reviewDueToday: number
+  }
+}
 
 function atomicWrite(file: string, data: string): void {
   const tmp = file + '.tmp'
@@ -54,6 +70,10 @@ export class WorkspaceService {
   private previewScheduler!: FsrScheduler
   /** 会话 undo 栈（D2：不跨会话） */
   private sessionOps: { seq: number; cardId: string }[] = []
+  /** 牌组调度索引（deckId → 堆 + 计数器），跨天/启动全量重建，其余增量维护 */
+  private idx = new Map<string, DeckIndex>()
+  private indexDayKey = ''
+  private orderCounter = 0
 
   // ---------- 路径 ----------
 
@@ -83,6 +103,7 @@ export class WorkspaceService {
     this.loadDecks()
     this.loadEvents()
     this.replayAll()
+    this.ensureDay()
     this.ensureGitignore()
   }
 
@@ -220,6 +241,128 @@ export class WorkspaceService {
     }
   }
 
+  // ---------- 调度索引（due 最小堆 + 增量计数器） ----------
+
+  private deckIdx(deckId: string): DeckIndex {
+    let x = this.idx.get(deckId)
+    if (!x) {
+      x = {
+        learning: new MinHeap(),
+        review: new MinHeap(),
+        fresh: new MinHeap(),
+        counts: { new: 0, learningAll: 0, learningDueToday: 0, reviewDueToday: 0 }
+      }
+      this.idx.set(deckId, x)
+    }
+    return x
+  }
+
+  /** 跨天检测：日期变化时全量重建索引（eot 变化影响 dueToday 口径，重建同时自愈任何计数漂移） */
+  ensureDay(now = Date.now()): void {
+    const k = localDateKey(now)
+    if (k === this.indexDayKey) return
+    this.indexDayKey = k
+    this.rebuildIndexes(now)
+  }
+
+  private rebuildIndexes(now: number): void {
+    const eot = endOfLocalDay(now)
+    this.idx = new Map()
+    const hidden = new Set(this.decks.filter((d) => d.deletedAt).map((d) => d.id))
+    let tie = 0
+    for (const c of this.cards.values()) {
+      c.tie = tie++ // tie 全量分配（含排除卡），保持与 Map 插入序一致
+      if (c.deletedAt || c.suspended || hidden.has(c.deckId)) continue
+      this.classPush(c, this.deckIdx(c.deckId), eot)
+    }
+    this.orderCounter = tie
+  }
+
+  /** 按当前状态入堆 + 加计数（调用方保证卡未删未暂停、牌组未删）；tie 取卡上分配好的插入序 */
+  private classPush(c: Card, ix: DeckIndex, eot: number): void {
+    if (c.tie == null) c.tie = ++this.orderCounter
+    const st = displayState(c)
+    if (st === 'new') {
+      ix.counts.new++
+      ix.fresh.push({ key: c.createdAt, tie: c.tie, id: c.id })
+      return
+    }
+    const due = c.fsrs!.due
+    if (st === 'review') {
+      if (due <= eot) ix.counts.reviewDueToday++
+      ix.review.push({ key: due, tie: c.tie, id: c.id })
+      return
+    }
+    ix.counts.learningAll++
+    if (due <= eot) ix.counts.learningDueToday++
+    ix.learning.push({ key: due, tie: c.tie, id: c.id })
+  }
+
+  /** 按变更前状态减计数（堆条目不删，弹出时惰性失效） */
+  private unclassCounts(before: Card, eot: number, deckId: string): void {
+    if (before.deletedAt || before.suspended) return
+    const ix = this.deckIdx(deckId)
+    const st = displayState(before)
+    if (st === 'new') {
+      ix.counts.new--
+      return
+    }
+    const due = before.fsrs!.due
+    if (st === 'review') {
+      if (due <= eot) ix.counts.reviewDueToday--
+      return
+    }
+    ix.counts.learningAll--
+    if (due <= eot) ix.counts.learningDueToday--
+  }
+
+  /** 任一状态变化点统一调用：减掉变更前贡献、按新状态重新入堆计数（deckIdBefore 供移动跨牌组扣减） */
+  private reindexCard(card: Card, before: Card | null, deckIdBefore?: string): void {
+    const now = Date.now()
+    this.ensureDay(now)
+    const eot = endOfLocalDay(now)
+    if (before) this.unclassCounts(before, eot, deckIdBefore ?? before.deckId)
+    const hidden = new Set(this.decks.filter((d) => d.deletedAt).map((d) => d.id))
+    if (!card.deletedAt && !card.suspended && !hidden.has(card.deckId)) {
+      this.classPush(card, this.deckIdx(card.deckId), eot)
+    }
+  }
+
+  /** 取堆顶有效卡：跳过失效条目（已删/暂停/换牌组/due 已变），dueLimit 内未到期则返回 null。
+   * 有效卡只 peek 不 pop——pickNext 是幂等读，条目在卡片状态变化后按 key 不匹配惰性失效。 */
+  private heapNext(
+    h: MinHeap,
+    deckId: string,
+    dueLimit: number | null,
+    match: (c: Card, e: HeapEntry) => boolean
+  ): Card | null {
+    while (h.size > 0) {
+      const e = h.peek() as HeapEntry
+      const card = this.cards.get(e.id)
+      if (!card || card.deletedAt || card.suspended || card.deckId !== deckId || !match(card, e)) {
+        h.pop()
+        continue
+      }
+      if (dueLimit != null && e.key > dueLimit) return null
+      return card
+    }
+    return null
+  }
+
+  private pickNextIdx(deckId: string, now: number): Card | null {
+    const ix = this.deckIdx(deckId)
+    const learning = this.heapNext(ix.learning, deckId, now, (c, e) => !!c.fsrs && displayState(c) === 'learning' && c.fsrs!.due === e.key)
+    if (learning) return learning
+    const review = this.heapNext(ix.review, deckId, now, (c, e) => displayState(c) === 'review' && c.fsrs!.due === e.key)
+    if (review) return review
+    return this.heapNext(ix.fresh, deckId, null, (c, e) => !c.fsrs && c.createdAt === e.key)
+  }
+
+  private remainingOf(deckId: string): number {
+    const ix = this.deckIdx(deckId)
+    return ix.counts.new + ix.counts.learningDueToday + ix.counts.reviewDueToday
+  }
+
   // ---------- 只读视图 ----------
 
   now(): number {
@@ -231,16 +374,18 @@ export class WorkspaceService {
   }
 
   deckInfos(): DeckInfo[] {
-    const now = Date.now()
-    const eot = this.endOfToday()
+    this.ensureDay()
     return this.decks
       .filter((d) => !d.deletedAt)
       .map((d) => {
-        const list: Card[] = []
-        for (const c of this.cards.values()) if (c.deckId === d.id) list.push(c)
-        return { ...d, counts: deckCounts(list, eot) }
+        const ix = this.deckIdx(d.id)
+        const counts: DeckCounts = {
+          new: ix.counts.new,
+          learning: ix.counts.learningAll,
+          review: ix.counts.reviewDueToday
+        }
+        return { ...d, counts: sortCounts(counts, Date.now()) }
       })
-      .map((x) => ({ ...x, counts: sortCounts(x.counts, now) }))
   }
 
   todayCount(): number {
@@ -283,7 +428,7 @@ export class WorkspaceService {
     const lines: string[] = []
     for (const c of this.cards.values()) {
       if (c.deckId !== deckId) continue
-      const { deckId: _d, fsrs: _f, reps: _r, lapses: _l, ...content } = c
+      const { deckId: _d, fsrs: _f, reps: _r, lapses: _l, tie: _t, ...content } = c
       lines.push(JSON.stringify(content))
     }
     lines.sort()
@@ -304,6 +449,7 @@ export class WorkspaceService {
     const card: Card = { ...content, deckId, fsrs: null, reps: 0, lapses: 0 }
     this.cards.set(card.id, card)
     this.saveDeckCards(deckId)
+    this.reindexCard(card, null)
     return card
   }
 
@@ -326,6 +472,7 @@ export class WorkspaceService {
     }))
     for (const c of cards) this.cards.set(c.id, c)
     this.saveDeckCards(deckId)
+    for (const c of cards) this.reindexCard(c, null)
     return cards
   }
 
@@ -351,10 +498,11 @@ export class WorkspaceService {
     return { updated, missing }
   }
 
-  /** 批量软删：每张一个 delete 事件（可撤销），按牌组去重一次落盘 */
+  /** 批量软删：每张一个 delete 事件（可撤销），不重写卡片文件（重放恢复删除态） */
   deleteCards(cardIds: string[]): { deleted: number; missing: number } {
     const now = Date.now()
     const evs: ReviewEvent[] = []
+    const touched: { card: Card; before: Card }[] = []
     let missing = 0
     for (const id of cardIds) {
       const card = this.cards.get(id)
@@ -362,13 +510,15 @@ export class WorkspaceService {
         missing++
         continue
       }
+      const before = { ...card }
       evs.push({ seq: ++this.seq, t: now, action: 'delete', cardId: id, deckId: card.deckId, before: card.fsrs })
       card.deletedAt = now
+      touched.push({ card, before })
     }
     if (evs.length === 0) return { deleted: 0, missing }
     this.appendEvents(evs)
     for (const ev of evs) this.sessionOps.push({ seq: ev.seq, cardId: ev.cardId })
-    for (const deckId of new Set(evs.map((e) => e.deckId))) this.saveDeckCards(deckId)
+    for (const t of touched) this.reindexCard(t.card, t.before)
     return { deleted: evs.length, missing }
   }
 
@@ -397,6 +547,7 @@ export class WorkspaceService {
     const card = this.cards.get(cardId)
     if (!card) return null
     if (card.suspended !== suspended) {
+      const before = { ...card }
       const ev: ReviewEvent = {
         seq: ++this.seq,
         t: Date.now(),
@@ -407,6 +558,7 @@ export class WorkspaceService {
       }
       this.appendEvents([ev])
       card.suspended = suspended
+      this.reindexCard(card, before)
     }
     return card
   }
@@ -415,17 +567,23 @@ export class WorkspaceService {
   moveCards(cardIds: string[], targetDeckId: string): number {
     if (!this.decks.some((d) => d.id === targetDeckId && !d.deletedAt)) return 0
     const now = Date.now()
-    const touched = new Set<string>([targetDeckId])
+    const touched: { card: Card; before: Card }[] = []
     let moved = 0
     for (const id of cardIds) {
       const c = this.cards.get(id)
       if (!c || c.deletedAt || c.deckId === targetDeckId) continue
-      touched.add(c.deckId)
+      const before = { ...c }
       c.deckId = targetDeckId
       c.updatedAt = now
       moved++
+      touched.push({ card: c, before })
     }
-    if (moved > 0) for (const deckId of touched) this.saveDeckCards(deckId)
+    if (moved > 0) {
+      const files = new Set<string>([targetDeckId])
+      for (const t of touched) files.add(t.before.deckId)
+      for (const deckId of files) this.saveDeckCards(deckId)
+      for (const t of touched) this.reindexCard(t.card, t.before, t.before.deckId)
+    }
     return moved
   }
 
@@ -433,9 +591,11 @@ export class WorkspaceService {
   resetProgress(cardIds: string[]): number {
     const now = Date.now()
     const evs: ReviewEvent[] = []
+    const touched: { card: Card; before: Card }[] = []
     for (const id of cardIds) {
       const c = this.cards.get(id)
       if (!c || c.deletedAt) continue
+      const before = { ...c }
       evs.push({
         seq: ++this.seq,
         t: now,
@@ -449,13 +609,14 @@ export class WorkspaceService {
       c.lapses = 0
       c.suspended = false
       c.updatedAt = now
+      touched.push({ card: c, before })
     }
     if (evs.length === 0) return 0
     this.appendEvents(evs)
     // reset 不可撤销：把该卡的会话撤销栈一并作废
     const resetIds = new Set(evs.map((e) => e.cardId))
     this.sessionOps = this.sessionOps.filter((op) => !resetIds.has(op.cardId))
-    for (const deckId of new Set(evs.map((e) => e.deckId))) this.saveDeckCards(deckId)
+    for (const t of touched) this.reindexCard(t.card, t.before)
     return evs.length
   }
 
@@ -478,10 +639,11 @@ export class WorkspaceService {
     const card = this.cards.get(cardId)
     if (!card || card.deletedAt) return
     const now = Date.now()
+    const before = { ...card }
     const ev: ReviewEvent = { seq: ++this.seq, t: now, action: 'delete', cardId, deckId: card.deckId, before: card.fsrs }
     this.appendEvents([ev])
     card.deletedAt = now
-    this.saveDeckCards(card.deckId)
+    this.reindexCard(card, before)
     this.sessionOps.push({ seq: ev.seq, cardId })
   }
 
@@ -500,10 +662,10 @@ export class WorkspaceService {
 
   getStudy(deckId: string): StudyPayload {
     const now = Date.now()
-    const list = this.deckCards(deckId)
+    this.ensureDay(now)
     return {
-      card: pickNext(list, now),
-      remaining: remainingCount(list, this.endOfToday()),
+      card: this.pickNextIdx(deckId, now),
+      remaining: this.remainingOf(deckId),
       todayCount: this.todayCount()
     }
   }
@@ -512,9 +674,10 @@ export class WorkspaceService {
     const card = this.cards.get(cardId)
     if (!card || card.deletedAt) throw new Error(`card not found: ${cardId}`)
     const now = Date.now()
-    const before = card.fsrs
-    const after = this.scheduler.review(before, rating, now)
-    const ev: ReviewEvent = { seq: ++this.seq, t: now, action: 'answer', cardId, deckId: card.deckId, rating, before, after, durationMs }
+    const before = { ...card }
+    const beforeFsrs = card.fsrs
+    const after = this.scheduler.review(beforeFsrs, rating, now)
+    const ev: ReviewEvent = { seq: ++this.seq, t: now, action: 'answer', cardId, deckId: card.deckId, rating, before: beforeFsrs, after, durationMs }
     const evs: ReviewEvent[] = [ev]
     card.fsrs = after
     card.reps++
@@ -525,6 +688,7 @@ export class WorkspaceService {
       evs.push({ seq: ++this.seq, t: now, action: 'suspend', cardId: card.id, deckId: card.deckId, suspended: true })
     }
     this.appendEvents(evs)
+    this.reindexCard(card, before)
     this.sessionOps.push({ seq: ev.seq, cardId })
     return { answeredCardId: cardId, ...this.getStudy(card.deckId) }
   }
@@ -547,6 +711,7 @@ export class WorkspaceService {
     const card = this.cards.get(op.cardId)
     if (!card) throw new Error(`card missing: ${op.cardId}`)
     const now = Date.now()
+    const before = { ...card }
     const ev: ReviewEvent = {
       seq: ++this.seq,
       t: now,
@@ -565,12 +730,11 @@ export class WorkspaceService {
       if (target.rating === 1) card.lapses = Math.max(0, card.lapses - 1)
     }
     if (target.action === 'delete') card.deletedAt = null
-    this.saveDeckCards(card.deckId)
-    const list = this.deckCards(card.deckId)
+    this.reindexCard(card, before)
     return {
       restoredCardId: card.id,
       card,
-      remaining: remainingCount(list, this.endOfToday()),
+      remaining: this.remainingOf(card.deckId),
       todayCount: this.todayCount()
     }
   }

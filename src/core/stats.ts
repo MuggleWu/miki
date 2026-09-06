@@ -4,7 +4,8 @@ import { FSRS_STATE } from '../shared/types'
 
 const INTL_BUCKETS = ['<1d', '1-3', '4-7', '8-14', '15-30', '30+'] as const
 
-function localDateKey(ms: number): string {
+/** 本地时区日期键 yyyy-MM-dd（热力图聚合与调度索引跨天检测共用） */
+export function localDateKey(ms: number): string {
   const d = new Date(ms)
   const p = (n: number) => String(n).padStart(2, '0')
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
