@@ -1,10 +1,10 @@
-import { app, BrowserWindow, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, screen, shell } from 'electron'
 import * as path from 'node:path'
 import * as fs from 'node:fs'
 import { WorkspaceService } from './workspace'
 import { startApiServer } from './api-server'
 import { IPC } from '../shared/ipc'
-import type { MikiConfig, QueryParams, Rating, SortKey, StatsParams } from '../shared/types'
+import type { MikiConfig, QueryParams, Rating, SortKey, StatsParams, WindowState } from '../shared/types'
 
 let ws: WorkspaceService
 let win: BrowserWindow | null = null
@@ -22,10 +22,28 @@ function resolveWorkspace(): string {
   return path.join(app.getPath('home'), 'miki-base')
 }
 
+/** 恢复上次窗口状态：把保存的普通态 bounds 钳回可见显示器的工作区（外接屏拔掉/分辨率变化时不出屏） */
+function clampToWorkArea(st: WindowState): { x?: number; y?: number; width: number; height: number } {
+  const width = Math.min(st.width, 10_000)
+  const height = Math.min(st.height, 10_000)
+  const wa = screen.getDisplayMatching({ x: st.x ?? 0, y: st.y ?? 0, width, height }).workArea
+  const w = Math.min(width, wa.width)
+  const h = Math.min(height, wa.height)
+  return {
+    x: st.x == null ? undefined : Math.min(Math.max(st.x, wa.x), wa.x + wa.width - w),
+    y: st.y == null ? undefined : Math.min(Math.max(st.y, wa.y), wa.y + wa.height - h),
+    width: w,
+    height: h
+  }
+}
+
 function createWindow(): void {
+  const restored = clampToWorkArea(ws.config.window)
   win = new BrowserWindow({
-    width: 1280,
-    height: 840,
+    x: restored.x,
+    y: restored.y,
+    width: restored.width,
+    height: restored.height,
     minWidth: 960,
     minHeight: 600,
     title: 'Miki',
@@ -38,6 +56,29 @@ function createWindow(): void {
       sandbox: true
     }
   })
+  // 上次是最大化：先按普通尺寸建窗再最大化（resize 回调里 getNormalBounds 仍取普通态，不会污染尺寸）
+  if (ws.config.window.maximized) win.maximize()
+
+  // 窗口尺寸/位置/最大化 → 工作区 config.json（防抖落盘；关闭时立即补一次）
+  const persistBounds = () => {
+    if (!win || win.isDestroyed()) return
+    const nb = win.getNormalBounds()
+    ws.saveConfig({ window: { x: nb.x, y: nb.y, width: nb.width, height: nb.height, maximized: win.isMaximized() } })
+  }
+  let saveTimer: NodeJS.Timeout | null = null
+  const schedulePersist = () => {
+    if (saveTimer) clearTimeout(saveTimer)
+    saveTimer = setTimeout(persistBounds, 800)
+  }
+  win.on('resize', schedulePersist)
+  win.on('move', schedulePersist)
+  win.on('maximize', persistBounds)
+  win.on('unmaximize', persistBounds)
+  win.on('close', () => {
+    if (saveTimer) clearTimeout(saveTimer)
+    persistBounds()
+  })
+
   // 外部内容一律交系统浏览器：窗口只加载本应用页面，防止外部网页拿到 preload 注入的 IPC 面
   win.webContents.on('will-navigate', (e, url) => {
     const devUrl = process.env.ELECTRON_RENDERER_URL

@@ -310,6 +310,15 @@ describe('saveConfig', () => {
     expect(t1).not.toBe('')
     expect(newWs(d).config.api.token).toBe(t1)
   })
+
+  it('window 状态：旧 config 缺键补默认，保存后跨 init 恢复', () => {
+    const d = tmpKept()
+    const w = newWs(d)
+    expect(w.config.window).toEqual(DEFAULT_CONFIG.window)
+    w.saveConfig({ window: { x: 40, y: 60, width: 1024, height: 700, maximized: false } })
+    const w2 = newWs(d)
+    expect(w2.config.window).toEqual({ x: 40, y: 60, width: 1024, height: 700, maximized: false })
+  })
 })
 
 describe('计数与统计入口', () => {

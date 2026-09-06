@@ -172,6 +172,16 @@ export interface StatsPayload {
 
 export type Theme = 'light' | 'dark'
 
+/** 主窗口状态（跨启动恢复尺寸/位置/最大化；存工作区 config.json） */
+export interface WindowState {
+  /** 普通态（非最大化）的坐标；null = 首次启动交给系统摆放 */
+  x: number | null
+  y: number | null
+  width: number
+  height: number
+  maximized: boolean
+}
+
 /** 刷卡界面的字体设置（fontFamily 空 = 跟随系统默认） */
 export interface StudyFont {
   fontFamily: string
@@ -199,6 +209,8 @@ export interface MikiConfig {
     selectedDeckId?: string | null
     selectedCardId?: string | null
   }
+  /** 主窗口尺寸/位置/最大化（resize/move 防抖落盘，下次启动恢复） */
+  window: WindowState
 }
 
 export const DEFAULT_CONFIG: Omit<MikiConfig, 'workspacePath'> = {
@@ -219,5 +231,6 @@ export const DEFAULT_CONFIG: Omit<MikiConfig, 'workspacePath'> = {
   browser: {
     columns: ['front', 'deckName', 'state', 'due', 'updatedAt'],
     sort: [{ col: 'updatedAt', asc: false }]
-  }
+  },
+  window: { x: null, y: null, width: 1280, height: 840, maximized: false }
 }
