@@ -18,7 +18,11 @@ const api = {
   getStats: (params: unknown) => ipcRenderer.invoke(IPC.getStats, params),
   saveBrowserConfig: (columns: string[], sort: unknown[]) =>
     ipcRenderer.invoke(IPC.saveBrowserConfig, columns, sort),
-  saveTheme: (theme: 'light' | 'dark') => ipcRenderer.invoke(IPC.saveTheme, theme)
+  saveTheme: (theme: 'light' | 'dark') => ipcRenderer.invoke(IPC.saveTheme, theme),
+  saveConfig: (patch: unknown) => ipcRenderer.invoke(IPC.saveConfig, patch),
+  setCardSuspended: (cardId: string, suspended: boolean) =>
+    ipcRenderer.invoke(IPC.setCardSuspended, cardId, suspended),
+  previewIntervals: (cardId: string) => ipcRenderer.invoke(IPC.previewIntervals, cardId)
 }
 
 contextBridge.exposeInMainWorld('miki', api)
