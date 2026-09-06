@@ -128,11 +128,19 @@ export interface CardRow {
   deletedAt: number | null
 }
 
+/** 查询状态过滤：'suspended' 按暂停标记，其余按调度状态 */
+export type QueryState = CardState | 'suspended'
+
 export interface QueryParams {
   deckId: string | null // null = 全部牌组
   keywords: string[]
   sort: SortKey[]
   limit?: number
+  offset?: number
+  state?: QueryState | null
+  /** 到期时间窗（ms epoch），无调度进度的卡在指定窗口时被排除 */
+  dueBefore?: number | null
+  dueAfter?: number | null
 }
 
 export interface QueryResult {
@@ -172,6 +180,8 @@ export interface MikiConfig {
   enableFuzzing: boolean
   /** leech 阈值：累计「重来」次数达到该值的卡自动暂停（0 = 关闭） */
   leechThreshold: number
+  /** 本机 HTTP API（面向人与 AI 的程序化接口；token 空 = 首次启动自动生成） */
+  api: { enabled: boolean; port: number; token: string }
   study: StudyFont
   browser: {
     columns: BrowserColumn[]
@@ -195,6 +205,7 @@ export const DEFAULT_CONFIG: Omit<MikiConfig, 'workspacePath'> = {
   maximumInterval: 36500,
   enableFuzzing: true,
   leechThreshold: 8,
+  api: { enabled: true, port: 8727, token: '' },
   study: { fontFamily: '', fontSize: 16 },
   browser: {
     columns: ['front', 'deckName', 'state', 'due', 'updatedAt'],

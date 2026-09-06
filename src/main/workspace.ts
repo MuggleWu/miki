@@ -22,7 +22,7 @@ import {
 import { FsrScheduler, DEFAULT_FSRS_PARAMS } from '../core/fsrs'
 import { deckCounts, pickNext, remainingCount } from '../core/queue'
 import { replayCard } from '../core/replay'
-import { compareByKeys, filterByKeywords, toRow } from '../core/query'
+import { compareByKeys, displayState, filterByKeywords, toRow } from '../core/query'
 import type { MikiConfigPatch } from '../shared/ipc'
 import { computeStats, endOfLocalDay } from '../core/stats'
 
@@ -98,13 +98,17 @@ export class WorkspaceService {
     }
     // study 嵌套字段单独合并，避免旧 config 整体覆盖默认值
     const study = { ...DEFAULT_CONFIG.study, ...(stored.study ?? {}) }
+    const api = { ...DEFAULT_CONFIG.api, ...(stored.api ?? {}) }
     const config: MikiConfig = {
       ...DEFAULT_CONFIG,
       ...stored,
       ...overrides,
       study,
+      api,
       workspacePath: this.root
     }
+    // HTTP API 鉴权 token：首次启动生成一次，长期使用
+    if (!config.api.token) config.api.token = randomUUID()
     atomicWrite(file, JSON.stringify(config, null, 2))
     return config
   }
@@ -297,6 +301,81 @@ export class WorkspaceService {
     return card
   }
 
+  /** 批量新增卡片：同批共用时间戳，一次落盘；不写调度事件（新卡无进度） */
+  addCards(deckId: string, items: { front: string; back: string }[]): Card[] {
+    if (items.length === 0) return []
+    const now = Date.now()
+    const cards: Card[] = items.map((it) => ({
+      id: randomUUID(),
+      deckId,
+      front: it.front,
+      back: it.back,
+      createdAt: now,
+      updatedAt: now,
+      deletedAt: null,
+      suspended: false,
+      fsrs: null,
+      reps: 0,
+      lapses: 0
+    }))
+    for (const c of cards) this.cards.set(c.id, c)
+    this.saveDeckCards(deckId)
+    return cards
+  }
+
+  /** 批量更新内容：按牌组分组一次落盘；返回更新数与不存在的 ID 数 */
+  updateCards(items: { cardId: string; front: string; back: string }[]): { updated: number; missing: number } {
+    const now = Date.now()
+    let updated = 0
+    let missing = 0
+    const touched = new Set<string>()
+    for (const it of items) {
+      const card = this.cards.get(it.cardId)
+      if (!card || card.deletedAt) {
+        missing++
+        continue
+      }
+      card.front = it.front
+      card.back = it.back
+      card.updatedAt = now
+      updated++
+      touched.add(card.deckId)
+    }
+    for (const deckId of touched) this.saveDeckCards(deckId)
+    return { updated, missing }
+  }
+
+  /** 批量软删：每张一个 delete 事件（可撤销），按牌组去重一次落盘 */
+  deleteCards(cardIds: string[]): { deleted: number; missing: number } {
+    const now = Date.now()
+    const evs: ReviewEvent[] = []
+    let missing = 0
+    for (const id of cardIds) {
+      const card = this.cards.get(id)
+      if (!card || card.deletedAt) {
+        missing++
+        continue
+      }
+      evs.push({ seq: ++this.seq, t: now, action: 'delete', cardId: id, deckId: card.deckId, before: card.fsrs })
+      card.deletedAt = now
+    }
+    if (evs.length === 0) return { deleted: 0, missing }
+    this.appendEvents(evs)
+    for (const ev of evs) this.sessionOps.push({ seq: ev.seq, cardId: ev.cardId })
+    for (const deckId of new Set(evs.map((e) => e.deckId))) this.saveDeckCards(deckId)
+    return { deleted: evs.length, missing }
+  }
+
+  /** 批量按 ID 取卡片（保持入参顺序，跳过不存在的 ID） */
+  getCards(cardIds: string[]): Card[] {
+    const out: Card[] = []
+    for (const id of cardIds) {
+      const card = this.cards.get(id)
+      if (card) out.push(card)
+    }
+    return out
+  }
+
   updateCard(cardId: string, front: string, back: string): Card | null {
     const card = this.cards.get(cardId)
     if (!card) return null
@@ -479,10 +558,19 @@ export class WorkspaceService {
     const nameById = new Map(this.decks.map((d) => [d.id, d.name]))
     let list = this.deckCards(params.deckId)
     list = filterByKeywords(list, params.keywords)
+    if (params.state) {
+      list = list.filter((c) => {
+        if (params.state === 'suspended') return c.suspended
+        return !c.suspended && displayState(c) === params.state
+      })
+    }
+    if (params.dueAfter != null) list = list.filter((c) => c.fsrs != null && c.fsrs.due >= params.dueAfter!)
+    if (params.dueBefore != null) list = list.filter((c) => c.fsrs != null && c.fsrs.due <= params.dueBefore!)
     const deckNameOf = (c: Card) => nameById.get(c.deckId) ?? ''
     list = [...list].sort((a, b) => compareByKeys(a, b, params.sort, deckNameOf))
+    const offset = params.offset ?? 0
     return {
-      rows: list.slice(0, params.limit ?? 5000).map((c) => toRow(c, deckNameOf(c))),
+      rows: list.slice(offset, offset + (params.limit ?? 5000)).map((c) => toRow(c, deckNameOf(c))),
       total: list.length
     }
   }

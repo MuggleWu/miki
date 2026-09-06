@@ -24,6 +24,12 @@ const api = {
     ipcRenderer.invoke(IPC.setCardSuspended, cardId, suspended),
   moveCards: (cardIds: string[], deckId: string) => ipcRenderer.invoke(IPC.moveCards, cardIds, deckId),
   resetProgress: (cardIds: string[]) => ipcRenderer.invoke(IPC.resetProgress, cardIds),
+  addCards: (deckId: string, items: { front: string; back: string }[]) =>
+    ipcRenderer.invoke(IPC.addCards, deckId, items),
+  updateCards: (items: { cardId: string; front: string; back: string }[]) =>
+    ipcRenderer.invoke(IPC.updateCards, items),
+  deleteCards: (cardIds: string[]) => ipcRenderer.invoke(IPC.deleteCards, cardIds),
+  getCards: (cardIds: string[]) => ipcRenderer.invoke(IPC.getCards, cardIds),
   previewIntervals: (cardId: string) => ipcRenderer.invoke(IPC.previewIntervals, cardId)
 }
 

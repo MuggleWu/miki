@@ -201,7 +201,7 @@ export function Browser() {
   const menuAction = async (act: 'delete' | 'reset' | 'move', targetDeckId?: string) => {
     if (!rowMenu) return
     const ids = rowMenu.ids
-    if (act === 'delete') for (const id of ids) await window.miki.deleteCard(id)
+    if (act === 'delete') await window.miki.deleteCards(ids)
     if (act === 'reset') await window.miki.resetProgress(ids)
     if (act === 'move' && targetDeckId) await window.miki.moveCards(ids, targetDeckId)
     setRowMenu(null)
