@@ -149,8 +149,11 @@ export interface StatsPayload {
   intervals: { bucket: string; count: number }[]
 }
 
+export type Theme = 'light' | 'dark'
+
 export interface MikiConfig {
   workspacePath: string
+  theme: Theme
   desiredRetention: number
   parameters: number[]
   learningStepsSec: number[]
@@ -164,6 +167,7 @@ export interface MikiConfig {
 }
 
 export const DEFAULT_CONFIG: Omit<MikiConfig, 'workspacePath'> = {
+  theme: 'light',
   desiredRetention: 0.9,
   parameters: [
     0.212, 1.2931, 2.3065, 8.2956, 6.4133, 0.8334, 3.0194, 0.001, 1.8722,

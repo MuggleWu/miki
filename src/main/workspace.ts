@@ -1,0 +1,398 @@
+// WorkspaceService：主进程唯一写入口（需求 NF1，技术栈 §2/§4）
+// 内存态 = 启动时从工作区文件重放；所有写路径：先落盘（原子写/追加），后更新内存。
+import * as fs from 'node:fs'
+import * as path from 'node:path'
+import { randomUUID } from 'node:crypto'
+import {
+  DEFAULT_CONFIG,
+  type Card,
+  type CardContent,
+  type Deck,
+  type DeckCounts,
+  type DeckInfo,
+  type MikiConfig,
+  type QueryParams,
+  type QueryResult,
+  type Rating,
+  type ReviewEvent,
+  type StatsParams,
+  type StudyPayload,
+  type UndoResult
+} from '../shared/types'
+import { FsrScheduler, DEFAULT_FSRS_PARAMS } from '../core/fsrs'
+import { deckCounts, pickNext, remainingCount } from '../core/queue'
+import { replayCard } from '../core/replay'
+import { compareByKeys, filterByKeywords, toRow } from '../core/query'
+import { computeStats, endOfLocalDay } from '../core/stats'
+
+const MONTH_MS = 31 * 86_400_000
+
+function atomicWrite(file: string, data: string): void {
+  const tmp = file + '.tmp'
+  fs.writeFileSync(tmp, data, 'utf-8')
+  fs.renameSync(tmp, file)
+}
+
+function readNdjson(file: string): string[] {
+  if (!fs.existsSync(file)) return []
+  return fs
+    .readFileSync(file, 'utf-8')
+    .split('\n')
+    .filter((l) => l.trim().length > 0)
+}
+
+export class WorkspaceService {
+  root!: string
+  config!: MikiConfig
+  decks: Deck[] = []
+  cards = new Map<string, Card>()
+  events: ReviewEvent[] = []
+  private seq = 0
+  private scheduler!: FsrScheduler
+  /** 会话 undo 栈（D2：不跨会话） */
+  private sessionOps: { seq: number; cardId: string }[] = []
+
+  // ---------- 路径 ----------
+
+  private decksFile(): string {
+    return path.join(this.root, 'decks.json')
+  }
+
+  private deckCardsFile(deckId: string): string {
+    return path.join(this.root, 'cards', `${deckId}.ndjson`)
+  }
+
+  private logFile(t: number): string {
+    const d = new Date(t)
+    const p = (n: number) => String(n).padStart(2, '0')
+    return path.join(this.root, 'review-log', `${d.getFullYear()}-${p(d.getMonth() + 1)}.ndjson`)
+  }
+
+  // ---------- 加载 ----------
+
+  init(root: string, overrides?: Partial<MikiConfig>): void {
+    this.root = root
+    fs.mkdirSync(path.join(this.root, 'cards'), { recursive: true })
+    fs.mkdirSync(path.join(this.root, 'review-log'), { recursive: true })
+    this.config = this.loadConfig(overrides)
+    this.scheduler = new FsrScheduler({
+      parameters: this.config.parameters,
+      desiredRetention: this.config.desiredRetention,
+      learningStepsSec: this.config.learningStepsSec,
+      relearningStepsSec: this.config.relearningStepsSec,
+      maximumInterval: this.config.maximumInterval,
+      enableFuzzing: this.config.enableFuzzing
+    })
+    this.loadDecks()
+    this.loadEvents()
+    this.replayAll()
+    this.ensureGitignore()
+  }
+
+  private loadConfig(overrides?: Partial<MikiConfig>): MikiConfig {
+    const file = path.join(this.root, 'config.json')
+    let stored: Partial<MikiConfig> = {}
+    if (fs.existsSync(file)) {
+      try {
+        stored = JSON.parse(fs.readFileSync(file, 'utf-8'))
+      } catch {
+        stored = {}
+      }
+    }
+    const config: MikiConfig = { ...DEFAULT_CONFIG, ...stored, ...overrides, workspacePath: this.root }
+    atomicWrite(file, JSON.stringify(config, null, 2))
+    return config
+  }
+
+  private loadDecks(): void {
+    if (fs.existsSync(this.decksFile())) {
+      try {
+        this.decks = JSON.parse(fs.readFileSync(this.decksFile(), 'utf-8'))
+        return
+      } catch {
+        // 损坏则重建为空
+      }
+    }
+    this.decks = []
+    this.saveDecks()
+  }
+
+  private saveDecks(): void {
+    atomicWrite(this.decksFile(), JSON.stringify(this.decks, null, 2))
+  }
+
+  /** 读全部 review-log（按月文件名序 + 行序），重编全局 seq */
+  private loadEvents(): void {
+    const dir = path.join(this.root, 'review-log')
+    const files = fs.existsSync(dir)
+      ? fs.readdirSync(dir).filter((f) => f.endsWith('.ndjson')).sort()
+      : []
+    this.events = []
+    this.seq = 0
+    for (const f of files) {
+      for (const line of readNdjson(path.join(dir, f))) {
+        try {
+          const ev = JSON.parse(line) as ReviewEvent
+          ev.seq = ++this.seq
+          this.events.push(ev)
+        } catch {
+          // 跳过损坏行
+        }
+      }
+    }
+  }
+
+  private replayAll(): void {
+    this.cards = new Map()
+    const byCard = new Map<string, ReviewEvent[]>()
+    for (const ev of this.events) {
+      const list = byCard.get(ev.cardId)
+      if (list) list.push(ev)
+      else byCard.set(ev.cardId, [ev])
+    }
+    for (const deck of this.decks) {
+      for (const line of readNdjson(this.deckCardsFile(deck.id))) {
+        let content: CardContent
+        try {
+          content = JSON.parse(line) as CardContent
+        } catch {
+          continue
+        }
+        this.cards.set(content.id, replayCard(content, deck.id, byCard.get(content.id) ?? []))
+      }
+    }
+  }
+
+  private ensureGitignore(): void {
+    const gitDir = path.join(this.root, '.git')
+    if (!fs.existsSync(gitDir)) return
+    const gi = path.join(this.root, '.gitignore')
+    const existing = fs.existsSync(gi) ? fs.readFileSync(gi, 'utf-8') : ''
+    if (!existing.split('\n').includes('.miki/')) {
+      fs.appendFileSync(gi, (existing.endsWith('\n') || existing === '' ? '' : '\n') + '.miki/\n')
+    }
+  }
+
+  // ---------- 只读视图 ----------
+
+  now(): number {
+    return Date.now()
+  }
+
+  endOfToday(): number {
+    return endOfLocalDay(Date.now())
+  }
+
+  deckInfos(): DeckInfo[] {
+    const now = Date.now()
+    const eot = this.endOfToday()
+    return this.decks
+      .filter((d) => !d.deletedAt)
+      .map((d) => {
+        const list: Card[] = []
+        for (const c of this.cards.values()) if (c.deckId === d.id) list.push(c)
+        return { ...d, counts: deckCounts(list, eot) }
+      })
+      .map((x) => ({ ...x, counts: sortCounts(x.counts, now) }))
+  }
+
+  todayCount(): number {
+    const start = new Date(); start.setHours(0, 0, 0, 0)
+    const undone = new Set(this.events.filter((e) => e.action === 'undo' && e.targetSeq != null).map((e) => e.targetSeq!))
+    return this.events.filter(
+      (e) => e.action === 'answer' && !undone.has(e.seq) && e.t >= start.getTime()
+    ).length
+  }
+
+  // ---------- 牌组 ----------
+
+  addDeck(name: string): Deck {
+    const deck: Deck = { id: randomUUID(), name, order: this.decks.length, createdAt: Date.now(), deletedAt: null }
+    this.decks.push(deck)
+    this.saveDecks()
+    return deck
+  }
+
+  renameDeck(id: string, name: string): Deck | null {
+    const deck = this.decks.find((d) => d.id === id && !d.deletedAt)
+    if (deck) {
+      deck.name = name
+      this.saveDecks()
+    }
+    return deck ?? null
+  }
+
+  deleteDeck(id: string): void {
+    const deck = this.decks.find((d) => d.id === id && !d.deletedAt)
+    if (deck) {
+      deck.deletedAt = Date.now()
+      this.saveDecks()
+    }
+  }
+
+  // ---------- 卡片 ----------
+
+  private saveDeckCards(deckId: string): void {
+    const lines: string[] = []
+    for (const c of this.cards.values()) {
+      if (c.deckId !== deckId) continue
+      const { deckId: _d, fsrs: _f, reps: _r, lapses: _l, ...content } = c
+      lines.push(JSON.stringify(content))
+    }
+    lines.sort()
+    atomicWrite(this.deckCardsFile(deckId), lines.length ? lines.join('\n') + '\n' : '')
+  }
+
+  addCard(deckId: string, front: string, back: string): Card {
+    const now = Date.now()
+    const content: CardContent = { id: randomUUID(), front, back, createdAt: now, updatedAt: now, deletedAt: null }
+    const card: Card = { ...content, deckId, fsrs: null, reps: 0, lapses: 0 }
+    this.cards.set(card.id, card)
+    this.saveDeckCards(deckId)
+    return card
+  }
+
+  updateCard(cardId: string, front: string, back: string): Card | null {
+    const card = this.cards.get(cardId)
+    if (!card) return null
+    card.front = front
+    card.back = back
+    card.updatedAt = Date.now()
+    this.saveDeckCards(card.deckId)
+    return card
+  }
+
+  private appendEvents(evs: ReviewEvent[]): void {
+    const byFile = new Map<string, string[]>()
+    for (const ev of evs) {
+      const f = this.logFile(ev.t)
+      const list = byFile.get(f) ?? []
+      list.push(JSON.stringify(ev))
+      byFile.set(f, list)
+    }
+    for (const [f, lines] of byFile) {
+      fs.mkdirSync(path.dirname(f), { recursive: true })
+      fs.appendFileSync(f, lines.join('\n') + '\n', 'utf-8')
+    }
+    this.events.push(...evs)
+  }
+
+  deleteCard(cardId: string): void {
+    const card = this.cards.get(cardId)
+    if (!card || card.deletedAt) return
+    const now = Date.now()
+    const ev: ReviewEvent = { seq: ++this.seq, t: now, action: 'delete', cardId, deckId: card.deckId, before: card.fsrs }
+    this.appendEvents([ev])
+    card.deletedAt = now
+    this.saveDeckCards(card.deckId)
+    this.sessionOps.push({ seq: ev.seq, cardId })
+  }
+
+  // ---------- 学习 ----------
+
+  private deckCards(deckId: string | null): Card[] {
+    const out: Card[] = []
+    const hidden = new Set(this.decks.filter((d) => d.deletedAt).map((d) => d.id))
+    for (const c of this.cards.values()) {
+      if (c.deletedAt || hidden.has(c.deckId)) continue
+      if (deckId != null && c.deckId !== deckId) continue
+      out.push(c)
+    }
+    return out
+  }
+
+  getStudy(deckId: string): StudyPayload {
+    const now = Date.now()
+    const list = this.deckCards(deckId)
+    return {
+      card: pickNext(list, now),
+      remaining: remainingCount(list, this.endOfToday()),
+      todayCount: this.todayCount()
+    }
+  }
+
+  answer(cardId: string, rating: Rating, durationMs?: number): StudyPayload & { answeredCardId: string } {
+    const card = this.cards.get(cardId)
+    if (!card || card.deletedAt) throw new Error(`card not found: ${cardId}`)
+    const now = Date.now()
+    const before = card.fsrs
+    const after = this.scheduler.review(before, rating, now)
+    const ev: ReviewEvent = { seq: ++this.seq, t: now, action: 'answer', cardId, deckId: card.deckId, rating, before, after, durationMs }
+    this.appendEvents([ev])
+    card.fsrs = after
+    card.reps++
+    if (rating === 1) card.lapses++
+    this.sessionOps.push({ seq: ev.seq, cardId })
+    return { answeredCardId: cardId, ...this.getStudy(card.deckId) }
+  }
+
+  undo(): UndoResult {
+    const op = this.sessionOps.pop()
+    if (!op) {
+      return { restoredCardId: null, card: null, remaining: 0, todayCount: this.todayCount() }
+    }
+    const target = this.events.find((e) => e.seq === op.seq)
+    if (!target) throw new Error(`session event missing: ${op.seq}`)
+    const card = this.cards.get(op.cardId)
+    if (!card) throw new Error(`card missing: ${op.cardId}`)
+    const now = Date.now()
+    const ev: ReviewEvent = {
+      seq: ++this.seq,
+      t: now,
+      action: 'undo',
+      cardId: card.id,
+      deckId: card.deckId,
+      targetSeq: target.seq,
+      before: target.before ?? null
+    }
+    this.appendEvents([ev])
+    // 内存恢复：answer 撤销 → 回到 before（新卡回 new）；delete 撤销 → 取消软删
+    card.fsrs = ev.before ? { ...ev.before } : target.action === 'answer' ? null : card.fsrs
+    if (target.action === 'delete') card.deletedAt = null
+    this.saveDeckCards(card.deckId)
+    const list = this.deckCards(card.deckId)
+    return {
+      restoredCardId: card.id,
+      card,
+      remaining: remainingCount(list, this.endOfToday()),
+      todayCount: this.todayCount()
+    }
+  }
+
+  // ---------- 卡片库 ----------
+
+  queryCards(params: QueryParams): QueryResult {
+    const nameById = new Map(this.decks.map((d) => [d.id, d.name]))
+    let list = this.deckCards(params.deckId)
+    list = filterByKeywords(list, params.keywords)
+    const deckNameOf = (c: Card) => nameById.get(c.deckId) ?? ''
+    list = [...list].sort((a, b) => compareByKeys(a, b, params.sort, deckNameOf))
+    return {
+      rows: list.slice(0, params.limit ?? 5000).map((c) => toRow(c, deckNameOf(c))),
+      total: list.length
+    }
+  }
+
+  getCard(cardId: string): Card | null {
+    return this.cards.get(cardId) ?? null
+  }
+
+  // ---------- 统计 ----------
+
+  getStats(params: StatsParams) {
+    return computeStats({
+      cards: [...this.cards.values()],
+      events: this.events,
+      deckId: params.deckId,
+      range: params.range,
+      now: Date.now()
+    })
+  }
+}
+
+function sortCounts(c: DeckCounts, _now: number): DeckCounts {
+  return c
+}
+
+// 抑制未使用告警（MONTH_MS 预留给日志切月策略）
+void MONTH_MS
