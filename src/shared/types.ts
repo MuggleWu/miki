@@ -23,7 +23,7 @@ export interface CardSnapshot {
 export interface ReviewEvent {
   seq: number
   t: number // ms epoch
-  action: 'answer' | 'delete' | 'undo' | 'reset'
+  action: 'answer' | 'delete' | 'undo' | 'reset' | 'suspend'
   cardId: string
   deckId: string
   rating?: Rating
@@ -33,6 +33,8 @@ export interface ReviewEvent {
   after?: CardSnapshot | null
   /** undo: 指向本会话被撤销事件的 seq */
   targetSeq?: number
+  /** suspend: 目标暂停状态（true 暂停 / false 解除） */
+  suspended?: boolean
   durationMs?: number
 }
 

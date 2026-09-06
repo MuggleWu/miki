@@ -392,11 +392,22 @@ export class WorkspaceService {
     return card
   }
 
+  /** 暂停/解除：追加 suspend 事件（不可撤销，不入会话撤销栈），不重写卡片文件 */
   setCardSuspended(cardId: string, suspended: boolean): Card | null {
     const card = this.cards.get(cardId)
     if (!card) return null
-    card.suspended = suspended
-    this.saveDeckCards(card.deckId)
+    if (card.suspended !== suspended) {
+      const ev: ReviewEvent = {
+        seq: ++this.seq,
+        t: Date.now(),
+        action: 'suspend',
+        cardId: card.id,
+        deckId: card.deckId,
+        suspended
+      }
+      this.appendEvents([ev])
+      card.suspended = suspended
+    }
     return card
   }
 
@@ -504,15 +515,16 @@ export class WorkspaceService {
     const before = card.fsrs
     const after = this.scheduler.review(before, rating, now)
     const ev: ReviewEvent = { seq: ++this.seq, t: now, action: 'answer', cardId, deckId: card.deckId, rating, before, after, durationMs }
-    this.appendEvents([ev])
+    const evs: ReviewEvent[] = [ev]
     card.fsrs = after
     card.reps++
     if (rating === 1) card.lapses++
-    // leech：累计重来次数达到阈值（>0 时启用）自动暂停，不再进入调度
+    // leech：累计重来次数达到阈值（>0 时启用）自动暂停，不再进入调度；同样走 suspend 事件
     if (this.config.leechThreshold > 0 && !card.suspended && card.lapses >= this.config.leechThreshold) {
       card.suspended = true
-      this.saveDeckCards(card.deckId)
+      evs.push({ seq: ++this.seq, t: now, action: 'suspend', cardId: card.id, deckId: card.deckId, suspended: true })
     }
+    this.appendEvents(evs)
     this.sessionOps.push({ seq: ev.seq, cardId })
     return { answeredCardId: cardId, ...this.getStudy(card.deckId) }
   }

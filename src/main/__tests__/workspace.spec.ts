@@ -168,6 +168,60 @@ describe('重放一致性（重启恢复）', () => {
   })
 })
 
+describe('suspend 事件化（暂停/解除走 review-log）', () => {
+  it('暂停与解除重启后一致；同状态重复设置不产生新事件', () => {
+    const d = tmpKept()
+    const w = newWs(d)
+    const deck = w.addDeck('suspend 事件').id
+    const c = w.addCard(deck, 'suspend 卡', '')
+    w.setCardSuspended(c.id, true)
+    w.setCardSuspended(c.id, false)
+    w.setCardSuspended(c.id, true)
+    expect(w.getCard(c.id)!.suspended).toBe(true)
+    const w2 = newWs(d)
+    expect(w2.getCard(c.id)!.suspended).toBe(true)
+    const evsBefore = w2.events.length
+    w2.setCardSuspended(c.id, true)
+    expect(w2.events.length).toBe(evsBefore)
+  })
+
+  it('leech 自动暂停走 suspend 事件，重启后保持暂停且不进队列', () => {
+    const d = tmpKept()
+    const w = newWs(d)
+    const deck = w.addDeck('leech 事件').id
+    w.saveConfig({ leechThreshold: 2 })
+    const c = w.addCard(deck, 'leech 事件卡', '')
+    w.answer(c.id, 3)
+    w.answer(c.id, 1)
+    w.answer(c.id, 1)
+    expect(w.getCard(c.id)!.suspended).toBe(true)
+    const w2 = newWs(d)
+    expect(w2.getCard(c.id)!.suspended).toBe(true)
+    expect(w2.getStudy(deck).card?.id).not.toBe(c.id)
+  })
+
+  it('reset 解除暂停：内存与重放一致', () => {
+    const d = tmpKept()
+    const w = newWs(d)
+    const deck = w.addDeck('reset suspend').id
+    const c = w.addCard(deck, 'reset suspend 卡', '')
+    w.setCardSuspended(c.id, true)
+    w.resetProgress([c.id])
+    expect(w.getCard(c.id)!.suspended).toBe(false)
+    expect(newWs(d).getCard(c.id)!.suspended).toBe(false)
+  })
+
+  it('suspend 不可撤销（不入会话撤销栈）', () => {
+    const d = tmpKept()
+    const w = newWs(d)
+    const deck = w.addDeck('suspend undo').id
+    const c = w.addCard(deck, 'suspend undo 卡', '')
+    w.setCardSuspended(c.id, true)
+    expect(w.undo().restoredCardId).toBeNull()
+    expect(w.getCard(c.id)!.suspended).toBe(true)
+  })
+})
+
 describe('损坏容错', () => {
   it('事件日志坏行跳过，好事件仍生效', () => {
     const d = tmpKept()
