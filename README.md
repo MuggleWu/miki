@@ -6,12 +6,18 @@ A local-first spaced repetition app — an Anki alternative with FSRS-6 scheduli
 
 本地优先的记忆卡片应用（Anki 替代品）：FSRS-6 调度、事件溯源复习日志、纯文件工作区。
 
+## Why Miki
+
+Anki is a truly fine piece of software that has helped many people, and FSRS is a genuinely great algorithm for keeping due dates under control. But as an individual, what I want is the minimal feature set that fits me — not everything. So I tailored and trimmed a version of my own, and that is Miki.
+
+It is a very small open-source project. Perhaps by the time I grow old, no one in this world will ever have found it. But it exists — and it is proof that we were here.
+
 ## Features
 
-- **FSRS-6 scheduling** — ported from py-fsrs v6.3.2, verified against 44 generated conformance vectors; every rating button previews the next due date before you commit
+- **FSRS-6 scheduling** — ported from py-fsrs v6.3.2, verified against 550+ generated conformance vectors; every rating button previews the next due date before you commit
 - **Five views** — decks (table sorted by name), study, card browser, stats (forecast / heatmap / reviews / card states / intervals), and settings
 - **Leech handling** — a card that reaches the lapse threshold is auto-suspended: it leaves the queue and all counts, shows as ⏸ in the browser, and can be unsuspended with one click
-- **Card browser** — multi-keyword AND search, configurable columns with drag-resizable widths and rotate sort, resizable side/panel dividers, inline editor with live Markdown preview; due shown in two columns — relative ("5 分钟后") and absolute ("2026-09-06 16:49")
+- **Card browser** — multi-keyword AND search, configurable columns with drag-resizable widths and rotate sort, resizable side/panel dividers, inline editor with live Markdown preview, and virtual scrolling that stays smooth with tens of thousands of cards; due shown in two columns — relative ("5 分钟后") and absolute ("2026-09-06 16:49")
 - **Study fonts** — configurable typeface and size for the card face, with a live sample in Settings; defaults follow the system font at 16px, matching Obsidian
 - **Rich card content** — Markdown + KaTeX + syntax highlighting
 - **Event-sourced review log** — append-only NDJSON; undo works by compensating events with self-contained snapshots
@@ -52,7 +58,7 @@ Runs on macOS, Windows and Linux (standard Electron window, no platform-specific
 
 ## HTTP API & MCP
 
-Miki ships a local HTTP API for humans and AI agents to manage decks and cards programmatically (CRUD, including batch operations). It listens on `127.0.0.1:8727` only, requires a bearer token, and rejects browser-originated cross-site requests. See [API.md](API.md).
+Miki ships a local HTTP API for humans and AI agents to manage decks and cards programmatically (CRUD, including batch operations). It listens on `127.0.0.1:8727` only, requires a bearer token, and rejects browser-originated cross-site requests. See [docs/api.md](docs/api.md).
 
 For MCP clients, a thin stdio wrapper is included:
 
@@ -61,6 +67,15 @@ MIKI_TOKEN=<token from config.json> node scripts/mcp-server.mjs
 ```
 
 It exposes tools such as `list_decks`, `add_cards`, `search_cards`, `update_cards`, `move_cards`, `delete_cards`, `reset_progress` and `get_stats`.
+
+## Documentation
+
+More docs (in Chinese) live in [docs/](docs/):
+
+- [使用手册](docs/usage.md) — views, interactions and the full shortcut list
+- [工作区数据格式](docs/data-format.md) — file layouts, event schema and replay rules
+- [HTTP API](docs/api.md) — endpoints, auth and safety boundaries
+- [开发指南](docs/development.md) — project structure, tests and the FSRS vector harness
 
 ## Workspace format
 
@@ -73,7 +88,15 @@ cards/<deck-id>.ndjson          # card content, one JSON object per line (includ
 review-log/<yyyy-mm>.ndjson     # append-only review events (answer / delete / undo / reset)
 ```
 
-`review-log` is the source of truth for scheduling; card states are rebuilt by replaying events.
+`review-log` is the source of truth for scheduling; card states are rebuilt by replaying events. See [docs/data-format.md](docs/data-format.md) for the full schema.
+
+## Acknowledgements
+
+This work is dedicated to my wife, Meihua.
+
+- [Anki](https://apps.ankiweb.net/) — the gold standard that made spaced repetition mainstream, and the reason Miki exists
+- [FSRS](https://github.com/open-spaced-repetition/fsrs4anki) and [py-fsrs](https://github.com/open-spaced-repetition/py-fsrs) — the open-source scheduling algorithm and its reference implementation, from which Miki's scheduler is ported and verified
+- The open-source stack Miki stands on: Electron, React, Vite, ECharts, markdown-it, KaTeX, highlight.js
 
 ## License
 

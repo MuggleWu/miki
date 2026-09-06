@@ -6,12 +6,18 @@
 
 A local-first spaced repetition app — an Anki alternative with FSRS-6 scheduling, built with Electron + React.
 
+## 为什么做 Miki
+
+Anki 是非常优秀的软件，帮助了很多人；FSRS 算法同样非常优秀，能把到期安排控制得很好。但作为个人，我想要的只是满足自己的最小功能集，而不是全部的功能。于是我定制、裁剪出一份自己的版本，这就是 Miki。
+
+它是一个很小的开源项目，可能直到我老去，在这个世界上也不会被人发现。但它存在过——它可以说明我们存在。
+
 ## 功能特性
 
 - **FSRS-6 调度** — 移植自 py-fsrs v6.3.2，经 550+ 组基准向量比对验证（官方 Python 实现生成期望输出，TS 实现逐例比对）；评级前每个按钮都会预览按下后的下次到期日期
 - **五个视图** — 牌组（按名称排序的表格）、学习、卡片库、统计（预测 / 热力图 / 复习 / 卡片状态 / 复习间隔）、设置
 - **Leech 处理** — 累计「重来」次数达到阈值的卡片自动暂停：移出学习队列与全部计数、在卡片库显示 ⏸，可一键解除
-- **卡片库** — 多关键词 AND 搜索、列可配置、可拖宽、rotate 排序，侧栏与面板分隔条可拖动，内嵌编辑器实时 Markdown 预览；到期以两列呈现——「距现在」（相对，如“5 分钟后”）与「到期时间」（绝对，如“2026-09-06 16:49”）
+- **卡片库** — 多关键词 AND 搜索、列可配置、可拖宽、rotate 排序，侧栏与面板分隔条可拖动，内嵌编辑器实时 Markdown 预览，虚拟滚动支撑万级卡片流畅浏览；到期以两列呈现——「距现在」（相对，如“5 分钟后”）与「到期时间」（绝对，如“2026-09-06 16:49”）
 - **刷卡字体** — 卡面字体与字号可配置，设置页带实时示例；默认跟随系统字体、16px，与 Obsidian 一致
 - **富卡片内容** — Markdown + KaTeX + 代码高亮
 - **事件溯源复习日志** — 只追加的 NDJSON；撤销通过自带快照的补偿事件实现
@@ -52,7 +58,7 @@ npm start          # 运行构建产物
 
 ## HTTP API 与 MCP
 
-Miki 内置本机 HTTP API，供人和 AI 程序化管理牌组与卡片（增删改查，含批量）。只监听 `127.0.0.1:8727`，必须携带 token，拒绝浏览器发起的跨站请求。详见 [API.md](API.md)。
+Miki 内置本机 HTTP API，供人和 AI 程序化管理牌组与卡片（增删改查，含批量）。只监听 `127.0.0.1:8727`，必须携带 token，拒绝浏览器发起的跨站请求。详见 [docs/api.md](docs/api.md)。
 
 MCP 客户端可用附带的 stdio 薄壳接入：
 
@@ -61,6 +67,15 @@ MIKI_TOKEN=<config.json 中的 api.token> node scripts/mcp-server.mjs
 ```
 
 提供 `list_decks`、`add_cards`、`search_cards`、`update_cards`、`move_cards`、`delete_cards`、`reset_progress`、`get_stats` 等工具。
+
+## 文档
+
+更多文档在 [docs/](docs/)：
+
+- [使用手册](docs/usage.md) — 五视图操作、鼠标交互与快捷键总表
+- [工作区数据格式](docs/data-format.md) — 目录结构、事件协议与重放规则
+- [HTTP API](docs/api.md) — 端点、认证与安全边界
+- [开发指南](docs/development.md) — 项目结构、测试组织与 FSRS 基准向量
 
 ## 工作区格式
 
@@ -73,7 +88,15 @@ cards/<deck-id>.ndjson          # 卡片内容，每行一个 JSON 对象（含 
 review-log/<yyyy-mm>.ndjson     # 只追加的复习事件（answer / delete / undo / reset）
 ```
 
-`review-log` 是调度状态的唯一真理来源；卡片状态通过重放事件重建。
+`review-log` 是调度状态的唯一真理来源；卡片状态通过重放事件重建。完整字段与事件协议见 [docs/data-format.md](docs/data-format.md)。
+
+## 致谢
+
+谨以此作品，献给我的妻子 meihua 女士。
+
+- [Anki](https://apps.ankiweb.net/) — 让间隔重复成为大众工具的黄金标准，也是 Miki 存在的原因
+- [FSRS](https://github.com/open-spaced-repetition/fsrs4anki) 与 [py-fsrs](https://github.com/open-spaced-repetition/py-fsrs) — 开源调度算法及其参考实现，Miki 的调度器移植自它并经基准向量比对验证
+- Miki 所站立的开源肩膀：Electron、React、Vite、ECharts、markdown-it、KaTeX、highlight.js
 
 ## 许可证
 
