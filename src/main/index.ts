@@ -27,7 +27,7 @@ function createWindow(): void {
     height: 840,
     minWidth: 960,
     minHeight: 600,
-    title: 'miki',
+    title: 'Miki',
     // 与主题一致的启动底色，避免加载闪烁
     backgroundColor: ws.config.theme === 'dark' ? '#101014' : '#f5f6f8',
     webPreferences: {
