@@ -36,8 +36,11 @@ interface AppStore {
   /** 首页三个数字列宽（未学习/学习中/待复习） */
   homeColWidths: number[]
   dialog: DialogState | null
+  /** 卡片内容版本号：编辑弹窗确认后 +1，学习页据此就地重取当前卡（phase 不复位） */
+  contentEpoch: number
   setTab: (t: Tab) => void
   reload: () => Promise<void>
+  bumpContent: () => void
   setSelectedDeck: (id: string | null) => void
   enterStudy: (deckId: string) => void
   /** deckId 缺省 = 保持当前选择；null = 显式选「全部牌组」 */
@@ -72,8 +75,11 @@ export const useApp = create<AppStore>((set) => ({
   browserColWidths: {},
   homeColWidths: [110, 110, 110],
   dialog: null,
+  contentEpoch: 0,
 
   setTab: (t) => set({ tab: t }),
+
+  bumpContent: () => set((s) => ({ contentEpoch: s.contentEpoch + 1 })),
 
   reload: async () => {
     const { decks, todayCount, totalCount, config } = await window.miki.loadWorkspace()

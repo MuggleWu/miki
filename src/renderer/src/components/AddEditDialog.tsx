@@ -9,6 +9,7 @@ export function AddEditDialog() {
   const decks = useApp((s) => s.decks)
   const closeDialog = useApp((s) => s.closeDialog)
   const reload = useApp((s) => s.reload)
+  const bumpContent = useApp((s) => s.bumpContent)
 
   const [deckId, setDeckId] = useState('')
   const [front, setFront] = useState('')
@@ -46,6 +47,7 @@ export function AddEditDialog() {
       frontRef.current?.focus()
     } else if (dialog.cardId) {
       await window.miki.updateCard(dialog.cardId, front, back)
+      bumpContent() // 学习页当前卡就地重取内容（同卡保留提问/答案相位）
       closeDialog()
     }
     await reload()

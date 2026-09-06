@@ -18,6 +18,7 @@ export function Study() {
   const studyDeckId = useApp((s) => s.studyDeckId)
   const decks = useApp((s) => s.decks)
   const config = useApp((s) => s.config)
+  const contentEpoch = useApp((s) => s.contentEpoch)
   const openBrowser = useApp((s) => s.openBrowser)
   const openDialog = useApp((s) => s.openDialog)
   const setStudyCurrentCardId = useApp((s) => s.setStudyCurrentCardId)
@@ -26,24 +27,29 @@ export function Study() {
   const [phase, setPhase] = useState<'question' | 'answer'>('question')
   const [previewDue, setPreviewDue] = useState<number[]>([])
   const questionShownAt = useRef<number>(Date.now())
+  // 最近一次装载进界面的卡（编辑弹窗确认后的重取用它判断「同卡」→ 保留当前相位）
+  const loadedCardIdRef = useRef<string | null>(null)
 
   const deck = decks.find((d) => d.id === studyDeckId)
   const font = config?.study
 
   const refresh = useCallback(
-    async (id: string) => {
+    async (id: string, keepPhase = false) => {
+      const prevId = loadedCardIdRef.current
       const p = await window.miki.getStudy(id)
+      if (!(keepPhase && p.card && p.card.id === prevId)) setPhase('question')
       setPayload(p)
-      setPhase('question')
+      loadedCardIdRef.current = p.card?.id ?? null
       questionShownAt.current = Date.now()
       setStudyCurrentCardId(p.card?.id ?? null)
     },
     [setStudyCurrentCardId]
   )
 
+  // 进入/换牌组重取；contentEpoch 变化（编辑当前卡确认后）也重取，同卡不清答题相位
   useEffect(() => {
-    if (studyDeckId) void refresh(studyDeckId)
-  }, [studyDeckId, refresh])
+    if (studyDeckId) void refresh(studyDeckId, true)
+  }, [studyDeckId, refresh, contentEpoch])
 
   // 评级按钮的下次到期预览（不落盘）
   useEffect(() => {
@@ -59,6 +65,7 @@ export function Study() {
       const durationMs = Date.now() - questionShownAt.current
       const p = await window.miki.answer(payload.card.id, rating, durationMs)
       setPayload(p)
+      loadedCardIdRef.current = p.card?.id ?? null
       setPhase('question')
       questionShownAt.current = Date.now()
       setStudyCurrentCardId(p.card?.id ?? null)
@@ -83,6 +90,7 @@ export function Study() {
     if (r.restoredCardId && r.card) {
       // 回到被恢复卡的提问态（需求 §7）
       setPayload({ card: r.card, remaining: r.remaining, todayCount: r.todayCount })
+      loadedCardIdRef.current = r.card.id
       setPhase('question')
       questionShownAt.current = Date.now()
       setStudyCurrentCardId(r.card.id)
