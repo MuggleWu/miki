@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain } from 'electron'
 import * as path from 'node:path'
 import * as fs from 'node:fs'
 import { WorkspaceService } from './workspace'
+import { startApiServer } from './api-server'
 import { IPC } from '../shared/ipc'
 import type { MikiConfig, QueryParams, Rating, SortKey, StatsParams } from '../shared/types'
 
@@ -98,9 +99,21 @@ app.whenReady().then(() => {
   )
   ipcMain.handle(IPC.moveCards, (_e, cardIds: string[], deckId: string) => ws.moveCards(cardIds, deckId))
   ipcMain.handle(IPC.resetProgress, (_e, cardIds: string[]) => ws.resetProgress(cardIds))
+  ipcMain.handle(IPC.addCards, (_e, deckId: string, items: { front: string; back: string }[]) =>
+    ws.addCards(deckId, items)
+  )
+  ipcMain.handle(IPC.updateCards, (_e, items: { cardId: string; front: string; back: string }[]) =>
+    ws.updateCards(items)
+  )
+  ipcMain.handle(IPC.deleteCards, (_e, cardIds: string[]) => ws.deleteCards(cardIds))
+  ipcMain.handle(IPC.getCards, (_e, cardIds: string[]) => ws.getCards(cardIds))
   ipcMain.handle(IPC.previewIntervals, (_e, cardId: string) => ws.previewIntervals(cardId))
 
   createWindow()
+
+  // 本机 HTTP API（面向人与 AI 的程序化接口），安全边界见 api-server.ts 与 API.md
+  const apiServer = startApiServer(ws)
+  app.on('will-quit', () => apiServer?.close())
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
