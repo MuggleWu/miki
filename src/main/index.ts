@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import * as path from 'node:path'
 import * as fs from 'node:fs'
 import { WorkspaceService } from './workspace'
@@ -35,8 +35,19 @@ function createWindow(): void {
       preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false
+      sandbox: true
     }
+  })
+  // 外部内容一律交系统浏览器：窗口只加载本应用页面，防止外部网页拿到 preload 注入的 IPC 面
+  win.webContents.on('will-navigate', (e, url) => {
+    const devUrl = process.env.ELECTRON_RENDERER_URL
+    if (url.startsWith('file:') || (devUrl && url.startsWith(devUrl))) return
+    e.preventDefault()
+    void shell.openExternal(url)
+  })
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    void shell.openExternal(url)
+    return { action: 'deny' }
   })
   if (process.env.ELECTRON_RENDERER_URL) {
     win.loadURL(process.env.ELECTRON_RENDERER_URL)
@@ -86,12 +97,13 @@ app.whenReady().then(() => {
     ws.config.browser.columns = columns as MikiConfig['browser']['columns']
     ws.config.browser.sort = sort
     const file = path.join(ws.root, 'config.json')
-    fs.writeFileSync(file, JSON.stringify(ws.config, null, 2), 'utf-8')
+    // config.json 含 API token，仅限当前用户
+    fs.writeFileSync(file, JSON.stringify(ws.config, null, 2), { encoding: 'utf-8', mode: 0o600 })
   })
   ipcMain.handle(IPC.saveTheme, (_e, theme: 'light' | 'dark') => {
     ws.config.theme = theme
     const file = path.join(ws.root, 'config.json')
-    fs.writeFileSync(file, JSON.stringify(ws.config, null, 2), 'utf-8')
+    fs.writeFileSync(file, JSON.stringify(ws.config, null, 2), { encoding: 'utf-8', mode: 0o600 })
   })
   ipcMain.handle(IPC.saveConfig, (_e, patch: Partial<MikiConfig>) => ws.saveConfig(patch))
   ipcMain.handle(IPC.setCardSuspended, (_e, cardId: string, suspended: boolean) =>

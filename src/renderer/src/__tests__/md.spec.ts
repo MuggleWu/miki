@@ -37,4 +37,29 @@ describe('renderMd', () => {
   it('空串安全', () => {
     expect(renderMd('')).toBe('')
   })
+
+  it('链接带 target=_blank 与 rel=noopener noreferrer', () => {
+    const html = renderMd('[站点](https://example.com)')
+    expect(html).toContain('href="https://example.com"')
+    expect(html).toContain('target="_blank"')
+    expect(html).toContain('rel="noopener noreferrer"')
+  })
+
+  it('自动链接（linkify）同样带安全属性', () => {
+    const html = renderMd('访问 https://example.com 看看')
+    expect(html).toContain('target="_blank"')
+    expect(html).toContain('rel="noopener noreferrer"')
+  })
+
+  it('原始 HTML 不渲染（html:false），脚本被转义', () => {
+    const html = renderMd('<script>alert(1)</script> 与 <img src=x onerror=alert(1)>')
+    expect(html).not.toContain('<script>')
+    expect(html).not.toContain('<img src=x')
+    expect(html).toContain('&lt;script&gt;')
+  })
+
+  it('javascript: 协议链接被 markdown-it 拒绝', () => {
+    const html = renderMd('[点我](javascript:alert(1))')
+    expect(html).not.toContain('href="javascript:')
+  })
 })

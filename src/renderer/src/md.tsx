@@ -20,6 +20,16 @@ const md: MarkdownIt = MarkdownIt({
   }
 })
 
+// 链接一律新开（主进程会把外链转交系统浏览器），并断开 opener
+const defaultLinkOpen =
+  md.renderer.rules.link_open ??
+  ((tokens, idx, options, _env, self) => self.renderToken(tokens, idx, options))
+md.renderer.rules.link_open = (tokens, idx, options, env, self) => {
+  tokens[idx].attrSet('target', '_blank')
+  tokens[idx].attrSet('rel', 'noopener noreferrer')
+  return defaultLinkOpen(tokens, idx, options, env, self)
+}
+
 const BLOCK_MATH = /\$\$([\s\S]+?)\$\$/g
 const INLINE_MATH = /\$([^$\n]+?)\$/g
 

@@ -30,7 +30,7 @@ const MONTH_MS = 31 * 86_400_000
 
 function atomicWrite(file: string, data: string): void {
   const tmp = file + '.tmp'
-  fs.writeFileSync(tmp, data, 'utf-8')
+  fs.writeFileSync(tmp, data, { encoding: 'utf-8', mode: 0o600 })
   fs.renameSync(tmp, file)
 }
 
@@ -110,6 +110,12 @@ export class WorkspaceService {
     // HTTP API 鉴权 token：首次启动生成一次，长期使用
     if (!config.api.token) config.api.token = randomUUID()
     atomicWrite(file, JSON.stringify(config, null, 2))
+    // 老版本可能以默认 0644 落盘过（含 token），收敛到仅当前用户可读写
+    try {
+      fs.chmodSync(file, 0o600)
+    } catch {
+      // 平台不支持则跳过
+    }
     return config
   }
 
