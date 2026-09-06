@@ -458,7 +458,7 @@ export function Browser() {
               <button onClick={() => setRowMenu({ ...rowMenu, mode: 'move' })}>
                 修改所属牌组{rowMenu.ids.length > 1 ? `（${rowMenu.ids.length} 张）` : ''}
               </button>
-              {rowMenu.ids.length === 1 && <button onClick={() => void menuAction('reset')}>重置进度</button>}
+              <button onClick={() => void menuAction('reset')}>重置进度{rowMenu.ids.length > 1 ? `（${rowMenu.ids.length} 张）` : ''}</button>
               <button className="danger" onClick={() => void menuAction('delete')}>
                 删除{rowMenu.ids.length > 1 ? `（${rowMenu.ids.length} 张）` : ''}
               </button>
