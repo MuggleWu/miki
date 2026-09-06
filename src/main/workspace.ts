@@ -7,6 +7,7 @@ import {
   DEFAULT_CONFIG,
   type Card,
   type CardContent,
+  type CardSnapshot,
   type Deck,
   type DeckCounts,
   type DeckInfo,
@@ -50,6 +51,15 @@ function atomicWrite(file: string, data: string): void {
   fs.renameSync(tmp, file)
 }
 
+/** 压实后的卡片行 = 内容 + 调度检查点快照；旧格式行无 fsrs/reps/lapses 字段（视为零值 + 全量重放）。
+ * __mikiSeq：该行调度快照已反映到的事件水位；缺省时回落到基文件 meta 的 __mikiCheckpoint */
+interface CardCheckpointRow extends CardContent {
+  fsrs?: CardSnapshot | null
+  reps?: number
+  lapses?: number
+  __mikiSeq?: number
+}
+
 function readNdjson(file: string): string[] {
   if (!fs.existsSync(file)) return []
   return fs
@@ -73,12 +83,18 @@ export class WorkspaceService {
   private sessionOps: { seq: number; cardId: string }[] = []
   /** 热力图聚合（undo 已抵消）：deckId → 日期键 → 计数 */
   private dailyAgg: DailyAgg = new Map()
+  /** 聚合检查点 seq（stats.json 已含该 seq 及之前的贡献） */
+  private statsCheckpoint = 0
   /** 今日已答净计数（answer ++ / undo 抵消 -- / 跨天清零） */
   private todayAnswers = 0
   /** 牌组调度索引（deckId → 堆 + 计数器），跨天/启动全量重建，其余增量维护 */
   private idx = new Map<string, DeckIndex>()
   private indexDayKey = ''
   private orderCounter = 0
+  /** 各牌组基文件检查点 seq（该 seq 及之前的事件已反映在快照行里） */
+  private deckCheckpoints = new Map<string, number>()
+  /** 各牌组 delta 行数（压实阈值触发） */
+  private deltaCounts = new Map<string, number>()
 
   // ---------- 路径 ----------
 
@@ -88,6 +104,14 @@ export class WorkspaceService {
 
   private deckCardsFile(deckId: string): string {
     return path.join(this.root, 'cards', `${deckId}.ndjson`)
+  }
+
+  private deckDeltaFile(deckId: string): string {
+    return path.join(this.root, 'cards', `${deckId}.delta.ndjson`)
+  }
+
+  private statsFile(): string {
+    return path.join(this.root, 'stats.json')
   }
 
   private logFile(t: number): string {
@@ -106,7 +130,8 @@ export class WorkspaceService {
     this.scheduler = this.buildScheduler(this.config)
     this.previewScheduler = this.buildScheduler(this.config, true)
     this.loadDecks()
-    this.loadCards()
+    this.loadStatsCheckpoint()
+    this.loadCardsWithCheckpoint()
     this.streamEvents()
     this.ensureDay()
     this.ensureGitignore()
@@ -194,25 +219,109 @@ export class WorkspaceService {
     atomicWrite(this.decksFile(), JSON.stringify(this.decks, null, 2))
   }
 
-  /** 读全部卡片内容基态（重放前 fsrs/reps/lapses 为零值，由事件流填充） */
-  private loadCards(): void {
+  /** 读统计聚合检查点（stats.json）；缺失/损坏 → 从头聚合（多读一遍事件，语义无损） */
+  private loadStatsCheckpoint(): void {
+    this.dailyAgg = new Map()
+    this.statsCheckpoint = 0
+    this.todayAnswers = 0
+    const file = this.statsFile()
+    if (!fs.existsSync(file)) return
+    try {
+      const raw = JSON.parse(fs.readFileSync(file, 'utf-8')) as {
+        checkpointSeq?: number
+        dailyAgg?: [string, [string, { total: number; again: number }][]][]
+      }
+    this.statsCheckpoint = Number(raw.checkpointSeq) || 0
+    for (const [deckId, days] of raw.dailyAgg ?? []) {
+      this.dailyAgg.set(deckId, new Map(days))
+    }
+    // 今日净计数直接从聚合恢复（跨天由 ensureDay 清零）
+    const tk = localDateKey(Date.now())
+    let n = 0
+    for (const m of this.dailyAgg.values()) n += m.get(tk)?.total ?? 0
+    this.todayAnswers = n
+  } catch {
+      this.dailyAgg = new Map()
+      this.statsCheckpoint = 0
+    }
+  }
+
+  /** 读全部卡片：基文件（含检查点快照行）→ delta 覆盖/墓碑（行序=时序）→ 卡片内存态。
+   * 每行跟踪 seq 水位：快照行自带 __mikiSeq，内容行继承基行水位，重放时按卡跳过水位前事件 */
+  private loadCardsWithCheckpoint(): void {
     this.cards = new Map()
+    this.deckCheckpoints = new Map()
     for (const deck of this.decks) {
+      const rows = new Map<string, { row: CardCheckpointRow; seq: number }>()
+      let cp = 0
       for (const line of readNdjson(this.deckCardsFile(deck.id))) {
-        let content: CardContent
+        let row: CardCheckpointRow
         try {
-          content = JSON.parse(line) as CardContent
+          row = JSON.parse(line) as CardCheckpointRow
         } catch {
           continue
         }
-        this.cards.set(content.id, { ...content, deckId: deck.id, fsrs: null, reps: 0, lapses: 0 })
+        if (row && typeof row === 'object' && '__mikiCheckpoint' in row) {
+          cp = Number((row as { __mikiCheckpoint?: number }).__mikiCheckpoint) || 0
+          continue
+        }
+        if (row && typeof row.id === 'string') rows.set(row.id, { row, seq: row.__mikiSeq ?? cp })
+      }
+      for (const line of readNdjson(this.deckDeltaFile(deck.id))) {
+        let row: (CardCheckpointRow & { __mikiTombstone?: boolean }) | null
+        try {
+          row = JSON.parse(line) as CardCheckpointRow & { __mikiTombstone?: boolean }
+        } catch {
+          continue
+        }
+        if (!row || typeof row.id !== 'string') continue
+        if (row.__mikiTombstone) {
+          rows.delete(row.id)
+          continue
+        }
+        // move 快照行自带水位；内容变更行只承载内容，继承基行的调度快照与水位
+        const prev = rows.get(row.id)
+        let seq: number
+        if (row.__mikiSeq !== undefined) {
+          seq = row.__mikiSeq
+        } else if (prev) {
+          if (row.fsrs === undefined) row.fsrs = prev.row.fsrs
+          if (row.reps === undefined) row.reps = prev.row.reps
+          if (row.lapses === undefined) row.lapses = prev.row.lapses
+          seq = prev.seq
+        } else {
+          seq = cp
+        }
+        rows.set(row.id, { row, seq })
+      }
+      this.deckCheckpoints.set(deck.id, cp)
+      for (const { row, seq } of rows.values()) {
+        const content: CardContent = {
+          id: row.id,
+          front: row.front,
+          back: row.back,
+          createdAt: row.createdAt,
+          updatedAt: row.updatedAt,
+          deletedAt: row.deletedAt ?? null,
+          suspended: !!row.suspended
+        }
+        this.cards.set(row.id, {
+          ...content,
+          deckId: deck.id,
+          fsrs: row.fsrs ? { ...row.fsrs } : null,
+          reps: row.reps ?? 0,
+          lapses: row.lapses ?? 0,
+          seqApplied: seq
+        })
       }
     }
   }
 
   /**
-   * 流式重放 review-log（需求 §19 L1）：逐事件应用到卡 + 热力图聚合 + 今日净计数，
-   * 历史事件不驻留内存——undo 抵消目标靠最近事件窗口（undo 与 target 同会话，距离有限）；
+   * 流式重放 review-log（需求 §19 L1）：一次顺序读，双水位消费——
+   * seq > 牌组检查点 → 应用到卡（检查点快照行已含之前效果）；
+   * seq > 聚合检查点 → 计入热力图聚合与今日净计数。
+   * 历史事件不驻留内存：undo 抵消目标靠最近事件窗口（undo 与 target 同会话，距离有限）；
    * 新版 undo 事件自带 targetAction/targetRating，窗口只是旧库兼容兜底。
    */
   private streamEvents(): void {
@@ -222,9 +331,7 @@ export class WorkspaceService {
       : []
     this.events = []
     this.seq = 0
-    this.dailyAgg = new Map()
-    this.todayAnswers = 0
-    const todayStart = this.todayStartMs()
+    const todayKey = localDateKey(Date.now())
     const win = new Map<number, { action: ReviewEvent['action']; rating?: Rating; t: number; deckId: string }>()
     for (const f of files) {
       for (const line of readNdjson(path.join(dir, f))) {
@@ -238,20 +345,23 @@ export class WorkspaceService {
         const card = this.cards.get(ev.cardId)
         const wEntry =
           ev.action === 'undo' && ev.targetSeq != null ? win.get(ev.targetSeq) ?? null : null
-        if (card) {
+        if (card && ev.seq > (card.seqApplied ?? 0)) {
           const tgt = wEntry
             ? { action: wEntry.action, rating: wEntry.rating }
             : ev.targetAction
               ? { action: ev.targetAction, rating: ev.targetRating }
               : null
           applyEvent(card, ev, tgt)
+          card.seqApplied = ev.seq
         }
-        if (ev.action === 'answer') {
-          bumpDailyAgg(this.dailyAgg, ev.deckId, ev.t, ev.rating, 1)
-          if (ev.t >= todayStart) this.todayAnswers++
-        } else if (ev.action === 'undo' && wEntry?.action === 'answer') {
-          bumpDailyAgg(this.dailyAgg, wEntry.deckId, wEntry.t, wEntry.rating, -1)
-          if (wEntry.t >= todayStart) this.todayAnswers--
+        if (ev.seq > this.statsCheckpoint) {
+          if (ev.action === 'answer') {
+            bumpDailyAgg(this.dailyAgg, ev.deckId, ev.t, ev.rating, 1)
+            if (localDateKey(ev.t) === todayKey) this.todayAnswers++
+          } else if (ev.action === 'undo' && wEntry?.action === 'answer') {
+            bumpDailyAgg(this.dailyAgg, wEntry.deckId, wEntry.t, wEntry.rating, -1)
+            if (localDateKey(wEntry.t) === todayKey) this.todayAnswers--
+          }
         }
         win.set(ev.seq, { action: ev.action, rating: ev.rating, t: ev.t, deckId: ev.deckId })
         if (win.size > 40_000) {
@@ -463,15 +573,87 @@ export class WorkspaceService {
 
   // ---------- 卡片 ----------
 
-  private saveDeckCards(deckId: string): void {
-    const lines: string[] = []
+  // ---------- 卡片文件写路径（追加 + 压实，需求 §19 L1） ----------
+
+  private contentRow(c: Card): string {
+    const { deckId: _d, fsrs: _f, reps: _r, lapses: _l, tie: _t, seqApplied: _s, ...content } = c
+    return JSON.stringify(content)
+  }
+
+  private snapshotRow(c: Card): string {
+    const { deckId: _d, tie: _t, seqApplied: _s, ...row } = c
+    return JSON.stringify(row)
+  }
+
+  /** 新卡行追加到基文件尾（纯新增、无调度历史，不走全量重写） */
+  private appendCardRows(deckId: string, cards: Card[]): void {
+    if (cards.length === 0) return
+    fs.appendFileSync(this.deckCardsFile(deckId), cards.map((c) => this.contentRow(c)).join('\n') + '\n', 'utf-8')
+  }
+
+  /** 内容变更追加到 delta 文件（启动时覆盖基行并继承其调度快照） */
+  private appendCardDelta(deckId: string, cards: Card[]): void {
+    if (cards.length === 0) return
+    fs.appendFileSync(this.deckDeltaFile(deckId), cards.map((c) => this.contentRow(c)).join('\n') + '\n', 'utf-8')
+    this.touchDelta(deckId)
+  }
+
+  /** 移入牌组：delta 追加带调度快照的完整行（目标可能没有该卡基行，快照须自带）；
+   * __mikiSeq 记录快照水位，重放不再重复应用水位前事件 */
+  private appendCardDeltaSnapshot(deckId: string, cards: Card[]): void {
+    if (cards.length === 0) return
+    const lines = cards.map((c) => {
+      const { deckId: _d, tie: _t, seqApplied: _s, ...row } = c
+      return JSON.stringify({ __mikiSeq: this.seq, ...row })
+    })
+    fs.appendFileSync(this.deckDeltaFile(deckId), lines.join('\n') + '\n', 'utf-8')
+    this.touchDelta(deckId)
+  }
+
+  /** 移出牌组的墓碑行（启动合并时删除对应基行；delta 内行序=时序，先移出后移回不会误删） */
+  private appendCardTombstones(deckId: string, ids: string[]): void {
+    if (ids.length === 0) return
+    fs.appendFileSync(
+      this.deckDeltaFile(deckId),
+      ids.map((id) => JSON.stringify({ id, __mikiTombstone: true })).join('\n') + '\n',
+      'utf-8'
+    )
+    this.touchDelta(deckId)
+  }
+
+  private touchDelta(deckId: string): void {
+    const n = (this.deltaCounts.get(deckId) ?? 0) + 1
+    this.deltaCounts.set(deckId, n)
+    if (n > 2000) this.compactDeck(deckId)
+  }
+
+  /** 压实一个牌组：全量重写基文件（检查点 seq + 调度快照行）→ 清 delta → 落聚合检查点 */
+  private compactDeck(deckId: string): void {
+    const lines: string[] = [JSON.stringify({ __mikiCheckpoint: this.seq })]
+    const rows: string[] = []
     for (const c of this.cards.values()) {
       if (c.deckId !== deckId) continue
-      const { deckId: _d, fsrs: _f, reps: _r, lapses: _l, tie: _t, ...content } = c
-      lines.push(JSON.stringify(content))
+      rows.push(this.snapshotRow(c))
     }
-    lines.sort()
-    atomicWrite(this.deckCardsFile(deckId), lines.length ? lines.join('\n') + '\n' : '')
+    rows.sort()
+    atomicWrite(this.deckCardsFile(deckId), lines.join('\n') + '\n' + (rows.length ? rows.join('\n') + '\n' : ''))
+    fs.rmSync(this.deckDeltaFile(deckId), { force: true })
+    this.deltaCounts.set(deckId, 0)
+    this.deckCheckpoints.set(deckId, this.seq)
+    this.writeStatsCheckpoint()
+  }
+
+  /** 统计聚合检查点落盘（压实时调用，运行期不写避免高频重写） */
+  private writeStatsCheckpoint(): void {
+    const daily: [string, [string, { total: number; again: number }][]][] = [...this.dailyAgg].map(
+      ([d, m]) => [d, [...m]]
+    )
+    atomicWrite(this.statsFile(), JSON.stringify({ checkpointSeq: this.seq, dailyAgg: daily }))
+  }
+
+  /** 手动全量压实（运维入口；把所有牌组基文件、调度快照与聚合检查点对齐到当前 seq） */
+  compact(): void {
+    for (const d of this.decks) this.compactDeck(d.id)
   }
 
   addCard(deckId: string, front: string, back: string): Card {
@@ -487,7 +669,7 @@ export class WorkspaceService {
     }
     const card: Card = { ...content, deckId, fsrs: null, reps: 0, lapses: 0 }
     this.cards.set(card.id, card)
-    this.saveDeckCards(deckId)
+    this.appendCardRows(deckId, [card])
     this.reindexCard(card, null)
     return card
   }
@@ -510,17 +692,17 @@ export class WorkspaceService {
       lapses: 0
     }))
     for (const c of cards) this.cards.set(c.id, c)
-    this.saveDeckCards(deckId)
+    this.appendCardRows(deckId, cards)
     for (const c of cards) this.reindexCard(c, null)
     return cards
   }
 
-  /** 批量更新内容：按牌组分组一次落盘；返回更新数与不存在的 ID 数 */
+  /** 批量更新内容：delta 追加（O(变更)），按牌组分组一次落盘；返回更新数与不存在的 ID 数 */
   updateCards(items: { cardId: string; front: string; back: string }[]): { updated: number; missing: number } {
     const now = Date.now()
     let updated = 0
     let missing = 0
-    const touched = new Set<string>()
+    const touched = new Map<string, Card[]>()
     for (const it of items) {
       const card = this.cards.get(it.cardId)
       if (!card || card.deletedAt) {
@@ -531,9 +713,11 @@ export class WorkspaceService {
       card.back = it.back
       card.updatedAt = now
       updated++
-      touched.add(card.deckId)
+      const list = touched.get(card.deckId) ?? []
+      list.push(card)
+      touched.set(card.deckId, list)
     }
-    for (const deckId of touched) this.saveDeckCards(deckId)
+    for (const [deckId, cards] of touched) this.appendCardDelta(deckId, cards)
     return { updated, missing }
   }
 
@@ -577,7 +761,7 @@ export class WorkspaceService {
     card.front = front
     card.back = back
     card.updatedAt = Date.now()
-    this.saveDeckCards(card.deckId)
+    this.appendCardDelta(card.deckId, [card])
     return card
   }
 
@@ -618,9 +802,16 @@ export class WorkspaceService {
       touched.push({ card: c, before })
     }
     if (moved > 0) {
-      const files = new Set<string>([targetDeckId])
-      for (const t of touched) files.add(t.before.deckId)
-      for (const deckId of files) this.saveDeckCards(deckId)
+      // 目标牌组 delta 追加带快照完整行、源牌组追加墓碑——均 O(移动数)，无全量重写；
+      // delta 内行序=操作时序，先移出后移回不会互相覆盖
+      this.appendCardDeltaSnapshot(targetDeckId, touched.map((t) => t.card))
+      const bySource = new Map<string, string[]>()
+      for (const t of touched) {
+        const list = bySource.get(t.before.deckId) ?? []
+        list.push(t.card.id)
+        bySource.set(t.before.deckId, list)
+      }
+      for (const [deckId, ids] of bySource) this.appendCardTombstones(deckId, ids)
       for (const t of touched) this.reindexCard(t.card, t.before, t.before.deckId)
     }
     return moved

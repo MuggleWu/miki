@@ -61,6 +61,8 @@ export interface Card extends CardContent {
   lapses: number
   /** 调度索引决胜序（= Map 插入序），非持久内存字段，落盘/重放不携带 */
   tie?: number
+  /** 本卡调度状态已反映到的事件水位（seq），非持久内存字段；快照行以 __mikiSeq 落盘 */
+  seqApplied?: number
 }
 
 export interface Deck {
