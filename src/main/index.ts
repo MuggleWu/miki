@@ -111,7 +111,7 @@ app.whenReady().then(() => {
 
   createWindow()
 
-  // 本机 HTTP API（面向人与 AI 的程序化接口），安全边界见 api-server.ts 与 API.md
+  // 本机 HTTP API（面向人与 AI 的程序化接口），安全边界见 api-server.ts 与 docs/api.md
   const apiServer = startApiServer(ws)
   app.on('will-quit', () => apiServer?.close())
 

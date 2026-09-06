@@ -1,4 +1,4 @@
-// 本机 HTTP API：把工作区 CRUD 能力暴露给人与 AI（技术栈 §2 的延伸，见 API.md）
+// 本机 HTTP API：把工作区 CRUD 能力暴露给人与 AI（技术栈 §2 的延伸，见 docs/api.md）
 // 安全边界：
 //   1. 只监听 127.0.0.1，不对局域网开放
 //   2. Host 校验（防 DNS rebinding）、Origin/Referer 一律拒绝（防浏览器跨站请求）
