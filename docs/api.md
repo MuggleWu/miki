@@ -16,7 +16,7 @@ curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8727/api/decks
 1. **只监听 127.0.0.1**，不对局域网/公网开放。
 2. **Bearer token 必填**（`Authorization: Bearer <token>` 或 `X-Miki-Token: <token>`）；服务端用时序安全比较。`GET /api/health` 是唯一免 token 的端点，仅用于探活。
 3. **带 `Origin` 或 `Referer` 的请求一律 403**——浏览器网页发起的跨站调用（CSRF）无法到达本接口；curl / 脚本 / AI 工具正常情况下不带这些头，不受影响。
-4. **Host 校验**：只接受 `127.0.0.1:<port>` 与 `localhost:<port>`，防 DNS rebinding。
+4. **Host 校验**：只接受 `127.0.0.1:<port>` 与 `localhost:<port>`（端口跟随实际监听端口——配置端口被占用顺延后，以启动日志报出的实际端口为准），防 DNS rebinding。
 5. **能力面收窄**：无答题、撤销、配置修改端点；写操作只覆盖牌组/卡片 CRUD。
 6. 请求体上限 5 MB；非白名单方法 405；未知路径 404；错误统一为 `{"error": "..."}` 加对应状态码。
 
