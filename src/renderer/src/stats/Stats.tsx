@@ -58,12 +58,20 @@ export function Stats() {
       min: 0,
       max: 60,
       show: false,
-      inRange: { color: [dark ? '#1e1e26' : '#e8eaef', '#4f6fe0', '#8b6ff0', '#c3b3ff'] }
+      // GitHub 式四档色阶，色相取 miki accent；空档接近背景色
+      inRange: { color: dark ? ['#1a1a21', '#2e3c85', '#5f7ce8', '#9db1ff'] : ['#e9ebf0', '#a8b8f0', '#6f8cff', '#3f55c0'] }
     },
     calendar: {
       range: [stats.heatmap[0]?.date, stats.heatmap[stats.heatmap.length - 1]?.date],
       cellSize: ['auto', 14],
-      itemStyle: { color: dark ? '#17171d' : '#ffffff', borderColor: dark ? '#101014' : '#e2e5ea' },
+      // GitHub 风格：格间缝隙用页面底色描边形成，关闭月份边界线
+      itemStyle: {
+        color: dark ? '#1a1a21' : '#e9ebf0',
+        borderColor: dark ? '#101014' : '#f5f6f8',
+        borderWidth: 2,
+        borderRadius: 2
+      },
+      splitLine: { show: false },
       yearLabel: { show: false },
       monthLabel: { color: dim },
       dayLabel: { color: dim, nameMap: 'ZH' }

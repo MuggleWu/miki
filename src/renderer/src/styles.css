@@ -159,7 +159,12 @@ input { user-select: text; }
 .modal .form-row input, .modal .form-row select { width: 100%; }
 .modal .actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
 
-.dialog-wide { min-width: 760px; max-width: 900px; width: 72vw; max-height: 86vh; overflow: auto; }
+/* 新增/编辑卡片弹窗：右下角可拖拽缩放 */
+.dialog-wide {
+  min-width: 520px; max-width: 94vw; width: 72vw;
+  min-height: 340px; max-height: 92vh;
+  resize: both; overflow: auto;
+}
 .dual {
   display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;
 }
@@ -196,9 +201,10 @@ input { user-select: text; }
 .colmenu label { display: flex; gap: 8px; padding: 5px 8px; border-radius: 6px; cursor: pointer; align-items: center; }
 .colmenu label:hover { background: var(--hover); }
 .editor { flex: 1; padding: 16px; overflow: auto; display: flex; flex-direction: column; gap: 14px; min-width: 320px; }
-.editor .block { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.editor textarea { min-height: 96px; width: 100%; font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 12.5px; line-height: 1.6; }
-.editor .preview { background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; min-height: 96px; overflow: auto; }
+/* 右栏宽度有限：正面/反面各自「源码在上、预览在下」竖向排布 */
+.editor .block { display: grid; grid-template-columns: 1fr; gap: 8px; }
+.editor textarea { min-height: 84px; width: 100%; font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 12.5px; line-height: 1.6; }
+.editor .preview { background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; min-height: 60px; max-height: 180px; overflow: auto; }
 .editor .block-title { color: var(--text-dim); font-size: 12px; margin-bottom: 6px; }
 .editor-empty { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--text-dim); }
 
@@ -224,3 +230,15 @@ input { user-select: text; }
 .md a { color: var(--accent); }
 .md ul, .md ol { margin: 0.4em 0; padding-left: 1.4em; }
 .md img { max-width: 100%; }
+
+/* highlight.js 最小配色：跟随主题变量，不引第三方主题 */
+.hljs { color: var(--text); background: transparent; }
+.hljs-comment, .hljs-quote { color: var(--text-dim); font-style: italic; }
+.hljs-keyword, .hljs-selector-tag, .hljs-literal, .hljs-section { color: var(--accent); }
+.hljs-string, .hljs-attr, .hljs-addition { color: var(--ok); }
+.hljs-number, .hljs-symbol, .hljs-bullet, .hljs-meta { color: var(--warn); }
+.hljs-title, .hljs-name, .hljs-tag, .hljs-attribute { color: var(--accent-2); }
+.hljs-built_in, .hljs-type, .hljs-params { color: var(--text); }
+.hljs-deletion { color: var(--danger); }
+.hljs-emphasis { font-style: italic; }
+.hljs-strong { font-weight: 700; }
