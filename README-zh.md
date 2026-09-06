@@ -50,6 +50,18 @@ npm start          # 运行构建产物
 
 支持 macOS、Windows、Linux（标准 Electron 窗口，无平台专属 API）。二进制打包与安装器后续提供，当前请从源码运行。
 
+## HTTP API 与 MCP
+
+Miki 内置本机 HTTP API，供人和 AI 程序化管理牌组与卡片（增删改查，含批量）。只监听 `127.0.0.1:8727`，必须携带 token，拒绝浏览器发起的跨站请求。详见 [API.md](API.md)。
+
+MCP 客户端可用附带的 stdio 薄壳接入：
+
+```bash
+MIKI_TOKEN=<config.json 中的 api.token> node scripts/mcp-server.mjs
+```
+
+提供 `list_decks`、`add_cards`、`search_cards`、`update_cards`、`move_cards`、`delete_cards`、`reset_progress`、`get_stats` 等工具。
+
 ## 工作区格式
 
 数据存放在一个纯文件夹中（由 `MIKI_WORKSPACE` 环境变量解析，缺省回落到 `~/miki-base`）：
@@ -58,7 +70,7 @@ npm start          # 运行构建产物
 config.json                     # 应用配置（FSRS 参数、主题、刷卡字体、leech 阈值、卡片库与首页布局）
 decks.json                      # 牌组列表
 cards/<deck-id>.ndjson          # 卡片内容，每行一个 JSON 对象（含 suspended 暂停标记）
-review-log/<yyyy-mm>.ndjson     # 只追加的复习事件（answer / delete / undo）
+review-log/<yyyy-mm>.ndjson     # 只追加的复习事件（answer / delete / undo / reset）
 ```
 
 `review-log` 是调度状态的唯一真理来源；卡片状态通过重放事件重建。

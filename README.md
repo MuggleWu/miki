@@ -50,6 +50,18 @@ npm start          # run the built app
 
 Runs on macOS, Windows and Linux (standard Electron window, no platform-specific APIs). Binary packaging/installers are planned; for now run from source.
 
+## HTTP API & MCP
+
+Miki ships a local HTTP API for humans and AI agents to manage decks and cards programmatically (CRUD, including batch operations). It listens on `127.0.0.1:8727` only, requires a bearer token, and rejects browser-originated cross-site requests. See [API.md](API.md).
+
+For MCP clients, a thin stdio wrapper is included:
+
+```bash
+MIKI_TOKEN=<token from config.json> node scripts/mcp-server.mjs
+```
+
+It exposes tools such as `list_decks`, `add_cards`, `search_cards`, `update_cards`, `move_cards`, `delete_cards`, `reset_progress` and `get_stats`.
+
 ## Workspace format
 
 Data is stored in a plain folder (resolved from the `MIKI_WORKSPACE` env var, falling back to `~/miki-base`):
@@ -58,7 +70,7 @@ Data is stored in a plain folder (resolved from the `MIKI_WORKSPACE` env var, fa
 config.json                     # app config (FSRS parameters, theme, study fonts, leech threshold, browser & home layout)
 decks.json                      # deck list
 cards/<deck-id>.ndjson          # card content, one JSON object per line (includes the suspended flag)
-review-log/<yyyy-mm>.ndjson     # append-only review events (answer / delete / undo)
+review-log/<yyyy-mm>.ndjson     # append-only review events (answer / delete / undo / reset)
 ```
 
 `review-log` is the source of truth for scheduling; card states are rebuilt by replaying events.
