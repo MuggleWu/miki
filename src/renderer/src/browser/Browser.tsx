@@ -1,8 +1,10 @@
 // 卡片库（B 域）：牌组树 + 多关键词搜索 + 可配置列 + rotate 排序 + 右侧编辑面板
+// 布局：左栏宽 / 表格宽 / 列宽均可拖动并跨页保持；⌘F 聚焦搜索框
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Md } from '../md'
 import { rotateSort } from '../../../core/query'
 import { useApp } from '../store'
+import { ColResizer, VResizer } from '../components/drag'
 import type { BrowserColumn, CardRow, SortKey } from '../../../shared/types'
 
 const COLUMN_LABEL: Record<BrowserColumn, string> = {
@@ -17,6 +19,20 @@ const COLUMN_LABEL: Record<BrowserColumn, string> = {
   lapses: '遗忘',
   createdAt: '创建时间',
   updatedAt: '修改时间'
+}
+
+const DEFAULT_COL_WIDTH: Record<BrowserColumn, number> = {
+  front: 260,
+  deckName: 120,
+  state: 96,
+  due: 100,
+  interval: 90,
+  stability: 90,
+  difficulty: 90,
+  reps: 70,
+  lapses: 70,
+  createdAt: 150,
+  updatedAt: 150
 }
 
 const ALL_COLUMNS = Object.keys(COLUMN_LABEL) as BrowserColumn[]
@@ -48,6 +64,12 @@ export function Browser() {
   const setBrowserKeywords = useApp((s) => s.setBrowserKeywords)
   const selectedId = useApp((s) => s.browserSelectedId)
   const setSelectedId = useApp((s) => s.setBrowserSelectedId)
+  const sideWidth = useApp((s) => s.browserSideWidth)
+  const setSideWidth = useApp((s) => s.setBrowserSideWidth)
+  const gridWidth = useApp((s) => s.browserGridWidth)
+  const setGridWidth = useApp((s) => s.setBrowserGridWidth)
+  const colWidths = useApp((s) => s.browserColWidths)
+  const setColWidth = useApp((s) => s.setBrowserColWidth)
   const openBrowser = useApp((s) => s.openBrowser)
 
   const keywords = browserKeywords
@@ -60,6 +82,23 @@ export function Browser() {
   const [editFront, setEditFront] = useState<string | null>(null)
   const [editBack, setEditBack] = useState<string | null>(null)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const searchRef = useRef<HTMLInputElement>(null)
+
+  // ⌘F：聚焦搜索框，已有内容时光标移到末尾
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f') {
+        e.preventDefault()
+        const el = searchRef.current
+        if (el) {
+          el.focus()
+          el.setSelectionRange(el.value.length, el.value.length)
+        }
+      }
+    }
+    window.addEventListener('keydown', h)
+    return () => window.removeEventListener('keydown', h)
+  }, [])
 
   // 搜索防抖
   useEffect(() => {
@@ -137,9 +176,9 @@ export function Browser() {
       case 'deckName':
         return row.deckName
       case 'state':
-        return STATE_LABEL[row.state] ?? row.state
+        return row.suspended ? '⏸ 已暂停' : STATE_LABEL[row.state] ?? row.state
       case 'due':
-        return fmtDue(row.due)
+        return row.suspended ? '—' : fmtDue(row.due)
       case 'interval':
         return row.intervalDays != null ? `${row.intervalDays} 天` : '—'
       case 'stability':
@@ -159,7 +198,7 @@ export function Browser() {
 
   return (
     <div className="browser" onClick={() => setColMenu(null)}>
-      <div className="browser-side">
+      <div className="browser-side" style={{ width: sideWidth }}>
         <div
           className={`tree-item ${browserDeckId == null ? 'active' : ''}`}
           onClick={() => openBrowser(null)}
@@ -173,9 +212,12 @@ export function Browser() {
         ))}
       </div>
 
+      <VResizer width={sideWidth} onResize={setSideWidth} />
+
       <div className="browser-main">
         <div className="browser-toolbar">
           <input
+            ref={searchRef}
             value={keywords}
             onChange={(e) => setBrowserKeywords(e.target.value)}
             placeholder="搜索：多个关键词空格分隔（AND）"
@@ -186,8 +228,19 @@ export function Browser() {
         </div>
 
         <div className="browser-body">
-          <div className="grid-wrap">
-            <table className="grid">
+          <div
+            className="grid-wrap"
+            style={gridWidth != null ? { width: gridWidth, flex: '0 0 auto' } : undefined}
+          >
+            <table
+              className="grid"
+              style={{ tableLayout: 'fixed', width: columns.reduce((n, c) => n + (colWidths[c] ?? DEFAULT_COL_WIDTH[c]), 0), minWidth: '100%' }}
+            >
+              <colgroup>
+                {columns.map((col) => (
+                  <col key={col} style={{ width: colWidths[col] ?? DEFAULT_COL_WIDTH[col] }} />
+                ))}
+              </colgroup>
               <thead>
                 <tr>
                   {columns.map((col) => (
@@ -198,10 +251,14 @@ export function Browser() {
                         e.preventDefault()
                         setColMenu({ x: e.clientX, y: e.clientY })
                       }}
-                      title="点击排序 / 右键配置列"
+                      title="点击排序 / 右键配置列 / 拖右缘调列宽"
                     >
                       {COLUMN_LABEL[col]}
                       {sort[0]?.col === col && (sort[0].asc ? ' ↑' : ' ↓')}
+                      <ColResizer
+                        width={colWidths[col] ?? DEFAULT_COL_WIDTH[col]}
+                        onResize={(w) => setColWidth(col, w)}
+                      />
                     </th>
                   ))}
                 </tr>
@@ -225,6 +282,8 @@ export function Browser() {
             </table>
           </div>
 
+          <VResizer width={gridWidth ?? 420} onResize={setGridWidth} />
+
           <div className="editor">
             {!selected && <div className="editor-empty">选中一张卡查看 / 编辑</div>}
             {selected && editFront != null && editBack != null && (
@@ -247,8 +306,21 @@ export function Browser() {
                     </div>
                   </div>
                 </div>
-                <div style={{ color: 'var(--text-dim)', fontSize: 12 }}>
-                  {selected.deckName} · {STATE_LABEL[selected.state]} · 修改时间 {fmtTime(selected.updatedAt)}
+                <div className="editor-meta">
+                  <span style={{ color: 'var(--text-dim)', fontSize: 12 }}>
+                    {selected.deckName} ·{' '}
+                    {selected.suspended ? '⏸ 已暂停（不计入调度）' : STATE_LABEL[selected.state]} · 修改时间{' '}
+                    {fmtTime(selected.updatedAt)}
+                  </span>
+                  {selected.suspended && (
+                    <button
+                      onClick={() => {
+                        void window.miki.setCardSuspended(selected.id, false).then(() => void query())
+                      }}
+                    >
+                      解除暂停
+                    </button>
+                  )}
                 </div>
               </>
             )}

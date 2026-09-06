@@ -1,7 +1,8 @@
-// 首页（H 域）：牌组表、选中态、行操作、今日统计、创建牌组
+// 首页（H 域）：牌组表、选中态、行操作、今日统计、创建牌组；数字列宽可拖、三列徽章配色
 import { useState } from 'react'
 import { useApp } from '../store'
 import { PromptModal } from '../components/PromptModal'
+import { ColResizer } from '../components/drag'
 
 type Menu = { x: number; y: number; deckId: string; name: string } | null
 type Modal = 'create' | { rename: string; name: string } | { delete: string; name: string } | null
@@ -10,6 +11,8 @@ export function Home() {
   const decks = useApp((s) => s.decks)
   const todayCount = useApp((s) => s.todayCount)
   const selectedDeckId = useApp((s) => s.selectedDeckId)
+  const homeColWidths = useApp((s) => s.homeColWidths)
+  const setHomeColWidth = useApp((s) => s.setHomeColWidth)
   const reload = useApp((s) => s.reload)
   const enterStudy = useApp((s) => s.enterStudy)
   const openBrowser = useApp((s) => s.openBrowser)
@@ -21,13 +24,29 @@ export function Home() {
 
   return (
     <div className="home" onClick={closeMenu}>
-      <table className="deck-table">
+      <table className="deck-table" style={{ tableLayout: 'fixed' }}>
+        <colgroup>
+          <col />
+          {homeColWidths.map((w, i) => (
+            <col key={i} style={{ width: w }} />
+          ))}
+          <col style={{ width: 44 }} />
+        </colgroup>
         <thead>
           <tr>
             <th>牌组</th>
-            <th className="num">未学习</th>
-            <th className="num">学习中</th>
-            <th className="num">待复习</th>
+            <th className="num">
+              未学习
+              <ColResizer width={homeColWidths[0]} onResize={(w) => setHomeColWidth(0, w)} />
+            </th>
+            <th className="num">
+              学习中
+              <ColResizer width={homeColWidths[1]} onResize={(w) => setHomeColWidth(1, w)} />
+            </th>
+            <th className="num">
+              待复习
+              <ColResizer width={homeColWidths[2]} onResize={(w) => setHomeColWidth(2, w)} />
+            </th>
             <th style={{ width: 44 }}></th>
           </tr>
         </thead>
@@ -47,9 +66,15 @@ export function Home() {
               title="点击进入学习"
             >
               <td>{d.name}</td>
-              <td className="num badge-new">{d.counts.new}</td>
-              <td className="num badge-learn">{d.counts.learning}</td>
-              <td className="num badge-review">{d.counts.review}</td>
+              <td className="num">
+                {d.counts.new > 0 ? <span className="badge badge-new">{d.counts.new}</span> : 0}
+              </td>
+              <td className="num">
+                {d.counts.learning > 0 ? <span className="badge badge-learn">{d.counts.learning}</span> : 0}
+              </td>
+              <td className="num">
+                {d.counts.review > 0 ? <span className="badge badge-review">{d.counts.review}</span> : 0}
+              </td>
               <td
                 onClick={(e) => {
                   e.stopPropagation()
