@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""用 py-fsrs v6.3.2 生成对拍向量，供 src/core/__tests__/fsrs.spec.ts 使用。
+"""生成 FSRS-6 基准比对向量（供 src/core/__tests__/fsrs.spec.ts 使用）：
+用官方 py-fsrs v6.3.2 对固定输入算出期望输出，TS 实现跑同样输入逐例比对。
 
 用法：需要 /tmp/py-fsrs（clone v6.3.2）与 typing_extensions。
     python3 tools/gen-fsrs-vectors.py

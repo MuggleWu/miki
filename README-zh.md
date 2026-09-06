@@ -8,7 +8,7 @@ A local-first spaced repetition app — an Anki alternative with FSRS-6 scheduli
 
 ## 功能特性
 
-- **FSRS-6 调度** — 移植自 py-fsrs v6.3.2，经 44 组生成的一致性向量对拍验证；评级前每个按钮都会预览按下后的下次到期日期
+- **FSRS-6 调度** — 移植自 py-fsrs v6.3.2，经 550+ 组基准向量比对验证（官方 Python 实现生成期望输出，TS 实现逐例比对）；评级前每个按钮都会预览按下后的下次到期日期
 - **五个视图** — 牌组（按名称排序的表格）、学习、卡片库、统计（预测 / 热力图 / 复习 / 卡片状态 / 复习间隔）、设置
 - **Leech 处理** — 累计「重来」次数达到阈值的卡片自动暂停：移出学习队列与全部计数、在卡片库显示 ⏸，可一键解除
 - **卡片库** — 多关键词 AND 搜索、列可配置、可拖宽、rotate 排序，侧栏与面板分隔条可拖动，内嵌编辑器实时 Markdown 预览；到期以两列呈现——「距现在」（相对，如“5 分钟后”）与「到期时间」（绝对，如“2026-09-06 16:49”）
@@ -44,7 +44,7 @@ npm install
 npm run dev        # 开发模式
 npm run build      # 生产构建
 npm run typecheck  # TypeScript 严格检查（不产出文件）
-npm test           # FSRS 向量对拍 + 核心回归测试
+npm test           # FSRS 基准向量比对 + 核心回归测试
 npm start          # 运行构建产物
 ```
 

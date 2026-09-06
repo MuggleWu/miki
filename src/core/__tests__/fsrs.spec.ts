@@ -1,4 +1,5 @@
-// FSRS-6 移植对拍：tools/fsrs-vectors.json 由 py-fsrs v6.3.2 生成
+// FSRS-6 基准比对（golden test）：py-fsrs v6.3.2 作为参考实现，生成固定输入的期望输出，
+// TS 移植实现跑同样输入后逐例比对。tools/fsrs-vectors.json 与 fsrs-vectors-random.json 均由其生成
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -85,7 +86,7 @@ function assertMatches(c: VecCase): void {
   expect(out.lastReview, `${c.name} lastReview`).toBe(c.after.lastReview)
 }
 
-describe('FSRS-6 py-fsrs 对拍', () => {
+describe('FSRS-6 与 py-fsrs 参考实现比对', () => {
   it('向量文件存在且非空', () => {
     expect(vectors.cases.length).toBeGreaterThan(30)
     expect(randomVectors.cases.length).toBeGreaterThan(300)

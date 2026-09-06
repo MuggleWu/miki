@@ -1,5 +1,5 @@
 // FSRS-6 调度器：从 py-fsrs v6.3.2（fsrs/scheduler.py）逐行移植。
-// 对拍基线：tools/gen-fsrs-vectors.py 生成的向量（enable_fuzzing=false）。
+// 比对基线：tools/ 下脚本用 py-fsrs 官方实现生成的期望输出（enable_fuzzing=false）。
 // 时间约定：全用毫秒时间戳 number；"天差"复刻 Python timedelta.days 的 floor 语义。
 
 import type { CardSnapshot, FsrsStateEnum, Rating } from '../shared/types'

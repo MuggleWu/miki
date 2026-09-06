@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""生成随机参数维度的 FSRS-6 对拍向量（补充固定默认参数的 fsrs-vectors.json）。
+"""生成随机参数维度的 FSRS-6 基准比对向量（补充固定默认参数的 fsrs-vectors.json）。
 
 覆盖维度：随机 21 参数（界内均匀采样）、随机 desiredRetention、
 随机 learning/relearning steps（含空）、随机 maximumInterval、随机 rating 路径。
-fuzz 关闭（随机性不可对拍，fuzz 边界逻辑由代码审查与固定向量覆盖）。
+fuzz 关闭（fuzz 含随机数，无法生成固定期望输出，其逻辑靠代码审查核对）。
 
 用法：python3 tools/gen-fsrs-vectors-random.py [输出路径]
 默认输出 tools/fsrs-vectors-random.json
