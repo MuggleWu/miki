@@ -14,6 +14,8 @@ interface AppStore {
   tab: Tab
   decks: DeckInfo[]
   todayCount: number
+  /** 历史累计净答题数（loadWorkspace 随牌组一起刷新） */
+  totalCount: number
   config: MikiConfig | null
   selectedDeckId: string | null
   studyDeckId: string | null
@@ -55,6 +57,7 @@ export const useApp = create<AppStore>((set) => ({
   tab: 'home',
   decks: [],
   todayCount: 0,
+  totalCount: 0,
   config: null,
   selectedDeckId: null,
   studyDeckId: null,
@@ -73,7 +76,7 @@ export const useApp = create<AppStore>((set) => ({
   setTab: (t) => set({ tab: t }),
 
   reload: async () => {
-    const { decks, todayCount, config } = await window.miki.loadWorkspace()
+    const { decks, todayCount, totalCount, config } = await window.miki.loadWorkspace()
     set((s) => {
       // 首次加载：恢复上次离开卡片库时的选中态（跨启动持久化在 config.browser）
       const restore = s.browserRestored
@@ -86,6 +89,7 @@ export const useApp = create<AppStore>((set) => ({
       return {
         decks,
         todayCount,
+        totalCount,
         config,
         selectedDeckId:
           s.selectedDeckId && decks.some((d) => d.id === s.selectedDeckId) ? s.selectedDeckId : decks[0]?.id ?? null,

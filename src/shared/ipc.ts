@@ -19,8 +19,8 @@ export type MikiConfigPatch = Partial<Omit<MikiConfig, 'browser'>> & {
 }
 
 export interface MikiApi {
-  /** 全量加载（decks + counts + today + config） */
-  loadWorkspace(): Promise<{ decks: DeckInfo[]; todayCount: number; config: MikiConfig }>
+  /** 全量加载（decks + counts + today + 累计 + config） */
+  loadWorkspace(): Promise<{ decks: DeckInfo[]; todayCount: number; totalCount: number; config: MikiConfig }>
   addDeck(name: string): Promise<DeckInfo[]>
   renameDeck(id: string, name: string): Promise<DeckInfo[]>
   deleteDeck(id: string): Promise<DeckInfo[]>

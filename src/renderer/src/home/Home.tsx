@@ -10,6 +10,7 @@ type Modal = 'create' | { rename: string; name: string } | { delete: string; nam
 export function Home() {
   const decks = useApp((s) => s.decks)
   const todayCount = useApp((s) => s.todayCount)
+  const totalCount = useApp((s) => s.totalCount)
   const selectedDeckId = useApp((s) => s.selectedDeckId)
   const homeColWidths = useApp((s) => s.homeColWidths)
   const setHomeColWidth = useApp((s) => s.setHomeColWidth)
@@ -89,11 +90,20 @@ export function Home() {
       </table>
 
       <div className="home-footer">
-        <span>
-          今天已学习 <b style={{ color: 'var(--text)' }}>{todayCount}</b> 张 · 快捷键：
-          <kbd className="kbd">S</kbd> 学习 · <kbd className="kbd">A</kbd> 添加 · <kbd className="kbd">B</kbd> 卡片库 ·{' '}
-          <kbd className="kbd">T</kbd> 统计 · <kbd className="kbd">D</kbd> 回首页
-        </span>
+        <div className="home-footer-left">
+          <div className="home-stats">
+            今天已学习 <b>{todayCount}</b> 张
+            <span className="home-stats-dot">·</span>
+            总共已学习 <b>{totalCount}</b> 张
+          </div>
+          <div className="home-hints">
+            <span><kbd className="kbd">S</kbd> 学习</span>
+            <span><kbd className="kbd">A</kbd> 添加</span>
+            <span><kbd className="kbd">B</kbd> 卡片库</span>
+            <span><kbd className="kbd">T</kbd> 统计</span>
+            <span><kbd className="kbd">D</kbd> 回首页</span>
+          </div>
+        </div>
         <button className="primary" onClick={() => setModal('create')}>
           创建牌组
         </button>

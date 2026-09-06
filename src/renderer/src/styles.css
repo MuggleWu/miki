@@ -122,6 +122,18 @@ input { user-select: text; }
   display: flex; justify-content: space-between; align-items: center;
   margin-top: 18px; color: var(--text-dim);
 }
+/* 首页底部：统计一行 + 快捷键 chips 一行（左侧纵向堆叠，右侧创建按钮） */
+.home-footer-left {
+  display: flex; flex-direction: column; gap: 7px;
+}
+.home-stats { font-size: 13px; }
+.home-stats b { color: var(--text); font-weight: 600; }
+.home-stats-dot { margin: 0 7px; opacity: 0.6; }
+.home-hints {
+  display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center;
+  font-size: 12px;
+}
+.home-hints span { display: inline-flex; align-items: center; gap: 5px; }
 .rowmenu {
   position: fixed; z-index: 60; background: var(--panel); border: 1px solid var(--border);
   border-radius: 8px; padding: 4px; min-width: 110px; box-shadow: var(--shadow);

@@ -1,6 +1,6 @@
 // WorkspaceService 服务层单测：undo 语义、leech 自动暂停、重放一致性、损坏容错、配置持久化、计数入口
 // api-server.spec 只间接覆盖 CRUD，这里直接盯服务层的不变量（重放 = 调度真理）。
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
@@ -337,6 +337,31 @@ describe('计数与统计入口', () => {
     const before = w.todayCount()
     w.answer(queryAll(w, '计数一').rows[0].id, 3)
     expect(w.todayCount()).toBe(before + 1)
+  })
+
+  it('totalAnswered 历史累计：undo 抵消，跨天累加', () => {
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(new Date('2026-10-06T10:00:00'))
+      const w = newWs(tmpKept())
+      const d = w.addDeck('累计组').id
+      const [c1, c2] = w.addCards(d, [
+        { front: '累计一', back: '' },
+        { front: '累计二', back: '' }
+      ])
+      w.answer(c1.id, 3)
+      w.answer(c2.id, 3)
+      expect(w.totalAnswered()).toBe(2)
+      w.undo()
+      expect(w.totalAnswered()).toBe(1) // undo 抵消今日一笔
+      vi.setSystemTime(new Date('2026-10-07T10:00:00')) // 次日再答一笔
+      const c3 = w.addCard(d, '累计三', '')
+      w.answer(c3.id, 3)
+      expect(w.todayCount()).toBe(1) // 次日计数独立
+      expect(w.totalAnswered()).toBe(2) // 累计跨天相加
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('删除牌组后卡片从所有视图消失且重启后仍不可见', () => {

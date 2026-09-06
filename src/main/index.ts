@@ -109,6 +109,7 @@ app.whenReady().then(() => {
   ipcMain.handle(IPC.loadWorkspace, () => ({
     decks: ws.deckInfos(),
     todayCount: ws.todayCount(),
+    totalCount: ws.totalAnswered(),
     config: ws.config
   }))
   ipcMain.handle(IPC.addDeck, (_e, name: string) => {

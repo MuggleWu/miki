@@ -574,6 +574,15 @@ export class WorkspaceService {
     return this.todayAnswers
   }
 
+  /** 历史累计净答题数（undo 已抵消；热力图聚合按日按牌组求和） */
+  totalAnswered(): number {
+    let total = 0
+    for (const byDay of this.dailyAgg.values()) {
+      for (const c of byDay.values()) total += c.total
+    }
+    return total
+  }
+
   // ---------- 牌组 ----------
 
   addDeck(name: string): Deck {
