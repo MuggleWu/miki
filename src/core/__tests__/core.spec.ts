@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { replayCard } from '../replay'
 import { deckCounts, pickNext, remainingCount } from '../queue'
 import { compareByKeys, filterByKeywords, rotateSort, toRow } from '../query'
-import { computeStats } from '../stats'
+import { bumpDailyAgg, computeStats, type DailyAgg } from '../stats'
 import { FsrScheduler, DEFAULT_FSRS_PARAMS } from '../fsrs'
 import type { Card, CardContent, ReviewEvent, SortKey } from '../../shared/types'
 import { FSRS_STATE } from '../../shared/types'
@@ -26,6 +26,22 @@ function answerEv(seq: number, card: Card, rating: 1 | 2 | 3 | 4, t: number): Re
   const before = card.fsrs
   const after = sched.review(before, rating, t)
   return { seq, t, action: 'answer', cardId: card.id, deckId: card.deckId, rating, before, after }
+}
+
+/** 事件流 → 热力图聚合（含 undo 抵消），computeStats 适配器 */
+function aggOf(evs: ReviewEvent[]): DailyAgg {
+  const agg: DailyAgg = new Map()
+  const answers = new Map<number, ReviewEvent>()
+  for (const e of evs) {
+    if (e.action === 'answer') {
+      bumpDailyAgg(agg, e.deckId, e.t, e.rating, 1)
+      answers.set(e.seq, e)
+    } else if (e.action === 'undo' && e.targetSeq != null) {
+      const t = answers.get(e.targetSeq)
+      if (t) bumpDailyAgg(agg, t.deckId, t.t, t.rating, -1)
+    }
+  }
+  return agg
 }
 
 describe('replay', () => {
@@ -248,12 +264,13 @@ describe('stats', () => {
     // 抵消最后一个
     evs.push({ seq: 4, t: T0 + 3 * DAY, action: 'undo', cardId: c1.id, deckId: c1.deckId, targetSeq: 3, before: evs[2].before! })
     const cards = [tmp, c2]
-    const s = computeStats({ cards, events: evs, deckId: null, range: 'year', now })
+    const agg = aggOf(evs)
+    const s = computeStats({ cards, dailyAgg: agg, deckId: null, range: 'year', now })
     expect(s.reviews.reduce((acc, r) => acc + r.total, 0)).toBe(2) // undo 抵消后
     expect(s.stateCounts.new).toBe(1) // c2 是 d2 的 new 卡
     expect(s.heatmap.length).toBe(365)
     expect(s.forecast.length).toBe(38) // 30 天 + 8 周
-    const s2 = computeStats({ cards, events: evs, deckId: 'd1', range: 'year', now })
+    const s2 = computeStats({ cards, dailyAgg: agg, deckId: 'd1', range: 'year', now })
     expect(s2.stateCounts.new).toBe(0)
   })
 
@@ -261,7 +278,7 @@ describe('stats', () => {
     const now = T0 + 5 * DAY
     const c = cardOf('i1')
     c.fsrs = { state: FSRS_STATE.Review, step: null, stability: 10, difficulty: 5, due: T0 + 5 * DAY + 6 * DAY, lastReview: T0 + 5 * DAY }
-    const s = computeStats({ cards: [c], events: [], deckId: null, range: 'all', now })
+    const s = computeStats({ cards: [c], dailyAgg: new Map(), deckId: null, range: 'all', now })
     expect(s.intervals.find((b) => b.bucket === '4-7')!.count).toBe(1)
   })
 })

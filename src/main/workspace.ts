@@ -21,10 +21,10 @@ import {
 } from '../shared/types'
 import { FsrScheduler, DEFAULT_FSRS_PARAMS } from '../core/fsrs'
 import { MinHeap, type HeapEntry } from '../core/min-heap'
-import { replayCard } from '../core/replay'
+import { applyEvent } from '../core/replay'
 import { compareByKeys, displayState, filterByKeywords, toRow } from '../core/query'
 import type { MikiConfigPatch } from '../shared/ipc'
-import { computeStats, endOfLocalDay, localDateKey } from '../core/stats'
+import { bumpDailyAgg, computeStats, endOfLocalDay, localDateKey, type DailyAgg } from '../core/stats'
 
 const MONTH_MS = 31 * 86_400_000
 
@@ -63,6 +63,7 @@ export class WorkspaceService {
   config!: MikiConfig
   decks: Deck[] = []
   cards = new Map<string, Card>()
+  /** 仅本会话事件（undo 查找用）；历史事件流式重放后不驻留（需求 §19 L1） */
   events: ReviewEvent[] = []
   private seq = 0
   private scheduler!: FsrScheduler
@@ -70,6 +71,10 @@ export class WorkspaceService {
   private previewScheduler!: FsrScheduler
   /** 会话 undo 栈（D2：不跨会话） */
   private sessionOps: { seq: number; cardId: string }[] = []
+  /** 热力图聚合（undo 已抵消）：deckId → 日期键 → 计数 */
+  private dailyAgg: DailyAgg = new Map()
+  /** 今日已答净计数（answer ++ / undo 抵消 -- / 跨天清零） */
+  private todayAnswers = 0
   /** 牌组调度索引（deckId → 堆 + 计数器），跨天/启动全量重建，其余增量维护 */
   private idx = new Map<string, DeckIndex>()
   private indexDayKey = ''
@@ -101,8 +106,8 @@ export class WorkspaceService {
     this.scheduler = this.buildScheduler(this.config)
     this.previewScheduler = this.buildScheduler(this.config, true)
     this.loadDecks()
-    this.loadEvents()
-    this.replayAll()
+    this.loadCards()
+    this.streamEvents()
     this.ensureDay()
     this.ensureGitignore()
   }
@@ -189,35 +194,9 @@ export class WorkspaceService {
     atomicWrite(this.decksFile(), JSON.stringify(this.decks, null, 2))
   }
 
-  /** 读全部 review-log（按月文件名序 + 行序），重编全局 seq */
-  private loadEvents(): void {
-    const dir = path.join(this.root, 'review-log')
-    const files = fs.existsSync(dir)
-      ? fs.readdirSync(dir).filter((f) => f.endsWith('.ndjson')).sort()
-      : []
-    this.events = []
-    this.seq = 0
-    for (const f of files) {
-      for (const line of readNdjson(path.join(dir, f))) {
-        try {
-          const ev = JSON.parse(line) as ReviewEvent
-          ev.seq = ++this.seq
-          this.events.push(ev)
-        } catch {
-          // 跳过损坏行
-        }
-      }
-    }
-  }
-
-  private replayAll(): void {
+  /** 读全部卡片内容基态（重放前 fsrs/reps/lapses 为零值，由事件流填充） */
+  private loadCards(): void {
     this.cards = new Map()
-    const byCard = new Map<string, ReviewEvent[]>()
-    for (const ev of this.events) {
-      const list = byCard.get(ev.cardId)
-      if (list) list.push(ev)
-      else byCard.set(ev.cardId, [ev])
-    }
     for (const deck of this.decks) {
       for (const line of readNdjson(this.deckCardsFile(deck.id))) {
         let content: CardContent
@@ -226,7 +205,62 @@ export class WorkspaceService {
         } catch {
           continue
         }
-        this.cards.set(content.id, replayCard(content, deck.id, byCard.get(content.id) ?? []))
+        this.cards.set(content.id, { ...content, deckId: deck.id, fsrs: null, reps: 0, lapses: 0 })
+      }
+    }
+  }
+
+  /**
+   * 流式重放 review-log（需求 §19 L1）：逐事件应用到卡 + 热力图聚合 + 今日净计数，
+   * 历史事件不驻留内存——undo 抵消目标靠最近事件窗口（undo 与 target 同会话，距离有限）；
+   * 新版 undo 事件自带 targetAction/targetRating，窗口只是旧库兼容兜底。
+   */
+  private streamEvents(): void {
+    const dir = path.join(this.root, 'review-log')
+    const files = fs.existsSync(dir)
+      ? fs.readdirSync(dir).filter((f) => f.endsWith('.ndjson')).sort()
+      : []
+    this.events = []
+    this.seq = 0
+    this.dailyAgg = new Map()
+    this.todayAnswers = 0
+    const todayStart = this.todayStartMs()
+    const win = new Map<number, { action: ReviewEvent['action']; rating?: Rating; t: number; deckId: string }>()
+    for (const f of files) {
+      for (const line of readNdjson(path.join(dir, f))) {
+        let ev: ReviewEvent
+        try {
+          ev = JSON.parse(line) as ReviewEvent
+        } catch {
+          continue
+        }
+        ev.seq = ++this.seq
+        const card = this.cards.get(ev.cardId)
+        const wEntry =
+          ev.action === 'undo' && ev.targetSeq != null ? win.get(ev.targetSeq) ?? null : null
+        if (card) {
+          const tgt = wEntry
+            ? { action: wEntry.action, rating: wEntry.rating }
+            : ev.targetAction
+              ? { action: ev.targetAction, rating: ev.targetRating }
+              : null
+          applyEvent(card, ev, tgt)
+        }
+        if (ev.action === 'answer') {
+          bumpDailyAgg(this.dailyAgg, ev.deckId, ev.t, ev.rating, 1)
+          if (ev.t >= todayStart) this.todayAnswers++
+        } else if (ev.action === 'undo' && wEntry?.action === 'answer') {
+          bumpDailyAgg(this.dailyAgg, wEntry.deckId, wEntry.t, wEntry.rating, -1)
+          if (wEntry.t >= todayStart) this.todayAnswers--
+        }
+        win.set(ev.seq, { action: ev.action, rating: ev.rating, t: ev.t, deckId: ev.deckId })
+        if (win.size > 40_000) {
+          let n = 20_000
+          for (const k of win.keys()) {
+            win.delete(k)
+            if (--n === 0) break
+          }
+        }
       }
     }
   }
@@ -257,12 +291,14 @@ export class WorkspaceService {
     return x
   }
 
-  /** 跨天检测：日期变化时全量重建索引（eot 变化影响 dueToday 口径，重建同时自愈任何计数漂移） */
+  /** 跨天检测：日期变化时全量重建索引并清零今日计数（重建同时自愈任何计数漂移） */
   ensureDay(now = Date.now()): void {
     const k = localDateKey(now)
     if (k === this.indexDayKey) return
+    const had = this.indexDayKey !== ''
     this.indexDayKey = k
     this.rebuildIndexes(now)
+    if (had) this.todayAnswers = 0
   }
 
   private rebuildIndexes(now: number): void {
@@ -388,12 +424,15 @@ export class WorkspaceService {
       })
   }
 
+  private todayStartMs(): number {
+    const d = new Date()
+    d.setHours(0, 0, 0, 0)
+    return d.getTime()
+  }
+
   todayCount(): number {
-    const start = new Date(); start.setHours(0, 0, 0, 0)
-    const undone = new Set(this.events.filter((e) => e.action === 'undo' && e.targetSeq != null).map((e) => e.targetSeq!))
-    return this.events.filter(
-      (e) => e.action === 'answer' && !undone.has(e.seq) && e.t >= start.getTime()
-    ).length
+    this.ensureDay()
+    return this.todayAnswers
   }
 
   // ---------- 牌组 ----------
@@ -688,6 +727,8 @@ export class WorkspaceService {
       evs.push({ seq: ++this.seq, t: now, action: 'suspend', cardId: card.id, deckId: card.deckId, suspended: true })
     }
     this.appendEvents(evs)
+    bumpDailyAgg(this.dailyAgg, card.deckId, ev.t, rating, 1)
+    this.todayAnswers++
     this.reindexCard(card, before)
     this.sessionOps.push({ seq: ev.seq, cardId })
     return { answeredCardId: cardId, ...this.getStudy(card.deckId) }
@@ -719,6 +760,8 @@ export class WorkspaceService {
       cardId: card.id,
       deckId: card.deckId,
       targetSeq: target.seq,
+      targetAction: target.action,
+      targetRating: target.rating,
       before: target.before ?? null
     }
     this.appendEvents([ev])
@@ -728,6 +771,8 @@ export class WorkspaceService {
     if (target.action === 'answer') {
       card.reps = Math.max(0, card.reps - 1)
       if (target.rating === 1) card.lapses = Math.max(0, card.lapses - 1)
+      bumpDailyAgg(this.dailyAgg, target.deckId, target.t, target.rating, -1)
+      if (target.t >= this.todayStartMs()) this.todayAnswers--
     }
     if (target.action === 'delete') card.deletedAt = null
     this.reindexCard(card, before)
@@ -771,7 +816,7 @@ export class WorkspaceService {
   getStats(params: StatsParams) {
     return computeStats({
       cards: [...this.cards.values()],
-      events: this.events,
+      dailyAgg: this.dailyAgg,
       deckId: params.deckId,
       range: params.range,
       now: Date.now()

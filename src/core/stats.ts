@@ -1,5 +1,5 @@
-// 统计聚合（需求 §8 五板块口径）
-import type { Card, ReviewEvent, StatsPayload } from '../shared/types'
+// 统计聚合（需求 §8 五板块口径 / §19 L1 事件不驻留）
+import type { Card, Rating, StatsPayload } from '../shared/types'
 import { FSRS_STATE } from '../shared/types'
 
 const INTL_BUCKETS = ['<1d', '1-3', '4-7', '8-14', '15-30', '30+'] as const
@@ -11,9 +11,26 @@ export function localDateKey(ms: number): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
 }
 
+/** 热力图聚合：deckId → 日期键 → {total, again}；由事件流式聚合（undo 已抵消），替代全量事件驻留 */
+export type DailyAgg = Map<string, Map<string, { total: number; again: number }>>
+
+/** 聚合计数（delta=1 答题 / -1 undo 抵消），唯一入口，流式重放与运行时共用 */
+export function bumpDailyAgg(agg: DailyAgg, deckId: string, t: number, rating: Rating | undefined, delta: 1 | -1): void {
+  let byDeck = agg.get(deckId)
+  if (!byDeck) {
+    byDeck = new Map()
+    agg.set(deckId, byDeck)
+  }
+  const key = localDateKey(t)
+  const c = byDeck.get(key) ?? { total: 0, again: 0 }
+  c.total += delta
+  if (rating === 1) c.again += delta
+  byDeck.set(key, c)
+}
+
 export interface StatsInput {
   cards: Card[] // 未过滤的全量卡（函数内部按 deckId 过滤）
-  events: ReviewEvent[]
+  dailyAgg: DailyAgg // 热力图聚合（undo 已抵消）
   deckId: string | null
   range: 'year' | 'all'
   now: number
@@ -22,30 +39,22 @@ export interface StatsInput {
 export function computeStats(input: StatsInput): StatsPayload {
   const { deckId, range, now } = input
   const rangeStart = range === 'year' ? now - 365 * 86_400_000 : 0
+  const startKey = range === 'year' ? localDateKey(rangeStart) : ''
 
   const deckOf = (deck: string) => deckId == null || deck === deckId
   const cards = input.cards.filter((c) => !c.deletedAt && deckOf(c.deckId))
 
-  // undo 抵消目标 answer 的统计贡献
-  const answerEvents = new Map<number, ReviewEvent>()
-  const undone = new Set<number>()
-  const events = input.events.filter((e) => deckOf(e.deckId))
-  for (const e of events) {
-    if (e.action === 'answer') answerEvents.set(e.seq, e)
-    else if (e.action === 'undo' && e.targetSeq != null) undone.add(e.targetSeq)
-  }
-  const effectiveAnswers = [...answerEvents.values()].filter(
-    (e) => !undone.has(e.seq) && e.t >= rangeStart
-  )
-
-  // 热力图 & 复习曲线
+  // 热力图 & 复习曲线（聚合已是净计数，按牌组过滤后合并）
   const dayCounts = new Map<string, { total: number; again: number }>()
-  for (const e of effectiveAnswers) {
-    const key = localDateKey(e.t)
-    const cur = dayCounts.get(key) ?? { total: 0, again: 0 }
-    cur.total++
-    if (e.rating === 1) cur.again++
-    dayCounts.set(key, cur)
+  for (const [deck, days] of input.dailyAgg) {
+    if (!deckOf(deck)) continue
+    for (const [key, c] of days) {
+      if (startKey && key < startKey) continue
+      const cur = dayCounts.get(key) ?? { total: 0, again: 0 }
+      cur.total += c.total
+      cur.again += c.again
+      dayCounts.set(key, cur)
+    }
   }
   const heatmap: StatsPayload['heatmap'] = []
   const reviews: StatsPayload['reviews'] = []

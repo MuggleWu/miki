@@ -33,6 +33,9 @@ export interface ReviewEvent {
   after?: CardSnapshot | null
   /** undo: 指向本会话被撤销事件的 seq */
   targetSeq?: number
+  /** undo: 被撤销事件的 action/rating（重放自包含，免回查事件窗口） */
+  targetAction?: 'answer' | 'delete' | 'undo' | 'reset' | 'suspend'
+  targetRating?: Rating
   /** suspend: 目标暂停状态（true 暂停 / false 解除） */
   suspended?: boolean
   durationMs?: number

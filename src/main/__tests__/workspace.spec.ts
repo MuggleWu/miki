@@ -163,8 +163,35 @@ describe('重放一致性（重启恢复）', () => {
     expect(r2.deletedAt).toBeNull()
     expect(r2.suspended).toBe(true)
     expect(r2.reps).toBe(1)
-    expect(w2.events.length).toBe(w.events.length)
+    // 历史事件不驻留内存：重启后新会话事件为空（调度状态已重放进卡片）
+    expect(w2.events.length).toBe(0)
     expect(w2.decks.length).toBe(w.decks.length)
+  })
+
+  it('历史事件不驻留：todayCount 与热力图重启后与重启前一致', () => {
+    const d = tmpKept()
+    const w = newWs(d)
+    const deck = w.addDeck('聚合组').id
+    const c1 = w.addCard(deck, '聚合一', '')
+    const c2 = w.addCard(deck, '聚合二', '')
+    w.answer(c1.id, 3)
+    w.answer(c2.id, 1)
+    w.answer(c2.id, 3)
+    const beforeToday = w.todayCount()
+    const beforeHeat = w.getStats({ deckId: null, range: 'year' }).reviews.reduce((a, r) => a + r.total, 0)
+    expect(beforeToday).toBe(3)
+    expect(beforeHeat).toBe(3)
+    // 撤销一张：热力图与今日计数同步回落
+    w.undo()
+    expect(w.todayCount()).toBe(2)
+    expect(w.getStats({ deckId: null, range: 'year' }).reviews.reduce((a, r) => a + r.total, 0)).toBe(2)
+
+    const w2 = newWs(d)
+    expect(w2.todayCount()).toBe(2)
+    expect(w2.getStats({ deckId: null, range: 'year' }).reviews.reduce((a, r) => a + r.total, 0)).toBe(2)
+    const again = w2.getStats({ deckId: null, range: 'year' }).heatmap.find((x) => x.date === new Date().toLocaleDateString('sv-SE'))!
+    expect(again.count).toBe(2) // undone 的 Again 不计（聚合已抵消）
+    expect(w2.events.length).toBe(0)
   })
 })
 
