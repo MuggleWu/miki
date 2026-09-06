@@ -210,7 +210,7 @@ input { user-select: text; }
 }
 .grid td { padding: 8px 12px; border-bottom: 1px solid var(--border); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 340px; cursor: pointer; }
 .grid tr.selected td { background: var(--active); }
-.grid tr:hover td { background: var(--hover); }
+.grid tbody tr:not([data-spacer]):hover td { background: var(--hover); }
 .colmenu {
   position: fixed; z-index: 70; background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
   padding: 8px; max-height: 60vh; overflow: auto; box-shadow: var(--shadow);

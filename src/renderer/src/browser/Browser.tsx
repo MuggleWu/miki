@@ -1,5 +1,6 @@
 // 卡片库（B 域）：牌组树 + 多关键词搜索 + 可配置列 + rotate 排序 + 右侧编辑面板
 // 布局：左栏宽 / 表格宽 / 列宽均可拖动并跨页保持；⌘F 聚焦搜索框
+// 虚拟滚动（B6）：行是单行 nowrap，行高恒定，首帧后实测一次；只渲染可视窗口行，上下用 spacer tr 撑开
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Md } from '../md'
 import { rotateSort } from '../../../core/query'
@@ -38,6 +39,11 @@ const DEFAULT_COL_WIDTH: Record<BrowserColumn, number> = {
 }
 
 const ALL_COLUMNS = Object.keys(COLUMN_LABEL) as BrowserColumn[]
+
+/** 行高估计值：首帧 spacer 用，渲染后用实测行高替换 */
+const ROW_H_ESTIMATE = 33
+/** 视口上下各多渲染的行数，滚动时不露白 */
+const OVERSCAN = 8
 
 const STATE_LABEL: Record<string, string> = { new: '未学习', learning: '学习中', review: '待复习' }
 
@@ -101,6 +107,10 @@ export function Browser() {
   const [editBack, setEditBack] = useState<string | null>(null)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const searchRef = useRef<HTMLInputElement>(null)
+  const gridWrapRef = useRef<HTMLDivElement>(null)
+  const [scrollTop, setScrollTop] = useState(0)
+  const [viewportH, setViewportH] = useState(600)
+  const [rowH, setRowH] = useState(ROW_H_ESTIMATE)
 
   // ⌘F：聚焦搜索框（光标到末尾）；⌘A：全选当前视图卡片（输入框聚焦时不拦）
   useEffect(() => {
@@ -131,7 +141,7 @@ export function Browser() {
 
   const query = useCallback(async () => {
     const kws = debouncedKw.split(/\s+/).filter(Boolean)
-    const r = await window.miki.queryCards({ deckId: browserDeckId, keywords: kws, sort, limit: 2000 })
+    const r = await window.miki.queryCards({ deckId: browserDeckId, keywords: kws, sort, limit: 100_000 })
     setRows(r.rows)
     setTotal(r.total)
   }, [browserDeckId, debouncedKw, sort])
@@ -145,6 +155,30 @@ export function Browser() {
     const t = setInterval(() => void query(), 60_000)
     return () => clearInterval(t)
   }, [query])
+
+  // 查询条件变化回到顶部；60 秒定时刷新不在依赖里，不打断当前位置
+  useEffect(() => {
+    gridWrapRef.current?.scrollTo({ top: 0 })
+    setScrollTop(0)
+  }, [browserDeckId, debouncedKw, sort])
+
+  // 容器高度（窗口缩放 / 拖动分栏）决定可视行数
+  useEffect(() => {
+    const el = gridWrapRef.current
+    if (!el) return
+    const ro = new ResizeObserver(() => setViewportH(el.clientHeight))
+    ro.observe(el)
+    setViewportH(el.clientHeight)
+    return () => ro.disconnect()
+  }, [])
+
+  // 行高实测：td 单行 nowrap 行高恒定，首帧渲染后测一次真实值，替换估计值
+  useEffect(() => {
+    if (rows.length === 0) return
+    const tr = gridWrapRef.current?.querySelector('tbody tr:not([data-spacer])')
+    const h = tr?.getBoundingClientRect().height ?? 0
+    if (h > 0 && Math.abs(h - rowH) > 0.5) setRowH(h)
+  }, [rows, rowH])
 
   // 离开时选中态持久化（跨启动恢复）：左树牌组 + 内容区主选中卡
   useEffect(() => {
@@ -286,6 +320,17 @@ export function Browser() {
     }
   }
 
+  // 虚拟滚动窗口：只渲染可视区 ± OVERSCAN 行
+  const top = Math.max(0, Math.floor(scrollTop / rowH) - OVERSCAN)
+  const winCount = Math.ceil(viewportH / rowH) + OVERSCAN * 2
+  const winRows = rows.slice(top, top + winCount)
+  const topPad = top * rowH
+  const bottomPad = Math.max(0, rows.length - (top + winCount)) * rowH
+  const spacerTd = (h: number) => ({
+    colSpan: columns.length,
+    style: { height: h, padding: 0, border: 'none' as const }
+  })
+
   return (
     <div
       className="browser"
@@ -333,6 +378,8 @@ export function Browser() {
         <div className="browser-body">
           <div
             className="grid-wrap"
+            ref={gridWrapRef}
+            onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
             style={gridWidth != null ? { width: gridWidth, flex: '0 0 auto' } : undefined}
           >
             <table
@@ -374,7 +421,12 @@ export function Browser() {
                     </td>
                   </tr>
                 )}
-                {rows.map((row) => (
+                {topPad > 0 && (
+                  <tr data-spacer aria-hidden="true">
+                    <td {...spacerTd(topPad)} />
+                  </tr>
+                )}
+                {winRows.map((row) => (
                   <tr
                     key={row.id}
                     className={row.id === selectedId || selection.includes(row.id) ? 'selected' : undefined}
@@ -386,6 +438,11 @@ export function Browser() {
                     ))}
                   </tr>
                 ))}
+                {bottomPad > 0 && (
+                  <tr data-spacer aria-hidden="true">
+                    <td {...spacerTd(bottomPad)} />
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
