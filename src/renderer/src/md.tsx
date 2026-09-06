@@ -24,7 +24,7 @@ const BLOCK_MATH = /\$\$([\s\S]+?)\$\$/g
 const INLINE_MATH = /\$([^$\n]+?)\$/g
 
 /** 公式先抽成占位符，markdown 渲染后回填 KaTeX，避免公式被 markdown 规则破坏 */
-function render(src: string): string {
+export function renderMd(src: string): string {
   const math: { expr: string; display: boolean }[] = []
   const stash = (expr: string, display: boolean): string => {
     math.push({ expr, display })
@@ -52,6 +52,6 @@ function render(src: string): string {
 }
 
 export function Md({ source }: { source: string }) {
-  const html = useMemo(() => render(source ?? ''), [source])
+  const html = useMemo(() => renderMd(source ?? ''), [source])
   return <div className="md" dangerouslySetInnerHTML={{ __html: html }} />
 }
