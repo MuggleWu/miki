@@ -21,6 +21,9 @@ interface AppStore {
   studyCurrentCardId: string | null
   browserDeckId: string | null
   browserFocusCardId: string | null
+  /** 卡片库界面态：切走再切回保持原样（列配置/排序在 config 里持久化） */
+  browserKeywords: string
+  browserSelectedId: string | null
   dialog: DialogState | null
   setTab: (t: Tab) => void
   reload: () => Promise<void>
@@ -30,6 +33,8 @@ interface AppStore {
   openDialog: (d: DialogState) => void
   closeDialog: () => void
   setStudyCurrentCardId: (id: string | null) => void
+  setBrowserKeywords: (kw: string) => void
+  setBrowserSelectedId: (id: string | null) => void
 }
 
 export const useApp = create<AppStore>((set) => ({
@@ -42,6 +47,8 @@ export const useApp = create<AppStore>((set) => ({
   studyCurrentCardId: null,
   browserDeckId: null,
   browserFocusCardId: null,
+  browserKeywords: '',
+  browserSelectedId: null,
   dialog: null,
 
   setTab: (t) => set({ tab: t }),
@@ -66,7 +73,9 @@ export const useApp = create<AppStore>((set) => ({
 
   openDialog: (d) => set({ dialog: d }),
   closeDialog: () => set({ dialog: null }),
-  setStudyCurrentCardId: (id) => set({ studyCurrentCardId: id })
+  setStudyCurrentCardId: (id) => set({ studyCurrentCardId: id }),
+  setBrowserKeywords: (kw) => set({ browserKeywords: kw }),
+  setBrowserSelectedId: (id) => set({ browserSelectedId: id })
 }))
 
 /** NF3：输入控件聚焦时单字母快捷键失效 */

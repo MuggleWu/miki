@@ -44,13 +44,16 @@ export function Browser() {
   const config = useApp((s) => s.config)
   const browserDeckId = useApp((s) => s.browserDeckId)
   const browserFocusCardId = useApp((s) => s.browserFocusCardId)
+  const browserKeywords = useApp((s) => s.browserKeywords)
+  const setBrowserKeywords = useApp((s) => s.setBrowserKeywords)
+  const selectedId = useApp((s) => s.browserSelectedId)
+  const setSelectedId = useApp((s) => s.setBrowserSelectedId)
   const openBrowser = useApp((s) => s.openBrowser)
 
-  const [keywords, setKeywords] = useState('')
-  const [debouncedKw, setDebouncedKw] = useState('')
+  const keywords = browserKeywords
+  const [debouncedKw, setDebouncedKw] = useState(browserKeywords)
   const [rows, setRows] = useState<CardRow[]>([])
   const [total, setTotal] = useState(0)
-  const [selectedId, setSelectedId] = useState<string | null>(null)
   const [columns, setColumns] = useState<BrowserColumn[]>(config?.browser.columns ?? ['front', 'deckName', 'state', 'due', 'updatedAt'])
   const [sort, setSort] = useState<SortKey[]>(config?.browser.sort ?? [{ col: 'updatedAt', asc: false }])
   const [colMenu, setColMenu] = useState<{ x: number; y: number } | null>(null)
@@ -174,7 +177,7 @@ export function Browser() {
         <div className="browser-toolbar">
           <input
             value={keywords}
-            onChange={(e) => setKeywords(e.target.value)}
+            onChange={(e) => setBrowserKeywords(e.target.value)}
             placeholder="搜索：多个关键词空格分隔（AND）"
           />
           <span style={{ color: 'var(--text-dim)', fontSize: 12 }}>
@@ -227,7 +230,7 @@ export function Browser() {
             {selected && editFront != null && editBack != null && (
               <>
                 <div>
-                  <div className="block-title">正面 · 左源码右预览（自动保存）</div>
+                  <div className="block-title">正面（自动保存）</div>
                   <div className="block">
                     <textarea value={editFront} onChange={(e) => { setEditFront(e.target.value); scheduleSave(e.target.value, editBack) }} />
                     <div className="preview">
@@ -236,7 +239,7 @@ export function Browser() {
                   </div>
                 </div>
                 <div>
-                  <div className="block-title">反面 · 左源码右预览（自动保存）</div>
+                  <div className="block-title">反面（自动保存）</div>
                   <div className="block">
                     <textarea value={editBack} onChange={(e) => { setEditBack(e.target.value); scheduleSave(editFront, e.target.value) }} />
                     <div className="preview">
