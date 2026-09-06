@@ -86,4 +86,7 @@ MIKI_BENCH=1 NODE_OPTIONS=--expose-gc npx vitest run src/main/__tests__/minevent
 
 ## 打包
 
-electron-builder 的图标资源已就位（`build/icon.icns` / `resources/icon.png`），安装器与分发待 M4。
+- `npm run pack:mac`：electron-vite build + electron-builder（`--dir` 目标，配置在 package.json 的 `build` 字段），产物 `release/mac-arm64/Miki.app`（arm64；appId `com.mugglewu.miki`，图标 `resources/icon.png` 1024²，本地构建不做签名 `identity: null`）。
+- 安装：`cp -R release/mac-arm64/Miki.app /Applications/` 后 `open /Applications/Miki.app`；新装应用按名字启动（`open -a Miki` / Raycast 搜 "miki"）需等 LaunchServices 索引，或用 `lsregister -f /Applications/Miki.app` 立即注册。
+- 工作区解析：`MIKI_WORKSPACE` 环境变量 → `~/Library/Application Support/Miki/workspace.json`（`{"workspacePath": ...}`）→ 默认 `~/miki-base`。打包版从 Raycast/Dock 启动无环境变量，靠 workspace.json 指到数据工作区。
+- 单实例锁：`app.requestSingleInstanceLock()`，第二个实例静默退出并唤起已有窗口（防 Raycast 与 dev 双开并发写同一工作区）。

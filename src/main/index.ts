@@ -98,6 +98,19 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
+  // 单实例锁：双开（Raycast/Dock 启动 + dev 实例）会并发写同一工作区的事件日志与检查点
+  if (!app.requestSingleInstanceLock()) {
+    app.quit()
+    return
+  }
+  app.on('second-instance', () => {
+    if (win && !win.isDestroyed()) {
+      if (win.isMinimized()) win.restore()
+      win.show()
+      win.focus()
+    }
+  })
+
   // 开发模式下 dock 没有打包后的 icns 可用，手动铺上应用图标
   if (process.platform === 'darwin' && !app.isPackaged && app.dock) {
     app.dock.setIcon(path.join(app.getAppPath(), 'resources/icon.png'))

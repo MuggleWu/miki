@@ -9,8 +9,28 @@
     "postinstall": "node scripts/fix-dev-app-name.js",
     "build": "electron-vite build",
     "start": "electron-vite preview",
+    "pack:mac": "npm run build && electron-builder --dir",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
+  },
+  "build": {
+    "appId": "com.mugglewu.miki",
+    "productName": "Miki",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "out/**"
+    ],
+    "asar": true,
+    "mac": {
+      "icon": "resources/icon.png",
+      "identity": null,
+      "category": "public.app-category.productivity",
+      "target": [
+        "dir"
+      ]
+    }
   },
   "dependencies": {
     "echarts": "^5.5.0",
@@ -29,6 +49,7 @@
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",
     "electron": "^33.0.0",
+    "electron-builder": "^26.15.3",
     "electron-vite": "^2.3.0",
     "typescript": "^5.5.4",
     "vite": "^5.4.0",
