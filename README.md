@@ -1,5 +1,7 @@
 # miki
 
+English | [简体中文](README-zh.md)
+
 A local-first spaced repetition app — an Anki alternative with FSRS-6 scheduling, built with Electron + React.
 
 本地优先的记忆卡片应用（Anki 替代品）：FSRS-6 调度、事件溯源复习日志、纯文件工作区。
@@ -7,10 +9,10 @@ A local-first spaced repetition app — an Anki alternative with FSRS-6 scheduli
 ## Features
 
 - **FSRS-6 scheduling** — ported from py-fsrs v6.3.2, verified against 44 generated conformance vectors; every rating button previews the next due date before you commit
-- **Five views** — decks, study, card browser, stats (forecast / heatmap / reviews / card states / intervals), and settings
+- **Five views** — decks (table sorted by name), study, card browser, stats (forecast / heatmap / reviews / card states / intervals), and settings
 - **Leech handling** — a card that reaches the lapse threshold is auto-suspended: it leaves the queue and all counts, shows as ⏸ in the browser, and can be unsuspended with one click
-- **Card browser** — multi-keyword AND search, configurable columns with drag-resizable widths and rotate sort, resizable side/panel dividers, inline editor with live Markdown preview
-- **Study fonts** — configurable typeface and size for the card face, with a live sample in Settings
+- **Card browser** — multi-keyword AND search, configurable columns with drag-resizable widths and rotate sort, resizable side/panel dividers, inline editor with live Markdown preview; due shown in two columns — relative ("5 分钟后") and absolute ("2026-09-06 16:49")
+- **Study fonts** — configurable typeface and size for the card face, with a live sample in Settings; defaults follow the system font at 16px, matching Obsidian
 - **Rich card content** — Markdown + KaTeX + syntax highlighting
 - **Event-sourced review log** — append-only NDJSON; undo works by compensating events with self-contained snapshots
 - **Plain-file workspace** — data lives in a folder separate from the app, git-friendly, sync with any tool
