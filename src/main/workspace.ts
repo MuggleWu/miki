@@ -43,6 +43,8 @@ interface DeckIndex {
     learningDueToday: number
     reviewDueToday: number
   }
+  /** 堆是否已构建：init/跨天重建只建计数器（首页/统计够用），堆推迟到首次取卡时全量构建 */
+  built: boolean
 }
 
 function atomicWrite(file: string, data: string): void {
@@ -252,7 +254,7 @@ export class WorkspaceService {
     this.cards = new Map()
     this.deckCheckpoints = new Map()
     for (const deck of this.decks) {
-      const rows = new Map<string, { row: CardCheckpointRow; seq: number }>()
+      const rows = new Map<string, CardCheckpointRow>()
       let cp = 0
       for (const line of readNdjson(this.deckCardsFile(deck.id))) {
         let row: CardCheckpointRow
@@ -265,7 +267,10 @@ export class WorkspaceService {
           cp = Number((row as { __mikiCheckpoint?: number }).__mikiCheckpoint) || 0
           continue
         }
-        if (row && typeof row.id === 'string') rows.set(row.id, { row, seq: row.__mikiSeq ?? cp })
+        if (row && typeof row.id === 'string') {
+          row.__mikiSeq ??= cp
+          rows.set(row.id, row)
+        }
       }
       for (const line of readNdjson(this.deckDeltaFile(deck.id))) {
         let row: (CardCheckpointRow & { __mikiTombstone?: boolean }) | null
@@ -281,38 +286,29 @@ export class WorkspaceService {
         }
         // move 快照行自带水位；内容变更行只承载内容，继承基行的调度快照与水位
         const prev = rows.get(row.id)
-        let seq: number
         if (row.__mikiSeq !== undefined) {
-          seq = row.__mikiSeq
+          // 水位已在行上
         } else if (prev) {
-          if (row.fsrs === undefined) row.fsrs = prev.row.fsrs
-          if (row.reps === undefined) row.reps = prev.row.reps
-          if (row.lapses === undefined) row.lapses = prev.row.lapses
-          seq = prev.seq
+          if (row.fsrs === undefined) row.fsrs = prev.fsrs ? { ...prev.fsrs } : prev.fsrs
+          if (row.reps === undefined) row.reps = prev.reps
+          if (row.lapses === undefined) row.lapses = prev.lapses
+          row.__mikiSeq = prev.__mikiSeq
         } else {
-          seq = cp
+          row.__mikiSeq = cp
         }
-        rows.set(row.id, { row, seq })
+        rows.set(row.id, row)
       }
       this.deckCheckpoints.set(deck.id, cp)
-      for (const { row, seq } of rows.values()) {
-        const content: CardContent = {
-          id: row.id,
-          front: row.front,
-          back: row.back,
-          createdAt: row.createdAt,
-          updatedAt: row.updatedAt,
-          deletedAt: row.deletedAt ?? null,
-          suspended: !!row.suspended
-        }
-        this.cards.set(row.id, {
-          ...content,
-          deckId: deck.id,
-          fsrs: row.fsrs ? { ...row.fsrs } : null,
-          reps: row.reps ?? 0,
-          lapses: row.lapses ?? 0,
-          seqApplied: seq
-        })
+      for (const row of rows.values()) {
+        // 行对象直接升级为卡（避免每卡再分配 content 中间对象与 fsrs 拷贝）
+        const card = row as unknown as Card
+        card.deckId = deck.id
+        card.fsrs = row.fsrs ?? null
+        card.reps = row.reps ?? 0
+        card.lapses = row.lapses ?? 0
+        card.seqApplied = row.__mikiSeq ?? cp
+        delete (card as unknown as CardCheckpointRow).__mikiSeq
+        this.cards.set(card.id, card)
       }
     }
   }
@@ -394,7 +390,8 @@ export class WorkspaceService {
         learning: new MinHeap(),
         review: new MinHeap(),
         fresh: new MinHeap(),
-        counts: { new: 0, learningAll: 0, learningDueToday: 0, reviewDueToday: 0 }
+        counts: { new: 0, learningAll: 0, learningDueToday: 0, reviewDueToday: 0 },
+        built: false
       }
       this.idx.set(deckId, x)
     }
@@ -424,24 +421,54 @@ export class WorkspaceService {
     this.orderCounter = tie
   }
 
-  /** 按当前状态入堆 + 加计数（调用方保证卡未删未暂停、牌组未删）；tie 取卡上分配好的插入序 */
+  /** 按当前状态加计数 +（堆已构建时）入堆（调用方保证卡未删未暂停、牌组未删）；tie 取卡上分配好的插入序 */
   private classPush(c: Card, ix: DeckIndex, eot: number): void {
     if (c.tie == null) c.tie = ++this.orderCounter
     const st = displayState(c)
     if (st === 'new') {
       ix.counts.new++
-      ix.fresh.push({ key: c.createdAt, tie: c.tie, id: c.id })
+      if (ix.built) ix.fresh.push({ key: c.createdAt, tie: c.tie, id: c.id })
       return
     }
     const due = c.fsrs!.due
     if (st === 'review') {
       if (due <= eot) ix.counts.reviewDueToday++
-      ix.review.push({ key: due, tie: c.tie, id: c.id })
+      if (ix.built) ix.review.push({ key: due, tie: c.tie, id: c.id })
       return
     }
     ix.counts.learningAll++
     if (due <= eot) ix.counts.learningDueToday++
+    if (ix.built) ix.learning.push({ key: due, tie: c.tie, id: c.id })
+  }
+
+  /** 仅入堆不计数（ensureBuilt 专用，计数已就绪） */
+  private pushOnly(c: Card, ix: DeckIndex): void {
+    if (c.tie == null) c.tie = ++this.orderCounter
+    const st = displayState(c)
+    if (st === 'new') {
+      ix.fresh.push({ key: c.createdAt, tie: c.tie, id: c.id })
+      return
+    }
+    const due = c.fsrs!.due
+    if (st === 'review') {
+      ix.review.push({ key: due, tie: c.tie, id: c.id })
+      return
+    }
     ix.learning.push({ key: due, tie: c.tie, id: c.id })
+  }
+
+  /** 首次取卡前全量构建该牌组的堆（百万卡 init 只建计数器，首次进学习页才付建堆成本） */
+  private ensureBuilt(deckId: string): DeckIndex {
+    const ix = this.deckIdx(deckId)
+    if (ix.built) return ix
+    ix.built = true
+    const hidden = new Set(this.decks.filter((d) => d.deletedAt).map((d) => d.id))
+    for (const c of this.cards.values()) {
+      if (c.deckId !== deckId || c.deletedAt || c.suspended || hidden.has(c.deckId)) continue
+      if (c.tie == null) c.tie = ++this.orderCounter
+      this.pushOnly(c, ix)
+    }
+    return ix
   }
 
   /** 按变更前状态减计数（堆条目不删，弹出时惰性失效） */
@@ -496,7 +523,7 @@ export class WorkspaceService {
   }
 
   private pickNextIdx(deckId: string, now: number): Card | null {
-    const ix = this.deckIdx(deckId)
+    const ix = this.ensureBuilt(deckId)
     const learning = this.heapNext(ix.learning, deckId, now, (c, e) => !!c.fsrs && displayState(c) === 'learning' && c.fsrs!.due === e.key)
     if (learning) return learning
     const review = this.heapNext(ix.review, deckId, now, (c, e) => displayState(c) === 'review' && c.fsrs!.due === e.key)
