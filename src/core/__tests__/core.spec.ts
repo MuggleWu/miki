@@ -127,8 +127,15 @@ describe('replay', () => {
 })
 
 describe('queue（D3 不限额）', () => {
-  it('learning 到期 → review 到期 → new 的优先序', () => {
+  const eotOf = (now: number): number => {
+    const d = new Date(now)
+    d.setHours(23, 59, 59, 999)
+    return d.getTime()
+  }
+
+  it('learning 到点 → review 当日到期 → new 的优先序', () => {
     const now = T0 + 10 * DAY
+    const eot = eotOf(now)
     const learnDue = cardOf('l1')
     learnDue.fsrs = sched.review(null, 1, T0) // Again → 1min 后
     const reviewDue = cardOf('r1')
@@ -136,20 +143,57 @@ describe('queue（D3 不限额）', () => {
     reviewDue.fsrs.due = now - 1000 // 已过期
     const fresh = cardOf('n1')
     const cards = [fresh, reviewDue, learnDue]
-    expect(pickNext(cards, now)!.id).toBe('l1')
+    expect(pickNext(cards, now, eot)!.id).toBe('l1')
     const cards2 = [fresh, reviewDue]
-    expect(pickNext(cards2, now)!.id).toBe('r1')
-    expect(pickNext([fresh], now)!.id).toBe('n1')
-    expect(pickNext([], now)).toBeNull()
+    expect(pickNext(cards2, now, eot)!.id).toBe('r1')
+    expect(pickNext([fresh], now, eot)!.id).toBe('n1')
+    expect(pickNext([], now, eot)).toBeNull()
+  })
+
+  it('刷完旧卡才能刷新卡：当日稍后到点的复习卡先于新卡', () => {
+    const now = T0 + 10 * DAY // 上午
+    const eot = eotOf(now)
+    const laterToday = cardOf('r2')
+    laterToday.fsrs = {
+      state: FSRS_STATE.Review, step: null, stability: 5, difficulty: 5,
+      due: eot - 3_600_000, lastReview: now - DAY // 今日 22 点到期，此刻未到点
+    }
+    const fresh = cardOf('n1')
+    expect(pickNext([fresh, laterToday], now, eot)!.id).toBe('r2')
+  })
+
+  it('明日及以后到期的复习卡不阻塞新卡', () => {
+    const now = T0 + 10 * DAY
+    const eot = eotOf(now)
+    const tomorrow = cardOf('r3')
+    tomorrow.fsrs = {
+      state: FSRS_STATE.Review, step: null, stability: 5, difficulty: 5,
+      due: eot + 60_000, lastReview: now - DAY // 明日到期
+    }
+    const fresh = cardOf('n1')
+    expect(pickNext([fresh, tomorrow], now, eot)!.id).toBe('n1')
+  })
+
+  it('学习中回炉卡未到点不阻塞新卡，到点后插回优先位', () => {
+    const now = T0 + 10 * DAY
+    const eot = eotOf(now)
+    const comeback = cardOf('l2')
+    comeback.fsrs = sched.review(null, 3, T0) // Good → 10min 步进
+    comeback.fsrs.due = now + 5 * 60_000 // 5 分钟后到期
+    const fresh = cardOf('n1')
+    expect(pickNext([fresh, comeback], now, eot)!.id).toBe('n1')
+    comeback.fsrs.due = now // 到点了
+    expect(pickNext([fresh, comeback], now, eot)!.id).toBe('l2')
   })
 
   it('同 rank 按 due 升序', () => {
     const now = T0 + 10 * DAY
+    const eot = eotOf(now)
     const a = cardOf('a')
     const b = cardOf('b')
     a.fsrs = { state: FSRS_STATE.Review, step: null, stability: 5, difficulty: 5, due: now - 2000, lastReview: T0 }
     b.fsrs = { state: FSRS_STATE.Review, step: null, stability: 5, difficulty: 5, due: now - 1000, lastReview: T0 }
-    expect(pickNext([b, a], now)!.id).toBe('a')
+    expect(pickNext([b, a], now, eot)!.id).toBe('a')
   })
 
   it('remaining 与 deckCounts 口径', () => {
@@ -176,7 +220,7 @@ describe('queue（D3 不限额）', () => {
     const normal = cardOf('p3')
     normal.fsrs = sched.review(null, 1, T0) // 1min 后到期
     const cards = [pausedNew, pausedDue, normal]
-    expect(pickNext(cards, now)!.id).toBe('p3')
+    expect(pickNext(cards, now, endOfToday.getTime())!.id).toBe('p3')
     expect(remainingCount(cards, endOfToday.getTime())).toBe(1)
     expect(deckCounts(cards, endOfToday.getTime())).toEqual({ new: 0, learning: 1, review: 0 })
   })

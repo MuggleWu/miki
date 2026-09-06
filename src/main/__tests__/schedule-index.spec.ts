@@ -42,7 +42,7 @@ function assertIndexMatchesScan(w: WorkspaceService): void {
   for (const deck of w.decks) {
     const list = refCards(w, deck.id)
     const study = w.getStudy(deck.id)
-    const refCard = pickNext(list, now)
+    const refCard = pickNext(list, now, eot)
     expect(study.card?.id ?? null, `pickNext mismatch deck=${deck.name}`).toBe(refCard?.id ?? null)
     expect(study.remaining, `remaining mismatch deck=${deck.name}`).toBe(remainingCount(list, eot))
     const info = w.deckInfos().find((x) => x.id === deck.id)

@@ -179,7 +179,9 @@ input { user-select: text; }
 .dual {
   display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;
 }
-.dual textarea { min-height: 110px; width: 100%; font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 12.5px; line-height: 1.6; }
+/* field-sizing: content：输入框随内容增高（不再固定行高内滚），超出部分由弹窗整体滚动；
+   预览无上限，随同一行自然伸展，长内容两侧都能看全 */
+.dual textarea { field-sizing: content; min-height: 110px; width: 100%; font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 12.5px; line-height: 1.6; }
 .dual .preview { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; min-height: 110px; overflow: auto; }
 .dual .tag { color: var(--text-dim); font-size: 11px; margin-bottom: 5px; display: flex; justify-content: space-between; }
 
