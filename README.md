@@ -50,12 +50,19 @@ Single-key shortcuts are ignored while typing in a text field, so `Ctrl+C/V` etc
 npm install
 npm run dev        # dev mode
 npm run build      # production build
+npm run pack:mac   # package the macOS app (release/mac-arm64/Miki.app)
 npm run typecheck  # strict TypeScript, no emit
 npm test           # FSRS vector conformance + core regression tests
 npm start          # run the built app
 ```
 
-Runs on macOS, Windows and Linux (standard Electron window, no platform-specific APIs). Binary packaging/installers are planned; for now run from source.
+Runs on macOS, Windows and Linux (standard Electron window, no platform-specific APIs).
+
+## Packaging & install (macOS)
+
+`npm run pack:mac` builds a standalone app with electron-builder: `release/mac-arm64/Miki.app` — Dock and menu show Miki with the app icon (appId `com.mugglewu.miki`); local builds are unsigned. Copy it to `/Applications` and launch from **Raycast (type `miki`)**, Spotlight, or the Dock; the app is single-instance — launching it again just focuses the existing window.
+
+Workspace resolution for the packaged app: `MIKI_WORKSPACE` env → `~/Library/Application Support/Miki/workspace.json` (`{"workspacePath": …}`) → defaults to `~/miki-base`. For the packaging workflow and LaunchServices registration details, see the "打包" (Packaging) section in [docs/development.md](docs/development.md).
 
 ## HTTP API & MCP
 

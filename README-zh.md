@@ -50,12 +50,19 @@ Anki 是非常优秀的软件，帮助了很多人；FSRS 算法同样非常优�
 npm install
 npm run dev        # 开发模式
 npm run build      # 生产构建
+npm run pack:mac   # 打包 macOS App（release/mac-arm64/Miki.app）
 npm run typecheck  # TypeScript 严格检查（不产出文件）
 npm test           # FSRS 基准向量比对 + 核心回归测试
 npm start          # 运行构建产物
 ```
 
-支持 macOS、Windows、Linux（标准 Electron 窗口，无平台专属 API）。二进制打包与安装器后续提供，当前请从源码运行。
+支持 macOS、Windows、Linux（标准 Electron 窗口，无平台专属 API）。
+
+## 打包与安装（macOS）
+
+`npm run pack:mac` 用 electron-builder 产出独立 App：`release/mac-arm64/Miki.app`——Dock 与菜单栏显示 Miki、自带应用图标（appId `com.mugglewu.miki`），本地构建不做签名。复制到 `/Applications` 后即可从 **Raycast（输入 `miki`）**、Spotlight 或 Dock 启动；应用全局单实例，重复启动只唤起已有窗口。
+
+打包版的工作区解析：`MIKI_WORKSPACE` 环境变量 → `~/Library/Application Support/Miki/workspace.json`（`{"workspacePath": …}`）→ 缺省 `~/miki-base`。打包流程、LaunchServices 注册等工作区配置细节见 [docs/development.md](docs/development.md)「打包」一节。
 
 ## HTTP API 与 MCP
 
