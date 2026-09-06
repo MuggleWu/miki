@@ -23,7 +23,7 @@ export interface CardSnapshot {
 export interface ReviewEvent {
   seq: number
   t: number // ms epoch
-  action: 'answer' | 'delete' | 'undo'
+  action: 'answer' | 'delete' | 'undo' | 'reset'
   cardId: string
   deckId: string
   rating?: Rating

@@ -76,6 +76,26 @@ describe('replay', () => {
     expect(c.fsrs).toEqual(evs[2].before)
   })
 
+  it('reset 清零调度与统计，其后再答题正常累积', () => {
+    let c = cardOf('c4')
+    const evs: ReviewEvent[] = [answerEv(1, c, 1, T0), answerEv(2, c, 3, T0 + 60_000)]
+    c = replayCard(content('c4'), 'd1', evs)
+    expect(c.reps).toBe(2)
+    expect(c.fsrs).not.toBeNull()
+    // 重置：变回新卡
+    const resetEv: ReviewEvent = { seq: 3, t: T0 + 120_000, action: 'reset', cardId: c.id, deckId: c.deckId, before: c.fsrs }
+    evs.push(resetEv)
+    c = replayCard(content('c4'), 'd1', evs)
+    expect(c.fsrs).toBeNull()
+    expect(c.reps).toBe(0)
+    expect(c.lapses).toBe(0)
+    // 重置后再答题照常推进
+    evs.push(answerEv(4, c, 3, T0 + 180_000))
+    c = replayCard(content('c4'), 'd1', evs)
+    expect(c.reps).toBe(1)
+    expect(c.fsrs).not.toBeNull()
+  })
+
   it('delete 软删后 undo 恢复', () => {
     let c = cardOf('c3')
     const evs = [answerEv(1, c, 4, T0)]

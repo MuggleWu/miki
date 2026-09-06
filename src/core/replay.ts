@@ -26,6 +26,11 @@ export function replayCard(
       if (ev.rating === 1) card.lapses++
     } else if (ev.action === 'delete') {
       card.deletedAt = ev.t
+    } else if (ev.action === 'reset') {
+      // 重置进度：调度状态与答题统计全部清零，卡片变回新卡（不可撤销）
+      card.fsrs = null
+      card.reps = 0
+      card.lapses = 0
     } else {
       // undo：恢复 target 事件之前的调度状态；内容删除状态一并恢复
       const target = ev.targetSeq != null ? bySeq.get(ev.targetSeq) : undefined
