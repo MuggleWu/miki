@@ -539,8 +539,13 @@ export class WorkspaceService {
       before: target.before ?? null
     }
     this.appendEvents([ev])
-    // 内存恢复：answer 撤销 → 回到 before（新卡回 new）；delete 撤销 → 取消软删
+    // 内存恢复：answer 撤销 → 回到 before（新卡回 new）并回退 reps/lapses（与 replay 抵消语义一致）；
+    // delete 撤销 → 取消软删
     card.fsrs = ev.before ? { ...ev.before } : target.action === 'answer' ? null : card.fsrs
+    if (target.action === 'answer') {
+      card.reps = Math.max(0, card.reps - 1)
+      if (target.rating === 1) card.lapses = Math.max(0, card.lapses - 1)
+    }
     if (target.action === 'delete') card.deletedAt = null
     this.saveDeckCards(card.deckId)
     const list = this.deckCards(card.deckId)
