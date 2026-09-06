@@ -21,6 +21,7 @@ Anki 是非常优秀的软件，帮助了很多人；FSRS 算法同样非常优�
 - **刷卡字体** — 卡面字体与字号可配置，设置页带实时示例；默认跟随系统字体、16px，与 Obsidian 一致
 - **富卡片内容** — Markdown + KaTeX + 代码高亮
 - **事件溯源复习日志** — 只追加的 NDJSON；撤销通过自带快照的补偿事件实现
+- **百万卡级性能** — 事件溯源架构上的极限优化：历史事件流式重放不驻留内存（百万历史事件重启仅占 22MB）、调度索引增量化（答题 0.12ms、撤销 0.3ms）、检查点 + delta 追加写（撤销写放大从整文件重写降为一次追加，冷启动 5.3s）；测试随机对拍保证调度语义与全量扫描严格一致
 - **纯文件工作区** — 数据存放在独立于应用的文件夹，git 友好，可用任意工具同步
 - **浅色 / 深色主题** — 默认浅色
 - **每日不限量** — 先学习队列，再到期复习，最后新卡
@@ -82,13 +83,15 @@ MIKI_TOKEN=<config.json 中的 api.token> node scripts/mcp-server.mjs
 数据存放在一个纯文件夹中（由 `MIKI_WORKSPACE` 环境变量解析，缺省回落到 `~/miki-base`）：
 
 ```
-config.json                     # 应用配置（FSRS 参数、主题、刷卡字体、leech 阈值、卡片库与首页布局）
-decks.json                      # 牌组列表
-cards/<deck-id>.ndjson          # 卡片内容，每行一个 JSON 对象（含 suspended 暂停标记）
-review-log/<yyyy-mm>.ndjson     # 只追加的复习事件（answer / delete / undo / reset）
+config.json                        # 应用配置（FSRS 参数、主题、刷卡字体、leech 阈值、卡片库与首页布局）
+decks.json                         # 牌组列表
+stats.json                         # 统计聚合检查点（热力图聚合 + 事件水位）
+cards/<deck-id>.ndjson             # 卡片基文件（检查点快照行，含 suspended 暂停标记）
+cards/<deck-id>.delta.ndjson       # 卡片增量变更（编辑 / 移动 / 墓碑），只追加
+review-log/<yyyy-mm>.ndjson        # 只追加的复习事件（answer / delete / undo / reset / suspend）
 ```
 
-`review-log` 是调度状态的唯一真理来源；卡片状态通过重放事件重建。完整字段与事件协议见 [docs/data-format.md](docs/data-format.md)。
+`review-log` 是调度状态的真理来源；卡片基文件 + delta 是内容真理的检查点形式，两者以事件水位对齐。完整字段、压实规则与重放协议见 [docs/data-format.md](docs/data-format.md)。
 
 ## 致谢
 

@@ -40,7 +40,9 @@ docs/                # 本目录
 关键约束：
 
 - **`core/` 不允许 import Electron 或 node:fs**——它是纯函数层，调度正确性由基准向量锁定，这样才有测试价值。
-- **所有写路径都走 `WorkspaceService`**：先落盘（原子写 / 追加），后更新内存；review-log 是唯一真理来源（见 [data-format.md](data-format.md)）。
+- **所有写路径都走 `WorkspaceService`**：先落盘（原子写 / 追加），后更新内存；review-log 是调度真理来源，卡片文件是内容真理来源，两者以事件水位对齐（见 [data-format.md](data-format.md)）。
+- **单事件应用只有一份语义**：`core/replay.ts` 的 `applyEvent` 同时服务全量重放与启动流式重放，改语义两处自然同步。
+- **调度索引语义以全量扫描为基准**：`schedule-index.spec.ts` 用 200 步随机操作对拍索引取卡/计数与全量扫描，保证增量结构不漂移。
 - 代码与用户数据物理分离：仓库里不出现任何真实卡片内容与工作区路径。
 
 ## 测试
@@ -49,7 +51,9 @@ docs/                # 本目录
 | --- | --- |
 | `src/core/__tests__/fsrs.spec.ts` | FSRS-6 基准向量比对：552 组固定输入的期望输出由 py-fsrs v6.3.2 官方实现生成（tools/ 下脚本），TS 实现逐例比对 state/step/stability/difficulty/due |
 | `src/core/__tests__/core.spec.ts` | replay / queue / query / stats 口径 |
-| `src/main/__tests__/workspace.spec.ts` | 服务层不变量：undo 语义、leech、重放一致性、损坏容错、配置持久化 |
+| `src/main/__tests__/workspace.spec.ts` | 服务层不变量：undo 语义、leech、suspend 事件化、重放一致性、事件不驻留、损坏容错、配置持久化 |
+| `src/main/__tests__/schedule-index.spec.ts` | 调度索引对拍：200 步随机操作（答题/撤销/删除/暂停/重置/跨天）后，索引取卡与计数逐牌组比对全量扫描基准 |
+| `src/main/__tests__/checkpoint.spec.ts` | 检查点 + delta 写路径：调度类操作零卡片写、move 墓碑往返幂等、压实前后一致、stats.json 增量重放、旧格式兼容 |
 | `src/main/__tests__/api-server.spec.ts` | HTTP API 安全链与 CRUD（真实监听临时端口） |
 | `src/renderer/src/__tests__/md.spec.ts` | Markdown 渲染 |
 
@@ -68,10 +72,13 @@ python3 tools/gen-fsrs-vectors-random.py     # 随机参数 507 例 → tools/fs
 
 ```bash
 MIKI_BENCH=1 npx vitest run src/main/__tests__/perf.spec.ts
-MIKI_BENCH_N=50000 MIKI_BENCH=1 npx vitest run src/main/__tests__/perf.spec.ts  # 加大规模
+MIKI_BENCH_N=1000000 MIKI_BENCH=1 npx vitest run src/main/__tests__/perf.spec.ts  # 百万卡极限
+MIKI_BENCH=1 NODE_OPTIONS=--expose-gc npx vitest run src/main/__tests__/minevents.spec.ts  # 事件不驻留验收
 ```
 
-默认跳过，不影响 `npm test`。输出为各核心操作耗时表（导入 / 查询 / 答题 / 重放 / 批量删除 / 撤销）。
+默认跳过，不影响 `npm test`。perf.spec 输出各核心操作耗时表（导入 / 查询 / 答题 / 重放 / 批量删除 / 撤销）；minevents.spec 构造 100 万历史事件重启，断言 `events` 不驻留且 heapUsed 远低于事件总量（需 `--expose-gc` 排除 parse 垃圾干扰）。
+
+百万卡参考值（2026-09-06，M 系列笔记本）：答题 0.12ms/次、撤销 0.3ms、批量删 1000 张 6.1ms、冷启动 5.3s、百万历史事件重启 heapUsed 22MB。
 
 ## FSRS 升级路径
 

@@ -6,10 +6,12 @@ Miki 的全部数据存放在一个纯文件夹（下称「工作区」）里，
 
 ```
 <workspace>/
-├── config.json                  # 应用配置（含 HTTP API 设置）
-├── decks.json                   # 牌组列表
-├── cards/<deck-id>.ndjson       # 卡片内容，每行一个 JSON 对象
-└── review-log/<yyyy-mm>.ndjson  # 复习事件日志，只追加
+├── config.json                        # 应用配置（含 HTTP API 设置）
+├── decks.json                         # 牌组列表
+├── stats.json                         # 统计聚合检查点（热力图聚合 + 事件水位）
+├── cards/<deck-id>.ndjson             # 卡片基文件（检查点快照行），追加 + 压实
+├── cards/<deck-id>.delta.ndjson       # 卡片增量变更（内容覆盖 / 移入行 / 墓碑），只追加
+└── review-log/<yyyy-mm>.ndjson        # 复习事件日志，只追加
 ```
 
 ## config.json
@@ -39,17 +41,42 @@ Miki 的全部数据存放在一个纯文件夹（下称「工作区」）里，
 
 删除牌组是软删（`deletedAt` 置时间戳）：其下卡片文件不删除，但不再出现在任何视图与调度里。
 
-## cards/&lt;deck-id&gt;.ndjson
+## cards/&lt;deck-id&gt;.ndjson（基文件）
 
-每行一个 `CardContent`，按 id 字符串排序存放，每次变更整文件原子重写：
+内容真理的检查点形式：首行是元数据行，其后每行一张卡的完整快照（内容 + 调度进度）：
 
 ```json
-{ "id": "uuid", "front": "正面（Markdown）", "back": "反面（Markdown）", "createdAt": 1757000000000, "updatedAt": 1757000000000, "deletedAt": null, "suspended": false }
+{"__mikiCheckpoint": 12345}
+{ "id": "uuid", "front": "正面（Markdown）", "back": "反面（Markdown）", "createdAt": 1757000000000, "updatedAt": 1757000000000, "deletedAt": null, "suspended": false, "fsrs": {...}, "reps": 3, "lapses": 1 }
 ```
 
-- `deletedAt`：软删标记；卡片可撤销恢复。
-- `suspended`：暂停标记，可以是手动设置或 leech 自动暂停；暂停卡不进调度与计数。
-- 卡片的调度状态（FSRS 稳定性/难度/到期）**不在这里**——它由 review-log 重放得出。
+- `__mikiCheckpoint`：该文件快照已反映到的事件水位（全局 seq）。
+- `fsrs` / `reps` / `lapses`：调度快照（state / step / stability / difficulty / due / lastReview + 计数），与事件重放结果一致。旧格式行没有这三个字段，视为零值并全量重放（兼容自动升级）。
+- 新增卡直接追加到文件尾；delta 积累超过 2000 行时自动「压实」：全量重写基文件 + 清空 delta。
+
+## cards/&lt;deck-id&gt;.delta.ndjson（增量）
+
+内容变更的追加日志，**行序即操作时序**，每行三种之一：
+
+```json
+{ "id": "uuid", "front": "改后正面", "back": "...", "createdAt": ..., "updatedAt": ..., "deletedAt": null, "suspended": false }
+{ "__mikiSeq": 12350, "id": "uuid", "front": "...", "...": "移入卡的完整快照行（含 fsrs/reps/lapses）" }
+{ "id": "uuid", "__mikiTombstone": true }
+```
+
+- 内容覆盖行：只承载变化的内容字段，调度快照继承基行（缺哪个字段继承哪个）。
+- 移入行（带 `__mikiSeq`）：跨牌组移动时写入目标牌组，自带完整调度快照与事件水位。
+- 墓碑行：跨牌组移动时写入源牌组，加载时删除对应行。同一 delta 内「先墓碑后移入行」按行序自然恢复，往返移动不会误删。
+
+## stats.json
+
+统计聚合的检查点（压实时落盘，运行期不重写）：
+
+```json
+{ "checkpointSeq": 12345, "dailyAgg": [ ["<deck-id>", [ ["2026-09-06", { "total": 42, "again": 3 }], ... ]], ... ] }
+```
+
+热力图聚合按「牌组 → 本地日期键 → 当日总量/重来量」维护，`undo` 实时抵消。启动时 `seq > checkpointSeq` 的事件增量并入聚合，内存占用与事件历史总量无关。
 
 ## review-log/&lt;yyyy-mm&gt;.ndjson
 
@@ -68,22 +95,31 @@ Miki 的全部数据存放在一个纯文件夹（下称「工作区」）里，
 | --- | --- | --- |
 | `answer` | `rating`(1-4)、`before`、`after`、`durationMs?` | 答题：FSRS 调度一次 |
 | `delete` | `before` | 软删卡片，可撤销 |
-| `undo` | `targetSeq`、`before` | 撤销：指向被抵消事件的 seq |
+| `undo` | `targetSeq`、`before`、`targetAction?`、`targetRating?` | 撤销：指向被抵消事件的 seq；`targetAction`/`targetRating` 是被抵消事件的类型与评分（自包含，旧事件由重放时的最近事件窗口兜底） |
 | `reset` | `before` | 重置进度：调度与统计清零、解除暂停；**不可撤销** |
+| `suspend` | `suspended`(缺省 true) | 暂停/解除暂停（含 leech 自动暂停）；**不可撤销**，改用暂停操作本身恢复 |
 
 ## 重放规则
 
-启动时读全部事件日志并按卡分组重放（`src/core/replay.ts`），规则：
+启动时一次顺序读全部事件日志（`streamEvents`），**双水位消费**——同一事件流同时喂给卡片调度与统计聚合：
+
+1. **卡片侧**：每张卡有自己的事件水位 `seqApplied`（来自快照行的 `__mikiSeq` / 基文件 `__mikiCheckpoint`）。`seq > seqApplied` 的事件才应用到卡，应用后水位前移。
+2. **聚合侧**：`seq > stats.json.checkpointSeq` 的事件并入热力图聚合（`answer` +1，`undo` 对目标事件 -1）；今日净计数同步增量维护，跨天清零。
+
+单事件应用规则（`src/core/replay.ts` 的 `applyEvent`，与全量重放共用同一实现）：
 
 1. `answer`：`fsrs = after`，`reps + 1`；`rating = 1`（重来）时 `lapses + 1`。
 2. `undo`：抵消 `targetSeq` 指向的事件——被撤销的是 answer 时 `reps/lapses` 回退并恢复 `before` 快照；是 delete 时取消软删。
-3. `reset`：`fsrs / reps / lapses` 清零。
+3. `reset`：`fsrs / reps / lapses` 清零、解除暂停。
 4. `delete`：置 `deletedAt`。
+5. `suspend`：置 `suspended`（缺省 true）。
 
-由此得到两条不变量：
+由此得到几条不变量：
 
-- **任何内存态都可以由 `cards/*.ndjson` + `review-log/*.ndjson` 纯函数重建**，因此日志损坏行直接跳过而不影响其他数据。
+- **任何内存态都可以由 `cards/*.ndjson`（含 delta）+ `review-log/*.ndjson` + `stats.json` 纯函数重建**，日志损坏行直接跳过而不影响其他数据；检查点文件缺失或过旧时自动退回全量重放。
+- **历史事件不驻留内存**：启动重放是流式的，事件读入即用即弃；调度索引（due 最小堆 + 增量计数器）与统计聚合（DailyAgg）都是增量结构，内存与事件历史总量无关。
 - **撤销是补偿事件，不是删除历史**——日志永远增长，撤销本身也被记录。
+- **写路径与读取路径分离**：调度类操作（答题/撤销/删除/暂停/重置）只追加 review-log，零卡片文件写；内容类操作（新增/编辑/移动）追加基文件尾或 delta，写放大为 O(变更数)。
 
 ## 用第三方程序读取的注意事项
 

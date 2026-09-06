@@ -21,6 +21,7 @@ It is a very small open-source project. Perhaps by the time I grow old, no one i
 - **Study fonts** — configurable typeface and size for the card face, with a live sample in Settings; defaults follow the system font at 16px, matching Obsidian
 - **Rich card content** — Markdown + KaTeX + syntax highlighting
 - **Event-sourced review log** — append-only NDJSON; undo works by compensating events with self-contained snapshots
+- **Million-card performance** — extreme-scale engineering on top of the event-sourced core: historical events are streamed and never retained in memory (a restart over 1M past events settles at 22MB), scheduling is served by incremental indexes (0.12ms per answer, 0.3ms per undo), and card files use checkpoints + delta appends (undo write amplification drops from a full-file rewrite to a single append; cold start 5.3s); randomized differential tests keep index semantics strictly identical to a full scan
 - **Plain-file workspace** — data lives in a folder separate from the app, git-friendly, sync with any tool
 - **Light / dark themes** — light by default
 - **Unlimited daily review** — learning queue first, then due reviews, then new cards
@@ -82,13 +83,15 @@ More docs (in Chinese) live in [docs/](docs/):
 Data is stored in a plain folder (resolved from the `MIKI_WORKSPACE` env var, falling back to `~/miki-base`):
 
 ```
-config.json                     # app config (FSRS parameters, theme, study fonts, leech threshold, browser & home layout)
-decks.json                      # deck list
-cards/<deck-id>.ndjson          # card content, one JSON object per line (includes the suspended flag)
-review-log/<yyyy-mm>.ndjson     # append-only review events (answer / delete / undo / reset)
+config.json                       # app config (FSRS parameters, theme, study fonts, leech threshold, browser & home layout)
+decks.json                        # deck list
+stats.json                        # stats aggregation checkpoint (daily aggregates + event watermark)
+cards/<deck-id>.ndjson            # card base file (checkpoint snapshot rows, includes the suspended flag)
+cards/<deck-id>.delta.ndjson      # card delta journal (edits / moves / tombstones), append-only
+review-log/<yyyy-mm>.ndjson       # append-only review events (answer / delete / undo / reset / suspend)
 ```
 
-`review-log` is the source of truth for scheduling; card states are rebuilt by replaying events. See [docs/data-format.md](docs/data-format.md) for the full schema.
+`review-log` is the source of truth for scheduling; the card base file + delta form a checkpointed record of card truth, aligned to the event watermark. See [docs/data-format.md](docs/data-format.md) for the full schema, compaction rules and replay protocol.
 
 ## Acknowledgements
 
