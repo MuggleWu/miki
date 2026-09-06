@@ -13,6 +13,11 @@ import type {
   UndoResult
 } from './types'
 
+/** 深合并的配置补丁：browser 允许只传部分字段（如选中态） */
+export type MikiConfigPatch = Partial<Omit<MikiConfig, 'browser'>> & {
+  browser?: Partial<MikiConfig['browser']>
+}
+
 export interface MikiApi {
   /** 全量加载（decks + counts + today + config） */
   loadWorkspace(): Promise<{ decks: DeckInfo[]; todayCount: number; config: MikiConfig }>
@@ -30,9 +35,13 @@ export interface MikiApi {
   getStats(params: StatsParams): Promise<StatsPayload>
   saveBrowserConfig(columns: string[], sort: unknown[]): Promise<void>
   saveTheme(theme: 'light' | 'dark'): Promise<void>
-  /** 设置页：合并保存配置（字体 / leech 等），返回新 config */
-  saveConfig(patch: Partial<MikiConfig>): Promise<MikiConfig>
+  /** 设置页/卡片库：深合并保存配置（字体 / leech / browser 选中态等），返回新 config */
+  saveConfig(patch: MikiConfigPatch): Promise<MikiConfig>
   setCardSuspended(cardId: string, suspended: boolean): Promise<Card | null>
+  /** 批量移动卡片到目标牌组（保留调度进度），返回移动数 */
+  moveCards(cardIds: string[], deckId: string): Promise<number>
+  /** 批量重置进度：变回新卡（不可撤销），返回处理数 */
+  resetProgress(cardIds: string[]): Promise<number>
   /** 四档评级各自的下次到期预览（ms epoch；不落盘） */
   previewIntervals(cardId: string): Promise<number[]>
 }
@@ -55,5 +64,7 @@ export const IPC = {
   saveTheme: 'miki:save-theme',
   saveConfig: 'miki:save-config',
   setCardSuspended: 'miki:set-card-suspended',
+  moveCards: 'miki:move-cards',
+  resetProgress: 'miki:reset-progress',
   previewIntervals: 'miki:preview-intervals'
 } as const

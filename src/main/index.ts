@@ -96,6 +96,8 @@ app.whenReady().then(() => {
   ipcMain.handle(IPC.setCardSuspended, (_e, cardId: string, suspended: boolean) =>
     ws.setCardSuspended(cardId, suspended)
   )
+  ipcMain.handle(IPC.moveCards, (_e, cardIds: string[], deckId: string) => ws.moveCards(cardIds, deckId))
+  ipcMain.handle(IPC.resetProgress, (_e, cardIds: string[]) => ws.resetProgress(cardIds))
   ipcMain.handle(IPC.previewIntervals, (_e, cardId: string) => ws.previewIntervals(cardId))
 
   createWindow()

@@ -23,6 +23,7 @@ import { FsrScheduler, DEFAULT_FSRS_PARAMS } from '../core/fsrs'
 import { deckCounts, pickNext, remainingCount } from '../core/queue'
 import { replayCard } from '../core/replay'
 import { compareByKeys, filterByKeywords, toRow } from '../core/query'
+import type { MikiConfigPatch } from '../shared/ipc'
 import { computeStats, endOfLocalDay } from '../core/stats'
 
 const MONTH_MS = 31 * 86_400_000
@@ -119,10 +120,11 @@ export class WorkspaceService {
     })
   }
 
-  /** 合并保存设置并落盘；调度相关字段变化时重建调度器 */
-  saveConfig(patch: Partial<MikiConfig>): MikiConfig {
+  /** 合并保存设置并落盘；study/browser 深合并（其余顶层替换）；调度相关字段变化时重建调度器 */
+  saveConfig(patch: MikiConfigPatch): MikiConfig {
     const study = { ...this.config.study, ...(patch.study ?? {}) }
-    Object.assign(this.config, patch, { study })
+    const browser = { ...this.config.browser, ...(patch.browser ?? {}) }
+    Object.assign(this.config, patch, { study, browser })
     const scheduleKeys: (keyof MikiConfig)[] = [
       'parameters',
       'desiredRetention',
@@ -311,6 +313,54 @@ export class WorkspaceService {
     card.suspended = suspended
     this.saveDeckCards(card.deckId)
     return card
+  }
+
+  /** 批量移动卡片到目标牌组：deckId 是内容字段，保留调度进度，不进调度事件 */
+  moveCards(cardIds: string[], targetDeckId: string): number {
+    if (!this.decks.some((d) => d.id === targetDeckId && !d.deletedAt)) return 0
+    const now = Date.now()
+    const touched = new Set<string>([targetDeckId])
+    let moved = 0
+    for (const id of cardIds) {
+      const c = this.cards.get(id)
+      if (!c || c.deletedAt || c.deckId === targetDeckId) continue
+      touched.add(c.deckId)
+      c.deckId = targetDeckId
+      c.updatedAt = now
+      moved++
+    }
+    if (moved > 0) for (const deckId of touched) this.saveDeckCards(deckId)
+    return moved
+  }
+
+  /** 批量重置进度：调度/统计清零并解除暂停，变回新卡；追加 reset 事件（不可撤销） */
+  resetProgress(cardIds: string[]): number {
+    const now = Date.now()
+    const evs: ReviewEvent[] = []
+    for (const id of cardIds) {
+      const c = this.cards.get(id)
+      if (!c || c.deletedAt) continue
+      evs.push({
+        seq: ++this.seq,
+        t: now,
+        action: 'reset',
+        cardId: c.id,
+        deckId: c.deckId,
+        before: c.fsrs ? { ...c.fsrs } : null
+      })
+      c.fsrs = null
+      c.reps = 0
+      c.lapses = 0
+      c.suspended = false
+      c.updatedAt = now
+    }
+    if (evs.length === 0) return 0
+    this.appendEvents(evs)
+    // reset 不可撤销：把该卡的会话撤销栈一并作废
+    const resetIds = new Set(evs.map((e) => e.cardId))
+    this.sessionOps = this.sessionOps.filter((op) => !resetIds.has(op.cardId))
+    for (const deckId of new Set(evs.map((e) => e.deckId))) this.saveDeckCards(deckId)
+    return evs.length
   }
 
   private appendEvents(evs: ReviewEvent[]): void {

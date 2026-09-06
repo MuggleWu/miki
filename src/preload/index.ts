@@ -22,6 +22,8 @@ const api = {
   saveConfig: (patch: unknown) => ipcRenderer.invoke(IPC.saveConfig, patch),
   setCardSuspended: (cardId: string, suspended: boolean) =>
     ipcRenderer.invoke(IPC.setCardSuspended, cardId, suspended),
+  moveCards: (cardIds: string[], deckId: string) => ipcRenderer.invoke(IPC.moveCards, cardIds, deckId),
+  resetProgress: (cardIds: string[]) => ipcRenderer.invoke(IPC.resetProgress, cardIds),
   previewIntervals: (cardId: string) => ipcRenderer.invoke(IPC.previewIntervals, cardId)
 }
 
