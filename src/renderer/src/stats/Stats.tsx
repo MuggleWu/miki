@@ -33,16 +33,17 @@ export function Stats() {
   }, [deckId, range, dataEpoch])
 
   const dark = theme === 'dark'
-  const dim = dark ? '#9a9aa6' : '#7a7e8a'
-  const split = dark ? '#26262f' : '#dcdfe6'
-  const accent = dark ? '#6f8cff' : '#4f6fe0'
-  const okColor = dark ? '#3fb984' : '#2f9e6a'
-  const dangerColor = dark ? '#e0556a' : '#d5405a'
+  // 深色 = Darcula 色板（与 styles.css [data-theme='dark'] 保持一致；canvas 读不到 CSS 变量，只能同步硬编码）
+  const dim = dark ? '#808080' : '#7a7e8a'
+  const split = dark ? '#43494a' : '#dcdfe6'
+  const accent = dark ? '#589df6' : '#4f6fe0'
+  const okColor = dark ? '#6faf6e' : '#2f9e6a'
+  const dangerColor = dark ? '#ff6b68' : '#d5405a'
   const warnColor = dark ? '#e0a555' : '#b97a1e'
-  const fg = dark ? '#e8e8ee' : '#1f2126'
+  const fg = dark ? '#a9b7c6' : '#1f2126'
   const chartBg = { backgroundColor: 'transparent', textStyle: { color: fg } }
   const AXIS = { axisLabel: { color: dim }, splitLine: { lineStyle: { color: split } } }
-  const TOOLTIP = { backgroundColor: dark ? '#26262f' : '#ffffff', borderColor: split, textStyle: { color: fg } }
+  const TOOLTIP = { backgroundColor: dark ? '#3c3f41' : '#ffffff', borderColor: split, textStyle: { color: fg } }
 
   const forecastOption: echarts.EChartsOption | null = stats && {
     ...chartBg,
@@ -67,16 +68,16 @@ export function Stats() {
       min: 0,
       max: 60,
       show: false,
-      // GitHub 式四档色阶，色相取 miki accent；空档接近背景色
-      inRange: { color: dark ? ['#1a1a21', '#2e3c85', '#5f7ce8', '#9db1ff'] : ['#e9ebf0', '#a8b8f0', '#6f8cff', '#3f55c0'] }
+      // GitHub 式四档色阶，高色阶取 accent 蓝；空档接近背景色
+      inRange: { color: dark ? ['#333333', '#28497c', '#3f74c4', '#589df6'] : ['#e9ebf0', '#a8b8f0', '#6f8cff', '#3f55c0'] }
     },
     calendar: {
       range: [stats.heatmap[0]?.date, stats.heatmap[stats.heatmap.length - 1]?.date],
       cellSize: ['auto', 14],
       // GitHub 风格：格间缝隙用页面底色描边形成，关闭月份边界线
       itemStyle: {
-        color: dark ? '#1a1a21' : '#e9ebf0',
-        borderColor: dark ? '#101014' : '#f5f6f8',
+        color: dark ? '#333333' : '#e9ebf0',
+        borderColor: dark ? '#2b2b2b' : '#f5f6f8',
         borderWidth: 2,
         borderRadius: 2
       },
