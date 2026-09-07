@@ -163,7 +163,8 @@ export interface StatsParams {
 }
 
 export interface StatsPayload {
-  forecast: { label: string; count: number }[]
+  /** 预测：等宽时间桶（38 根），label 为桶起点，range 为桶起止文本（tooltip 用） */
+  forecast: { label: string; count: number; range: string }[]
   heatmap: { date: string; count: number }[] // yyyy-MM-dd
   reviews: { label: string; total: number; again: number }[]
   stateCounts: DeckCounts

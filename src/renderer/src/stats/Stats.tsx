@@ -50,7 +50,15 @@ export function Stats() {
     xAxis: { type: 'category', data: stats.forecast.map((f) => f.label), ...AXIS },
     yAxis: { type: 'value', ...AXIS },
     series: [{ type: 'bar', data: stats.forecast.map((f) => f.count), itemStyle: { color: accent }, barCategoryGap: '30%' }],
-    tooltip: { trigger: 'axis', ...TOOLTIP }
+    tooltip: {
+      trigger: 'axis',
+      ...TOOLTIP,
+      formatter: (ps: unknown) => {
+        const p = (ps as { dataIndex: number }[]) [0]
+        const f = stats.forecast[p.dataIndex]
+        return `${f.range}<br/>${f.count} 张`
+      }
+    }
   }
 
   const heatmapOption: echarts.EChartsOption | null = stats && range === 'year' ? {

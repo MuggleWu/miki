@@ -85,31 +85,39 @@ export function computeStats(input: StatsInput): StatsPayload {
     }
   }
 
-  // 预测：未来 30 天按天 + 第 5-12 周按周
+  // 预测：38 根等宽柱自适应分桶（柱数沿用原 30 天 + 8 周；桶宽随视野均分，逾期积压与超远间隔都进图）
   const forecast: StatsPayload['forecast'] = []
-  const dueByDay = new Map<string, number>()
-  const dueByWeek = new Map<string, number>()
+  const FORECAST_BARS = 38
   const endOfToday = endOfLocalDay(now)
-  for (const c of cards) {
-    if (!c.fsrs || c.fsrs.due <= endOfToday) continue
-    if (c.fsrs.due <= endOfToday + 30 * 86_400_000) {
-      const key = localDateKey(c.fsrs.due)
-      dueByDay.set(key, (dueByDay.get(key) ?? 0) + 1)
-    } else {
-      const week = Math.floor((c.fsrs.due - endOfToday) / (7 * 86_400_000))
-      const key = `W+${week}`
-      dueByWeek.set(key, (dueByWeek.get(key) ?? 0) + 1)
+  // 暂停卡不进调度（与队列口径一致），不计入预测；逾期卡仅在「全部」档计入
+  const scheduled = cards.filter((c) => !c.suspended && c.fsrs).map((c) => c.fsrs!.due)
+  let fStart: number
+  let fSpan: number
+  if (range === 'all' && scheduled.length > 0) {
+    // 全部：最远到期 − 最早逾期，跨度均分 38 桶（逾期积压落在最左侧柱）
+    let minDue = Infinity
+    let maxDue = -Infinity
+    for (const due of scheduled) {
+      if (due < minDue) minDue = due
+      if (due > maxDue) maxDue = due
     }
+    fStart = minDue
+    fSpan = Math.max(maxDue - minDue, FORECAST_BARS)
+  } else {
+    // 近一年：未来 365 天均分 38 桶；无已调度卡时回退此窗口（全零柱）
+    fStart = endOfToday
+    fSpan = 365 * 86_400_000
   }
-  const start = new Date(endOfToday + 86_400_000)
-  start.setHours(0, 0, 0, 0)
-  for (let i = 0; i < 30; i++) {
-    const t = start.getTime() + i * 86_400_000
-    const key = localDateKey(t)
-    forecast.push({ label: key.slice(5), count: dueByDay.get(key) ?? 0 })
+  const barWidth = fSpan / FORECAST_BARS
+  const counts = new Array<number>(FORECAST_BARS).fill(0)
+  for (const due of scheduled) {
+    if (range === 'year' && (due <= fStart || due > fStart + fSpan)) continue // 逾期与超视野不计
+    const bi = Math.min(FORECAST_BARS - 1, Math.max(0, Math.floor((due - fStart) / barWidth)))
+    counts[bi]++
   }
-  for (let w = 5; w <= 12; w++) {
-    forecast.push({ label: `+${w}w`, count: dueByWeek.get(`W+${w}`) ?? 0 })
+  for (let i = 0; i < FORECAST_BARS; i++) {
+    const rs = fStart + barWidth * i
+    forecast.push({ label: forecastLabel(rs, barWidth), count: counts[i], range: forecastRange(rs, rs + barWidth, barWidth) })
   }
 
   // 状态分布
@@ -138,4 +146,26 @@ export function endOfLocalDay(ms: number): number {
   const d = new Date(ms)
   d.setHours(23, 59, 59, 999)
   return d.getTime()
+}
+
+/** 预测柱标签：桶宽 ≥1 年只标年份，≥25 天标年-月，否则标月-日 */
+function forecastLabel(ms: number, barWidth: number): string {
+  const d = new Date(ms)
+  const p = (n: number) => String(n).padStart(2, '0')
+  if (barWidth >= 365 * 86_400_000) return `${d.getFullYear()}`
+  if (barWidth >= 25 * 86_400_000) return `${d.getFullYear()}-${p(d.getMonth() + 1)}`
+  return `${p(d.getMonth() + 1)}-${p(d.getDate())}`
+}
+
+/** 预测柱 tooltip 区间文本：起止两端各格式化一次，按桶宽省略同侧重复 */
+function forecastRange(rs: number, re: number, barWidth: number): string {
+  const p = (n: number) => String(n).padStart(2, '0')
+  const fmt = (ms: number, withYear: boolean) => {
+    const d = new Date(ms)
+    const md = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+    return withYear ? md : md.slice(5)
+  }
+  const withYear = barWidth >= 25 * 86_400_000
+  if (barWidth < 86_400_000) return `${fmt(rs, false)} ${String(new Date(rs).getHours()).padStart(2, '0')}:00 起`
+  return `${fmt(rs, withYear)} ~ ${fmt(re, withYear)}`
 }

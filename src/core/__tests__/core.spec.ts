@@ -313,9 +313,52 @@ describe('stats', () => {
     expect(s.reviews.reduce((acc, r) => acc + r.total, 0)).toBe(2) // undo 抵消后
     expect(s.stateCounts.new).toBe(1) // c2 是 d2 的 new 卡
     expect(s.heatmap.length).toBe(365)
-    expect(s.forecast.length).toBe(38) // 30 天 + 8 周
+    expect(s.forecast.length).toBe(38) // 等宽自适应分桶，柱数不变
     const s2 = computeStats({ cards, dailyAgg: agg, deckId: 'd1', range: 'year', now })
     expect(s2.stateCounts.new).toBe(0)
+  })
+
+  it('预测等宽分桶：year 档未来 365 天均分 38 桶，超视野/暂停/今天内到期不计', () => {
+    const now = T0 + 10 * DAY
+    const mk = (id: string, dueOffsetDay: number, suspended = false): Card => {
+      const c = cardOf(id)
+      c.suspended = suspended
+      c.fsrs = { state: FSRS_STATE.Review, step: null, stability: 5, difficulty: 5, due: T0 + 10 * DAY + dueOffsetDay * DAY, lastReview: T0 }
+      return c
+    }
+    const cards = [mk('f1', 100), mk('f2', 400), mk('f3', 50, true), mk('f4', 0)] // f2 超一年 f3 暂停 f4 今天内
+    const s = computeStats({ cards, dailyAgg: new Map(), deckId: null, range: 'year', now })
+    expect(s.forecast.length).toBe(38)
+    expect(s.forecast.reduce((a, f) => a + f.count, 0)).toBe(1)
+    // f1 距窗口左界约 99.33 天，桶宽 365/38 ≈ 9.605 天 → 第 10 桶
+    expect(s.forecast[10].count).toBe(1)
+    expect(s.forecast[0].range).toMatch(/^09-11 ~ /) // 桶宽 <25 天时 range 不带年份
+  })
+
+  it('预测等宽分桶：all 档最远到期减最早逾期均分，逾期进首柱、最远进末柱', () => {
+    const now = T0 + 10 * DAY
+    const mk = (id: string, dueDay: number): Card => {
+      const c = cardOf(id)
+      c.fsrs = { state: FSRS_STATE.Review, step: null, stability: 5, difficulty: 5, due: T0 + dueDay * DAY, lastReview: T0 }
+      return c
+    }
+    const cards = [mk('g1', 2), mk('g2', 40), mk('g3', 100)] // 跨度 98 天，桶宽 98/38 ≈ 2.579 天
+    const s = computeStats({ cards, dailyAgg: new Map(), deckId: null, range: 'all', now })
+    expect(s.forecast.length).toBe(38)
+    expect(s.forecast[0].count).toBe(1) // 最早逾期（g1）
+    // g2 offset 38 天 → floor(38/2.5789) = 14
+    expect(s.forecast[14].count).toBe(1)
+    expect(s.forecast[37].count).toBe(1) // 最远到期 clamp 末柱
+    expect(s.forecast.reduce((a, f) => a + f.count, 0)).toBe(3)
+    // 同一批卡在 year 档：逾期 g1 不计；g2(10-21)、g3(12-19) 落入未来窗口
+    const sy = computeStats({ cards, dailyAgg: new Map(), deckId: null, range: 'year', now })
+    expect(sy.forecast.reduce((a, f) => a + f.count, 0)).toBe(2)
+  })
+
+  it('预测等宽分桶：无已调度卡时回退零柱', () => {
+    const s = computeStats({ cards: [cardOf('h1')], dailyAgg: new Map(), deckId: null, range: 'all', now: T0 })
+    expect(s.forecast.length).toBe(38)
+    expect(s.forecast.every((f) => f.count === 0)).toBe(true)
   })
 
   it('间隔分段', () => {
