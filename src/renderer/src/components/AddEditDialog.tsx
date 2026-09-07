@@ -4,12 +4,22 @@ import { useEffect, useRef, useState } from 'react'
 import { Md } from '../md'
 import { sortedDecks, useApp } from '../store'
 
+/** wrap 类编辑（bold/backtick）纯函数的统一返回：替换范围、替换文本、应用后新选区 */
+export interface WrapResult {
+  text: string
+  replaceStart: number
+  replaceEnd: number
+  replacement: string
+  selStart: number
+  selEnd: number
+}
+
 /** 选中区加粗开关键（⌘B）：算出替换范围/替换文本/新选区。纯函数便于测试 */
 export function boldSelection(
   value: string,
   start: number,
   end: number
-): { text: string; replaceStart: number; replaceEnd: number; replacement: string; selStart: number; selEnd: number } {
+): WrapResult {
   const sel = value.slice(start, end)
   // 无选区：光标处插入 ****，光标落中间
   if (sel === '') {
@@ -56,11 +66,72 @@ export function boldSelection(
   }
 }
 
-/** 把 boldSelection 的结果应用到文本框：优先 execCommand（保留原生撤销栈，⌘Z 可回退），失败退回直改 */
-function applyBold(el: HTMLTextAreaElement, setText: (v: string) => void): void {
+/** 单按反引号：无选区插一对 ` 光标落中间；有选区两侧包 ` 选区保持内层。
+ * 不做 toggle——三连按出代码块依赖「按 2 下后文本呈 ``|`` 形态」，toggle 会拆掉中间态 */
+export function backtickSelection(value: string, start: number, end: number): WrapResult {
+  if (start === end) {
+    return {
+      text: value.slice(0, start) + '``' + value.slice(end),
+      replaceStart: start,
+      replaceEnd: start,
+      replacement: '``',
+      selStart: start + 1,
+      selEnd: start + 1
+    }
+  }
+  const sel = value.slice(start, end)
+  return {
+    text: value.slice(0, start) + '`' + sel + '`' + value.slice(end),
+    replaceStart: start,
+    replaceEnd: end,
+    replacement: '`' + sel + '`',
+    selStart: start + 1,
+    selEnd: end + 1
+  }
+}
+
+/** 三连按反引号检测（第三下触发）：前两下单按的产物恰好是可检测的文本形态——
+ * 无选区且光标两侧紧贴各 2 个 `（``|``）→ 替换为空围栏代码块，光标落内容行；
+ * 选区外侧紧贴 `` 对（``sel`` 双层包裹）→ 替换为 ```/sel/``` 围栏代码块，选区保持内容。
+ * 纯文本形态检测不限按键间隔，不匹配返回 null（由单按逻辑接管） */
+export function tripleBacktick(value: string, start: number, end: number): WrapResult | null {
+  if (start === end) {
+    if (value.slice(start - 2, start) !== '``' || value.slice(end, end + 2) !== '``') return null
+    return {
+      text: value.slice(0, start - 2) + '```\n\n```' + value.slice(end + 2),
+      replaceStart: start - 2,
+      replaceEnd: end + 2,
+      replacement: '```\n\n```',
+      selStart: start + 2,
+      selEnd: start + 2
+    }
+  }
+  const sel = value.slice(start, end)
+  if (value.slice(start - 2, start) !== '``' || value.slice(end, end + 2) !== '``') return null
+  return {
+    text: value.slice(0, start - 2) + '```\n' + sel + '\n```' + value.slice(end + 2),
+    replaceStart: start - 2,
+    replaceEnd: end + 2,
+    replacement: '```\n' + sel + '\n```',
+    selStart: start + 2,
+    selEnd: start + 2 + sel.length
+  }
+}
+
+/** 反引号键入口：先试三连按转换，未命中走单按包裹 */
+export function tickSelection(value: string, start: number, end: number): WrapResult {
+  return tripleBacktick(value, start, end) ?? backtickSelection(value, start, end)
+}
+
+/** 把 wrapSelection 的结果应用到文本框：优先 execCommand（保留原生撤销栈，⌘Z 可回退），失败退回直改 */
+export function applyWrap(
+  el: HTMLTextAreaElement,
+  setText: (v: string) => void,
+  fn: (value: string, start: number, end: number) => WrapResult
+): void {
   const { selectionStart: s, selectionEnd: e } = el
   if (s == null || e == null) return
-  const r = boldSelection(el.value, s, e)
+  const r = fn(el.value, s, e)
   el.focus()
   el.setSelectionRange(r.replaceStart, r.replaceEnd)
   try {
@@ -136,7 +207,16 @@ export function AddEditDialog() {
             const el = e.target instanceof HTMLTextAreaElement ? e.target : null
             if (el) {
               e.preventDefault()
-              applyBold(el, el === frontRef.current ? setFront : setBack)
+              applyWrap(el, el === frontRef.current ? setFront : setBack, boldSelection)
+            }
+            return
+          }
+          if (e.key === '`' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+            // 反引号：单按包裹 / 三连按出代码块（正反面输入框内）
+            const el = e.target instanceof HTMLTextAreaElement ? e.target : null
+            if (el) {
+              e.preventDefault()
+              applyWrap(el, el === frontRef.current ? setFront : setBack, tickSelection)
             }
             return
           }
@@ -208,8 +288,8 @@ export function AddEditDialog() {
         )}
         <div className="actions">
           <span style={{ color: 'var(--text-dim)', fontSize: 12, marginRight: 'auto', alignSelf: 'center' }}>
-            <kbd className="kbd">⌘</kbd>+<kbd className="kbd">B</kbd> 加粗 · <kbd className="kbd">⌘</kbd>+
-            <kbd className="kbd">↩</kbd> 提交 · <kbd className="kbd">esc</kbd> 关闭
+            <kbd className="kbd">⌘</kbd>+<kbd className="kbd">B</kbd> 加粗 · <kbd className="kbd">`</kbd> 行内代码（连按三下出代码块） ·{' '}
+            <kbd className="kbd">⌘</kbd>+<kbd className="kbd">↩</kbd> 提交 · <kbd className="kbd">esc</kbd> 关闭
           </span>
           <button onClick={closeDialog}>取消</button>
           <button className="primary" onClick={() => void submit()}>

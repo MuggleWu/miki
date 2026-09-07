@@ -6,6 +6,7 @@ import { Md } from '../md'
 import { rotateSort } from '../../../core/query'
 import { isTypingTarget, sortedDecks, useApp } from '../store'
 import { ColResizer, VResizer, isDragResizing } from '../components/drag'
+import { applyWrap, tickSelection } from '../components/AddEditDialog'
 import type { BrowserColumn, CardRow, SortKey } from '../../../shared/types'
 
 const COLUMN_LABEL: Record<BrowserColumn, string> = {
@@ -457,7 +458,19 @@ export function Browser() {
                 <div>
                   <div className="block-title">正面（自动保存）</div>
                   <div className="block">
-                    <textarea value={editFront} onChange={(e) => { setEditFront(e.target.value); scheduleSave(e.target.value, editBack) }} />
+                    <textarea
+                      value={editFront}
+                      onChange={(e) => { setEditFront(e.target.value); scheduleSave(e.target.value, editBack) }}
+                      onKeyDown={(e) => {
+                        if (e.key === '`' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+                          const el = e.target instanceof HTMLTextAreaElement ? e.target : null
+                          if (el) {
+                            e.preventDefault()
+                            applyWrap(el, (v) => { setEditFront(v); scheduleSave(v, editBack) }, tickSelection)
+                          }
+                        }
+                      }}
+                    />
                     <div className="preview">
                       <Md source={editFront} />
                     </div>
@@ -466,7 +479,19 @@ export function Browser() {
                 <div>
                   <div className="block-title">反面（自动保存）</div>
                   <div className="block">
-                    <textarea value={editBack} onChange={(e) => { setEditBack(e.target.value); scheduleSave(editFront, e.target.value) }} />
+                    <textarea
+                      value={editBack}
+                      onChange={(e) => { setEditBack(e.target.value); scheduleSave(editFront, e.target.value) }}
+                      onKeyDown={(e) => {
+                        if (e.key === '`' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+                          const el = e.target instanceof HTMLTextAreaElement ? e.target : null
+                          if (el) {
+                            e.preventDefault()
+                            applyWrap(el, (v) => { setEditBack(v); scheduleSave(editFront, v) }, tickSelection)
+                          }
+                        }
+                      }}
+                    />
                     <div className="preview">
                       <Md source={editBack} />
                     </div>
