@@ -87,20 +87,25 @@ export function AddEditDialog() {
 
   useEffect(() => {
     if (!dialog) return
-    setDeckId(dialog.deckId ?? decks[0]?.id ?? '')
+    // 只在弹窗打开时初始化一次。decks 不能进依赖：App 的 60s 轮询与切视图都会 reload()
+    // 换新 decks 数组引用，若它在依赖里，弹窗开着时正反面输入会被清空
+    // （add：白打；edit：闪断后回退到已保存内容，未保存输入丢失）。
+    // 开窗瞬间的默认牌组用 getState 现取，不建立对 decks 的响应式依赖。
+    setDeckId(dialog.deckId ?? useApp.getState().decks[0]?.id ?? '')
     setFront('')
     setBack('')
     setLoaded(dialog.mode === 'add')
     if (dialog.mode === 'edit' && dialog.cardId) {
       void window.miki.getCard(dialog.cardId).then((card) => {
-        if (card) {
+        // 回填前确认仍是同一个弹窗会话：防止快速取消→再开新弹窗时旧 promise 串场覆盖
+        if (card && useApp.getState().dialog === dialog) {
           setFront(card.front)
           setBack(card.back)
         }
         setLoaded(true)
       })
     }
-  }, [dialog, decks])
+  }, [dialog])
 
   if (!dialog) return null
 
