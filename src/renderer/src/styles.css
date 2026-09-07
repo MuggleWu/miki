@@ -17,7 +17,7 @@
   --pre-bg: #f0f1f5;
   --shadow: 0 8px 24px rgba(31, 33, 38, 0.12);
   --radius: 10px;
-  /* 代码语法色：浅色取 One Light 近似（hljs 规则引用，深色由 Darcula 覆盖） */
+  /* 代码语法色：浅色取 One Light 近似（Shiki 主题 miki-code 内联引用，深色由 Darcula 覆盖） */
   --code-comment: #9299a3;
   --code-keyword: #b7561e;
   --code-string: #43864a;
@@ -294,15 +294,7 @@ input { user-select: text; }
 .md ul, .md ol { margin: 0.4em 0; padding-left: 1.4em; }
 .md img { max-width: 100%; }
 
-/* highlight.js 配色：引用主题的代码语法色变量（浅色 One Light 近似，深色 Darcula），不引第三方主题 */
-.hljs { color: var(--text); background: transparent; }
-.hljs-comment, .hljs-quote { color: var(--code-comment); font-style: italic; }
-.hljs-keyword, .hljs-selector-tag, .hljs-literal, .hljs-section { color: var(--code-keyword); }
-.hljs-string, .hljs-attr, .hljs-addition { color: var(--code-string); }
-.hljs-number, .hljs-symbol, .hljs-bullet, .hljs-meta { color: var(--code-number); }
-.hljs-title, .hljs-title.function_, .hljs-name, .hljs-tag, .hljs-attribute { color: var(--code-func); }
-.hljs-built_in, .hljs-type, .hljs-title.class_, .hljs-params { color: var(--code-type); }
-.hljs-variable, .hljs-operator { color: var(--text); }
-.hljs-deletion { color: var(--danger); }
-.hljs-emphasis { font-style: italic; }
-.hljs-strong { font-weight: 700; }
+/* Shiki TextMate 高亮（highlighter.ts）：token 色为内联 style 直接引用 --code-* 变量，随主题自动切换；
+   这里只管降级路径（引擎未就绪时转义纯文本，沿用 .hljs 类）与代码块基础版式 */
+.hljs { color: var(--text); }
+.md pre.shiki { margin: 0.6em 0; }

@@ -107,7 +107,7 @@ review-log/<yyyy-mm>.ndjson        # 只追加的复习事件（answer / delete 
 
 - [Anki](https://apps.ankiweb.net/) — 让间隔重复成为大众工具的黄金标准，也是 Miki 存在的原因
 - [FSRS](https://github.com/open-spaced-repetition/fsrs4anki) 与 [py-fsrs](https://github.com/open-spaced-repetition/py-fsrs) — 开源调度算法及其参考实现，Miki 的调度器移植自它并经基准向量比对验证
-- Miki 所站立的开源肩膀：Electron、React、Vite、ECharts、markdown-it、KaTeX、highlight.js
+- Miki 所站立的开源肩膀：Electron、React、Vite、ECharts、markdown-it、KaTeX、Shiki
 
 ## 许可证
 

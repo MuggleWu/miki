@@ -107,7 +107,7 @@ This work is dedicated to my wife, Meihua.
 
 - [Anki](https://apps.ankiweb.net/) — the gold standard that made spaced repetition mainstream, and the reason Miki exists
 - [FSRS](https://github.com/open-spaced-repetition/fsrs4anki) and [py-fsrs](https://github.com/open-spaced-repetition/py-fsrs) — the open-source scheduling algorithm and its reference implementation, from which Miki's scheduler is ported and verified
-- The open-source stack Miki stands on: Electron, React, Vite, ECharts, markdown-it, KaTeX, highlight.js
+- The open-source stack Miki stands on: Electron, React, Vite, ECharts, markdown-it, KaTeX, Shiki (TextMate syntax highlighting)
 
 ## License
 

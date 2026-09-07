@@ -1,21 +1,17 @@
-// markdown 渲染：markdown-it + KaTeX + highlight.js（学习页卡面 / 预览共用，需求 §6）
+// markdown 渲染：markdown-it + KaTeX + Shiki TextMate 高亮（学习页卡面 / 预览共用，需求 §6）。
+// 高亮引擎在 main.tsx 预载（highlighter.ts），未就绪时代码块退化为转义纯文本，首帧不空白。
 import { useMemo } from 'react'
 import MarkdownIt from 'markdown-it'
-import hljs from 'highlight.js'
 import katex from 'katex'
+import { highlightSync } from './highlighter'
 
 const md: MarkdownIt = MarkdownIt({
   html: false,
   linkify: true,
   breaks: true,
   highlight(code, lang) {
-    if (lang && hljs.getLanguage(lang)) {
-      try {
-        return `<pre class="hljs"><code>${hljs.highlight(code, { language: lang }).value}</code></pre>`
-      } catch {
-        // 降级为转义输出
-      }
-    }
+    const html = highlightSync(code, lang)
+    if (html) return html
     return `<pre class="hljs"><code>${md.utils.escapeHtml(code)}</code></pre>`
   }
 })
