@@ -178,6 +178,18 @@ export function AddEditDialog() {
     }
   }, [dialog])
 
+  // 内容就绪（add：立即；edit：回填完成）后聚焦正面输入框，光标落到内容末尾，
+  // 打开即可续写。edit 的 setFront 与 setLoaded 同批 flush，本 effect 跑在 commit 后，
+  // frontRef 上已是回填后的完整内容
+  useEffect(() => {
+    if (!dialog || !loaded) return
+    const el = frontRef.current
+    if (!el) return
+    el.focus()
+    const end = el.value.length
+    el.setSelectionRange(end, end)
+  }, [dialog, loaded])
+
   if (!dialog) return null
 
   const submit = async () => {
@@ -249,7 +261,6 @@ export function AddEditDialog() {
                 </div>
                 <textarea
                   ref={frontRef}
-                  autoFocus={dialog.mode === 'add'}
                   value={front}
                   onChange={(e) => setFront(e.target.value)}
                   placeholder="问题 / 提示"
