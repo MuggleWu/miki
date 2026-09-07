@@ -29,6 +29,15 @@ export default function App() {
     return () => clearInterval(t)
   }, [reload])
 
+  // 主进程热加载完成（git pull / 他机写入等外部变更）→ 重取全局数据 + 让当前视图就地刷新
+  useEffect(() => {
+    const off = window.miki.onWorkspaceChanged(() => {
+      void reload()
+      useApp.getState().bumpData()
+    })
+    return off
+  }, [reload])
+
   // 主题：浅色默认（用户习惯），深色经 data-theme 覆盖
   useEffect(() => {
     document.documentElement.dataset.theme = config?.theme === 'dark' ? 'dark' : 'light'

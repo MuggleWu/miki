@@ -90,3 +90,8 @@ MIKI_BENCH=1 NODE_OPTIONS=--expose-gc npx vitest run src/main/__tests__/minevent
 - 安装：`cp -R release/mac-arm64/Miki.app /Applications/` 后 `open /Applications/Miki.app`；新装应用按名字启动（`open -a Miki` / Raycast 搜 "miki"）需等 LaunchServices 索引，或用 `lsregister -f /Applications/Miki.app` 立即注册。
 - 工作区解析：`MIKI_WORKSPACE` 环境变量 → `~/Library/Application Support/Miki/workspace.json`（`{"workspacePath": ...}`）→ 默认 `~/miki-base`。打包版从 Raycast/Dock 启动无环境变量，靠 workspace.json 指到数据工作区。
 - 单实例锁：`app.requestSingleInstanceLock()`，第二个实例静默退出并唤起已有窗口（防 Raycast 与 dev 双开并发写同一工作区）。
+- 工作区热加载（`WorkspaceService.startWatching()`，默认 2s 轮询）：受管文件 = `decks.json` / `config.json` / `stats.json` / `cards/*.ndjson`（含 delta）/ `review-log/*.ndjson`，按 `mtime+size` 指纹与上次快照比对；发现外部变化（git pull、他机写入）后主进程全量重建内存态（与启动加载链同语义），再经 `miki:workspace-changed` 事件通知渲染进程刷新当前视图。要点：
+  - **自写豁免**：本机所有写路径（原子写/追加）完成后立即更新快照，不把自己的写入当外部变更——若漏挂一处，也只多一次全量重载，不会死循环（重载结束重扫快照）；
+  - **冷却**：3s 内重复变化合并（置 dirty），git pull 大操作期间最多每 3s 重载一次；
+  - **撤销栈作废**：外部变更后撤销目标可能失效（卡被改/删、事件行序变化），重载即清空会话撤销栈（D2 仅本会话）；
+  - **不主动压实**：热加载不清 delta、不折叠他人刚同步的文件，只在内存中重建（压实阈值从零重新计数，与重启一致）。

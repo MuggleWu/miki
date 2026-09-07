@@ -6,6 +6,7 @@ import * as os from 'node:os'
 import * as path from 'node:path'
 import { WorkspaceService } from '../workspace'
 import { DEFAULT_CONFIG } from '../../shared/types'
+import type { CardSnapshot, ReviewEvent } from '../../shared/types'
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'miki-ws-test-'))
 const newWs = (d: string) => {
@@ -389,5 +390,102 @@ describe('previewIntervals（评级预览）', () => {
     expect(iv[1]).toBeLessThanOrEqual(iv[2])
     expect(iv[2]).toBeLessThan(iv[3])
     expect(w.getCard(card.id)!.fsrs).toEqual(snap)
+  })
+})
+
+describe('工作区热加载（外部变更，git pull / 他机写入）', () => {
+  it('外部追加新卡行 → pollOnce 后内存态同步，且只通知一次', () => {
+    const d = tmpKept()
+    const w = newWs(d)
+    const deck = w.addDeck('热加载组')
+    let notified = 0
+    w.onExternalChange(() => notified++)
+    // 模拟 git pull：另一台机器直接向基文件追加新卡行
+    const ext = {
+      id: 'ext-1',
+      front: '外部新增',
+      back: '外部答案',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      deletedAt: null,
+      suspended: false
+    }
+    fs.appendFileSync(path.join(d, 'cards', `${deck.id}.ndjson`), JSON.stringify(ext) + '\n', 'utf-8')
+    w.pollOnce()
+    expect(notified).toBe(1)
+    expect(w.getCard('ext-1')).not.toBeNull()
+    expect(queryAll(w, '外部新增').rows.some((r) => r.id === 'ext-1')).toBe(true)
+    // 无新变化：再次轮询不重复通知
+    w.pollOnce()
+    expect(notified).toBe(1)
+  })
+
+  it('外部 answer 事件（他机刷卡）→ 重放后调度/todayCount 同步', () => {
+    const d = tmpKept()
+    const w = newWs(d)
+    const deck = w.addDeck('异机组')
+    const card = w.addCard(deck.id, '题', '答')
+    const now = Date.now()
+    const after: CardSnapshot = {
+      state: 2,
+      step: null,
+      stability: 5,
+      difficulty: 5,
+      due: now + 86_400_000,
+      lastReview: now
+    }
+    const ev: ReviewEvent = { seq: 0, t: now, action: 'answer', cardId: card.id, deckId: deck.id, rating: 4, before: null, after }
+    const p = (n: number) => String(n).padStart(2, '0')
+    const file = path.join(d, 'review-log', `${new Date().getFullYear()}-${p(new Date().getMonth() + 1)}.ndjson`)
+    fs.appendFileSync(file, JSON.stringify(ev) + '\n', 'utf-8')
+    w.pollOnce()
+    const c = w.getCard(card.id)!
+    expect(c.fsrs).toEqual(after)
+    expect(c.reps).toBe(1)
+    expect(w.todayCount()).toBe(1)
+  })
+
+  it('外部 decks.json 变更（新牌组）→ pollOnce 后可见', () => {
+    const d = tmpKept()
+    const w = newWs(d)
+    const newDeck = { id: 'ext-deck', name: '外部牌组', order: 0, createdAt: Date.now(), deletedAt: null }
+    const decks = JSON.parse(fs.readFileSync(path.join(d, 'decks.json'), 'utf-8'))
+    fs.writeFileSync(path.join(d, 'decks.json'), JSON.stringify([...decks, newDeck], null, 2), 'utf-8')
+    w.pollOnce()
+    expect(w.deckInfos().some((x) => x.id === 'ext-deck')).toBe(true)
+  })
+
+  it('自写豁免：本机 addCard/answer 后 pollOnce 不误判外部变更', () => {
+    const d = tmpKept()
+    const w = newWs(d)
+    let notified = 0
+    w.onExternalChange(() => notified++)
+    const deck = w.addDeck('本地组')
+    const card = w.addCard(deck.id, '本地卡', '')
+    w.answer(card.id, 3)
+    w.pollOnce()
+    expect(notified).toBe(0)
+  })
+
+  it('外部变更重载后会话撤销栈作废（undo 无操作）', () => {
+    const d = tmpKept()
+    const w = newWs(d)
+    const deck = w.addDeck('撤销组')
+    const card = w.addCard(deck.id, 'a', 'b')
+    w.answer(card.id, 3)
+    // 外部变更（追加一行新卡）触发重载
+    const ext = {
+      id: 'ext-2',
+      front: '扰动',
+      back: '',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      deletedAt: null,
+      suspended: false
+    }
+    fs.appendFileSync(path.join(d, 'cards', `${deck.id}.ndjson`), JSON.stringify(ext) + '\n', 'utf-8')
+    w.pollOnce()
+    const r = w.undo()
+    expect(r.restoredCardId).toBeNull()
   })
 })

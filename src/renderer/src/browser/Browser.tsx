@@ -70,6 +70,7 @@ export function Browser() {
   const browserDeckId = useApp((s) => s.browserDeckId)
   const browserFocusCardId = useApp((s) => s.browserFocusCardId)
   const browserKeywords = useApp((s) => s.browserKeywords)
+  const dataEpoch = useApp((s) => s.dataEpoch)
   const setBrowserKeywords = useApp((s) => s.setBrowserKeywords)
   const selectedId = useApp((s) => s.browserSelectedId)
   const setSelectedId = useApp((s) => s.setBrowserSelectedId)
@@ -148,7 +149,7 @@ export function Browser() {
 
   useEffect(() => {
     void query()
-  }, [query, config])
+  }, [query, config, dataEpoch])
 
   // 60 秒重取当前视图：相对到期（「距现在」）随时间推移自动更新
   useEffect(() => {

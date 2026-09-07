@@ -149,16 +149,11 @@ app.whenReady().then(() => {
   ipcMain.handle(IPC.queryCards, (_e, params: QueryParams) => ws.queryCards(params))
   ipcMain.handle(IPC.getStats, (_e, params: StatsParams) => ws.getStats(params))
   ipcMain.handle(IPC.saveBrowserConfig, (_e, columns: string[], sort: SortKey[]) => {
-    ws.config.browser.columns = columns as MikiConfig['browser']['columns']
-    ws.config.browser.sort = sort
-    const file = path.join(ws.root, 'config.json')
-    // config.json 含 API token，仅限当前用户
-    fs.writeFileSync(file, JSON.stringify(ws.config, null, 2), { encoding: 'utf-8', mode: 0o600 })
+    // 统一走 saveConfig（原子写 + 自写豁免快照）；config.json 含 API token 由 atomicWrite 保持 0600
+    ws.saveConfig({ browser: { columns: columns as MikiConfig['browser']['columns'], sort } })
   })
   ipcMain.handle(IPC.saveTheme, (_e, theme: 'light' | 'dark') => {
-    ws.config.theme = theme
-    const file = path.join(ws.root, 'config.json')
-    fs.writeFileSync(file, JSON.stringify(ws.config, null, 2), { encoding: 'utf-8', mode: 0o600 })
+    ws.saveConfig({ theme })
   })
   ipcMain.handle(IPC.saveConfig, (_e, patch: Partial<MikiConfig>) => ws.saveConfig(patch))
   ipcMain.handle(IPC.setCardSuspended, (_e, cardId: string, suspended: boolean) =>
@@ -177,6 +172,12 @@ app.whenReady().then(() => {
   ipcMain.handle(IPC.previewIntervals, (_e, cardId: string) => ws.previewIntervals(cardId))
 
   createWindow()
+
+  // 工作区热加载：git pull / 他机写入后主进程自动重载内存态，通知渲染进程刷新当前视图
+  ws.onExternalChange(() => {
+    if (win && !win.isDestroyed()) win.webContents.send(IPC.workspaceChanged)
+  })
+  ws.startWatching()
 
   // 本机 HTTP API（面向人与 AI 的程序化接口），安全边界见 api-server.ts 与 docs/api.md
   const apiServer = startApiServer(ws)

@@ -23,13 +23,14 @@ function Chart(props: { option: echarts.EChartsOption }) {
 export function Stats() {
   const decks = useApp((s) => s.decks)
   const theme = useApp((s) => s.config?.theme ?? 'light')
+  const dataEpoch = useApp((s) => s.dataEpoch)
   const [deckId, setDeckId] = useState<string | null>(null)
   const [range, setRange] = useState<'year' | 'all'>('year')
   const [stats, setStats] = useState<StatsPayload | null>(null)
 
   useEffect(() => {
     void window.miki.getStats({ deckId, range }).then(setStats)
-  }, [deckId, range])
+  }, [deckId, range, dataEpoch])
 
   const dark = theme === 'dark'
   const dim = dark ? '#9a9aa6' : '#7a7e8a'

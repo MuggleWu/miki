@@ -23,6 +23,7 @@ It is a very small open-source project. Perhaps by the time I grow old, no one i
 - **Event-sourced review log** — append-only NDJSON; undo works by compensating events with self-contained snapshots
 - **Million-card performance** — extreme-scale engineering on top of the event-sourced core: historical events are streamed and never retained in memory (a restart over 1M past events settles at 22MB), scheduling is served by incremental indexes (0.12ms per answer, 0.3ms per undo), and card files use checkpoints + delta appends (undo write amplification drops from a full-file rewrite to a single append; cold start 5.3s); randomized differential tests keep index semantics strictly identical to a full scan
 - **Plain-file workspace** — data lives in a folder separate from the app, git-friendly, sync with any tool
+- **Workspace hot reload** — external changes while the app runs (git pull, another machine's writes) are detected and applied without a restart: the in-progress study card keeps its phase, self-writes never trigger a reload loop, and the session undo stack is safely invalidated on conflict
 - **Light / dark themes** — light by default
 - **Unlimited daily review** — learning comebacks slot back in when due, and new cards only start once every old card due today has been cleared: finish the old, then the new
 

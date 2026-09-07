@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import { IPC } from '../shared/ipc'
+import { IPC, type MikiApi } from '../shared/ipc'
 
-const api = {
+const api: MikiApi = {
   loadWorkspace: () => ipcRenderer.invoke(IPC.loadWorkspace),
   addDeck: (name: string) => ipcRenderer.invoke(IPC.addDeck, name),
   renameDeck: (id: string, name: string) => ipcRenderer.invoke(IPC.renameDeck, id, name),
@@ -30,7 +30,12 @@ const api = {
     ipcRenderer.invoke(IPC.updateCards, items),
   deleteCards: (cardIds: string[]) => ipcRenderer.invoke(IPC.deleteCards, cardIds),
   getCards: (cardIds: string[]) => ipcRenderer.invoke(IPC.getCards, cardIds),
-  previewIntervals: (cardId: string) => ipcRenderer.invoke(IPC.previewIntervals, cardId)
+  previewIntervals: (cardId: string) => ipcRenderer.invoke(IPC.previewIntervals, cardId),
+  onWorkspaceChanged: (cb) => {
+    const h = () => cb()
+    ipcRenderer.on(IPC.workspaceChanged, h)
+    return () => ipcRenderer.removeListener(IPC.workspaceChanged, h)
+  }
 }
 
 contextBridge.exposeInMainWorld('miki', api)

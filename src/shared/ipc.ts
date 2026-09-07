@@ -52,6 +52,8 @@ export interface MikiApi {
   getCards(cardIds: string[]): Promise<Card[]>
   /** 四档评级各自的下次到期预览（ms epoch；不落盘） */
   previewIntervals(cardId: string): Promise<number[]>
+  /** 订阅工作区外部变更（git pull / 他机写入）后主进程热加载完成事件；返回退订函数 */
+  onWorkspaceChanged(cb: () => void): () => void
 }
 
 export const IPC = {
@@ -78,5 +80,7 @@ export const IPC = {
   updateCards: 'miki:update-cards',
   deleteCards: 'miki:delete-cards',
   getCards: 'miki:get-cards',
-  previewIntervals: 'miki:preview-intervals'
+  previewIntervals: 'miki:preview-intervals',
+  /** main → renderer 事件：工作区外部变更已热加载，UI 应刷新当前视图 */
+  workspaceChanged: 'miki:workspace-changed'
 } as const

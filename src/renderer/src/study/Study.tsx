@@ -19,6 +19,7 @@ export function Study() {
   const decks = useApp((s) => s.decks)
   const config = useApp((s) => s.config)
   const contentEpoch = useApp((s) => s.contentEpoch)
+  const dataEpoch = useApp((s) => s.dataEpoch)
   const openBrowser = useApp((s) => s.openBrowser)
   const openDialog = useApp((s) => s.openDialog)
   const setStudyCurrentCardId = useApp((s) => s.setStudyCurrentCardId)
@@ -46,10 +47,11 @@ export function Study() {
     [setStudyCurrentCardId]
   )
 
-  // 进入/换牌组重取；contentEpoch 变化（编辑当前卡确认后）也重取，同卡不清答题相位
+  // 进入/换牌组重取；contentEpoch 变化（编辑当前卡确认后）也重取，同卡不清答题相位；
+  // dataEpoch 变化（工作区热加载）同样重取：同卡保留相位，被外部删除/移走则换下一张
   useEffect(() => {
     if (studyDeckId) void refresh(studyDeckId, true)
-  }, [studyDeckId, refresh, contentEpoch])
+  }, [studyDeckId, refresh, contentEpoch, dataEpoch])
 
   // 评级按钮的下次到期预览（不落盘）
   useEffect(() => {

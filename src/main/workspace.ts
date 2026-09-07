@@ -97,6 +97,12 @@ export class WorkspaceService {
   private deckCheckpoints = new Map<string, number>()
   /** 各牌组 delta 行数（压实阈值触发） */
   private deltaCounts = new Map<string, number>()
+  /** 工作区外部变更检测：受管文件上次快照（path → `${mtimeMs}:${size}`），始自 init/热加载 */
+  private stamps = new Map<string, string>()
+  private watcherTimer: ReturnType<typeof setInterval> | null = null
+  private watcherCbs: (() => void)[] = []
+  private lastReloadAt = 0
+  private reloadDirty = false
 
   // ---------- 路径 ----------
 
@@ -137,6 +143,8 @@ export class WorkspaceService {
     this.streamEvents()
     this.ensureDay()
     this.ensureGitignore()
+    // 启动完成即建快照基线：后续轮询只认真外部变更，不把启动加载当变化
+    this.stamps = this.collectStamps()
   }
 
   private loadConfig(overrides?: Partial<MikiConfig>): MikiConfig {
@@ -201,6 +209,7 @@ export class WorkspaceService {
       this.previewScheduler = this.buildScheduler(this.config, true)
     }
     atomicWrite(path.join(this.root, 'config.json'), JSON.stringify(this.config, null, 2))
+    this.noteWrite(path.join(this.root, 'config.json'))
     return this.config
   }
 
@@ -219,6 +228,7 @@ export class WorkspaceService {
 
   private saveDecks(): void {
     atomicWrite(this.decksFile(), JSON.stringify(this.decks, null, 2))
+    this.noteWrite(this.decksFile())
   }
 
   /** 读统计聚合检查点（stats.json）；缺失/损坏 → 从头聚合（多读一遍事件，语义无损） */
@@ -379,6 +389,112 @@ export class WorkspaceService {
     if (!existing.split('\n').includes('.miki/')) {
       fs.appendFileSync(gi, (existing.endsWith('\n') || existing === '' ? '' : '\n') + '.miki/\n')
     }
+  }
+
+  // ---------- 工作区热加载（外部变更检测；git pull / 他机写入后内存态自动刷新） ----------
+
+  /** 冷却窗口：git pull 大操作期间文件反复变化时合并触发，防重载风暴 */
+  private static readonly RELOAD_COOLDOWN_MS = 3000
+
+  /** 受管文件 = 数据真理层（decks/config/stats + cards/review-log 全部 *.ndjson）；.git/.miki 等派生物不参与 */
+  private managedFiles(): string[] {
+    const out: string[] = [this.decksFile(), this.statsFile(), path.join(this.root, 'config.json')]
+    const scan = (dir: string): void => {
+      if (!fs.existsSync(dir)) return
+      for (const f of fs.readdirSync(dir)) {
+        if (f.endsWith('.ndjson')) out.push(path.join(dir, f))
+      }
+    }
+    scan(path.join(this.root, 'cards'))
+    scan(path.join(this.root, 'review-log'))
+    return out
+  }
+
+  /** 文件指纹：`${mtimeMs}:${size}`；不存在返回 null（用于删文件检测） */
+  private stampOf(p: string): string | null {
+    try {
+      const st = fs.statSync(p)
+      return `${st.mtimeMs}:${st.size}`
+    } catch {
+      return null
+    }
+  }
+
+  private collectStamps(): Map<string, string> {
+    const m = new Map<string, string>()
+    for (const p of this.managedFiles()) {
+      const s = this.stampOf(p)
+      if (s !== null) m.set(p, s)
+    }
+    return m
+  }
+
+  /** 自写豁免：写路径完成后立即更新该文件快照，避免把自己的写入当外部变更 */
+  private noteWrite(file: string): void {
+    const s = this.stampOf(file)
+    if (s === null) this.stamps.delete(file)
+    else this.stamps.set(file, s)
+  }
+
+  /** 注册外部变更回调（主进程把它转发给渲染进程刷新 UI） */
+  onExternalChange(cb: () => void): void {
+    this.watcherCbs.push(cb)
+  }
+
+  startWatching(intervalMs = 2000): void {
+    if (this.watcherTimer !== null) return
+    this.watcherTimer = setInterval(() => this.pollOnce(), intervalMs)
+  }
+
+  stopWatching(): void {
+    if (this.watcherTimer !== null) {
+      clearInterval(this.watcherTimer)
+      this.watcherTimer = null
+    }
+  }
+
+  /** 轮询一次：快照对比发现外部变化 → 热加载（冷却期内合并到下次）。测试直接调用。 */
+  pollOnce(): void {
+    const cur = this.collectStamps()
+    let changed = cur.size !== this.stamps.size
+    if (!changed) {
+      for (const [p, s] of cur) {
+        if (this.stamps.get(p) !== s) {
+          changed = true
+          break
+        }
+      }
+    }
+    if (!changed) return
+    if (this.reloadDirty || Date.now() - this.lastReloadAt < WorkspaceService.RELOAD_COOLDOWN_MS) {
+      this.reloadDirty = true
+      return
+    }
+    this.reloadDirty = false
+    this.reloadFromDisk()
+  }
+
+  /** 全量重载内存态——与启动加载链逐段同语义（「文件是唯一真理，内存态是运行时缓存」）。
+   * 调用方保证 done 后 UI 会被通知刷新。 */
+  reloadFromDisk(): void {
+    this.config = this.loadConfig()
+    this.scheduler = this.buildScheduler(this.config)
+    this.previewScheduler = this.buildScheduler(this.config, true)
+    this.loadDecks()
+    this.loadStatsCheckpoint()
+    this.loadCardsWithCheckpoint()
+    this.streamEvents()
+    // 卡对象/调度状态全换新：索引含 due key 与 tie 分配，必须全量重建（与跨天/启动同路径）
+    this.indexDayKey = localDateKey(Date.now())
+    this.rebuildIndexes(Date.now())
+    // 外部变更后旧撤销目标可能已失效（卡被改/删、事件行序变化），作废会话撤销栈（D2：仅本会话）
+    this.sessionOps = []
+    // 与重启一致：压实阈值从零重新计数；不主动压实——避免热加载改写他人刚同步的文件
+    this.deltaCounts = new Map()
+    // 重载完成即重建基线（含本链自身的 config 写入），后续轮询只认真外部变化
+    this.stamps = this.collectStamps()
+    this.lastReloadAt = Date.now()
+    for (const cb of this.watcherCbs) cb()
   }
 
   // ---------- 调度索引（due 最小堆 + 增量计数器） ----------
@@ -627,6 +743,7 @@ export class WorkspaceService {
   private appendCardRows(deckId: string, cards: Card[]): void {
     if (cards.length === 0) return
     fs.appendFileSync(this.deckCardsFile(deckId), cards.map((c) => this.contentRow(c)).join('\n') + '\n', 'utf-8')
+    this.noteWrite(this.deckCardsFile(deckId))
   }
 
   /** 内容变更追加到 delta 文件（启动时覆盖基行并继承其调度快照） */
@@ -634,6 +751,7 @@ export class WorkspaceService {
     if (cards.length === 0) return
     fs.appendFileSync(this.deckDeltaFile(deckId), cards.map((c) => this.contentRow(c)).join('\n') + '\n', 'utf-8')
     this.touchDelta(deckId)
+    this.noteWrite(this.deckDeltaFile(deckId))
   }
 
   /** 移入牌组：delta 追加带调度快照的完整行（目标可能没有该卡基行，快照须自带）；
@@ -646,6 +764,7 @@ export class WorkspaceService {
     })
     fs.appendFileSync(this.deckDeltaFile(deckId), lines.join('\n') + '\n', 'utf-8')
     this.touchDelta(deckId)
+    this.noteWrite(this.deckDeltaFile(deckId))
   }
 
   /** 移出牌组的墓碑行（启动合并时删除对应基行；delta 内行序=时序，先移出后移回不会误删） */
@@ -657,6 +776,7 @@ export class WorkspaceService {
       'utf-8'
     )
     this.touchDelta(deckId)
+    this.noteWrite(this.deckDeltaFile(deckId))
   }
 
   private touchDelta(deckId: string): void {
@@ -679,6 +799,8 @@ export class WorkspaceService {
     this.deltaCounts.set(deckId, 0)
     this.deckCheckpoints.set(deckId, this.seq)
     this.writeStatsCheckpoint()
+    this.noteWrite(this.deckCardsFile(deckId))
+    this.noteWrite(this.deckDeltaFile(deckId))
   }
 
   /** 统计聚合检查点落盘（压实时调用，运行期不写避免高频重写） */
@@ -687,6 +809,7 @@ export class WorkspaceService {
       ([d, m]) => [d, [...m]]
     )
     atomicWrite(this.statsFile(), JSON.stringify({ checkpointSeq: this.seq, dailyAgg: daily }))
+    this.noteWrite(this.statsFile())
   }
 
   /** 手动全量压实（运维入口；把所有牌组基文件、调度快照与聚合检查点对齐到当前 seq） */
@@ -899,6 +1022,7 @@ export class WorkspaceService {
     for (const [f, lines] of byFile) {
       fs.mkdirSync(path.dirname(f), { recursive: true })
       fs.appendFileSync(f, lines.join('\n') + '\n', 'utf-8')
+      this.noteWrite(f)
     }
     this.events.push(...evs)
   }
