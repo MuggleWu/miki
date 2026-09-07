@@ -2,7 +2,7 @@
 // 添加模式提交后弹窗保留并清空输入（连续新增场景），Esc/取消才关闭
 import { useEffect, useRef, useState } from 'react'
 import { Md } from '../md'
-import { useApp } from '../store'
+import { sortedDecks, useApp } from '../store'
 
 /** 选中区加粗开关键（⌘B）：算出替换范围/替换文本/新选区。纯函数便于测试 */
 export function boldSelection(
@@ -91,7 +91,7 @@ export function AddEditDialog() {
     // 换新 decks 数组引用，若它在依赖里，弹窗开着时正反面输入会被清空
     // （add：白打；edit：闪断后回退到已保存内容，未保存输入丢失）。
     // 开窗瞬间的默认牌组用 getState 现取，不建立对 decks 的响应式依赖。
-    setDeckId(dialog.deckId ?? useApp.getState().decks[0]?.id ?? '')
+    setDeckId(dialog.deckId ?? sortedDecks(useApp.getState().decks)[0]?.id ?? '')
     setFront('')
     setBack('')
     setLoaded(dialog.mode === 'add')
@@ -152,7 +152,7 @@ export function AddEditDialog() {
           <div className="form-row">
             <label>牌组</label>
             <select value={deckId} onChange={(e) => setDeckId(e.target.value)}>
-              {decks.map((d) => (
+              {sortedDecks(decks).map((d) => (
                 <option key={d.id} value={d.id}>
                   {d.name}
                 </option>
