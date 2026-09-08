@@ -36,15 +36,15 @@ export function Home() {
         <thead>
           <tr>
             <th>牌组</th>
-            <th className="num">
+            <th className="num" style={{ textAlign: 'center' }}>
               总数
               <ColResizer width={homeColWidths[0]} onResize={(w) => setHomeColWidth(0, w)} />
             </th>
-            <th className="num">
+            <th className="num" style={{ textAlign: 'center' }}>
               未学习
               <ColResizer width={homeColWidths[1]} onResize={(w) => setHomeColWidth(1, w)} />
             </th>
-            <th className="num">
+            <th className="num" style={{ textAlign: 'center' }}>
               到期
               <ColResizer width={homeColWidths[2]} onResize={(w) => setHomeColWidth(2, w)} />
             </th>
@@ -67,13 +67,13 @@ export function Home() {
               title="点击进入学习"
             >
               <td>{d.name}</td>
-              <td className="num">
+              <td className="num" style={{ textAlign: 'center' }}>
                 {d.counts.total > 0 ? <span className="badge badge-total">{d.counts.total}</span> : 0}
               </td>
-              <td className="num">
+              <td className="num" style={{ textAlign: 'center' }}>
                 {d.counts.new > 0 ? <span className="badge badge-new">{d.counts.new}</span> : 0}
               </td>
-              <td className="num">
+              <td className="num" style={{ textAlign: 'center' }}>
                 {d.counts.due > 0 ? <span className="badge badge-due">{d.counts.due}</span> : 0}
               </td>
               <td
