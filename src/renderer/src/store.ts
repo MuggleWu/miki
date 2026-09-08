@@ -1,14 +1,12 @@
 // 全局状态：tab 路由、牌组列表、选中态、跨页焦点与界面布局
 import { create } from 'zustand'
+import { dialogToPayload } from '../../shared/card-dialog'
 import type { BrowserColumn, DeckInfo, MikiConfig } from '../../shared/types'
 
 export type Tab = 'home' | 'study' | 'browser' | 'stats' | 'settings'
 
-export interface DialogState {
-  mode: 'add' | 'edit'
-  deckId: string | null
-  cardId: string | null // edit 模式
-}
+/** 添加/编辑卡片弹窗状态（结构定义在 shared，主窗口与弹窗子窗口共用） */
+export type DialogState = import('../../shared/types').DialogState
 
 interface AppStore {
   tab: Tab
@@ -35,6 +33,7 @@ interface AppStore {
   browserColWidths: Partial<Record<BrowserColumn, number>>
   /** 首页三个数字列宽（未学习/学习中/待复习） */
   homeColWidths: number[]
+  /** 卡片弹窗子窗口开关状态（载荷由调用方/主进程同步；主窗口无 DOM 弹窗，只有状态镜像） */
   dialog: DialogState | null
   /** 卡片内容版本号：编辑弹窗确认后 +1，学习页据此就地重取当前卡（phase 不复位） */
   contentEpoch: number
@@ -121,8 +120,16 @@ export const useApp = create<AppStore>((set) => ({
       browserFocusCardId: focusCardId ?? null
     })),
 
-  openDialog: (d) => set({ dialog: d }),
-  closeDialog: () => set({ dialog: null }),
+  /** 请求打开卡片弹窗子窗口：本地立即记状态（快捷键屏蔽不再等 IPC 往返），真实窗口由主进程管理 */
+  openDialog: (d) => {
+    set({ dialog: d })
+    void window.miki.openCardDialog(dialogToPayload(d))
+  },
+  /** 关闭卡片弹窗子窗口（主窗口 Esc 触达；弹窗内取消走 CardForm 的 onCancelled） */
+  closeDialog: () => {
+    set({ dialog: null })
+    void window.miki.closeCardDialog()
+  },
   setStudyCurrentCardId: (id) => set({ studyCurrentCardId: id }),
   setBrowserKeywords: (kw) => set({ browserKeywords: kw }),
   setBrowserSelectedId: (id) => set({ browserSelectedId: id }),

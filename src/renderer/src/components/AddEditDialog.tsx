@@ -1,8 +1,12 @@
-// 添加/编辑卡片弹窗（S3/S4）：正反面双栏 markdown 编辑 + 预览，cmd+enter 提交
-// 添加模式提交后弹窗保留并清空输入（连续新增场景），Esc/取消才关闭
-import { useEffect, useRef, useState } from 'react'
+// 卡片添加/编辑表单：正反面双栏 markdown 编辑 + 预览，cmd+enter 提交。
+// 被两个宿主复用：
+//   1. 主窗口 DOM 弹窗壳（AddEditDialog，本文件）
+//   2. 卡片弹窗子窗口（CardDialogWindow.tsx，独立 BrowserWindow，可拖出主窗口）
+// 表单本身不含开/关逻辑：初始值与提交/取消回调由宿主注入
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { Md } from '../md'
 import { sortedDecks, useApp } from '../store'
+import type { DialogState } from '../../../shared/types'
 
 /** wrap 类编辑（bold/backtick）纯函数的统一返回：替换范围、替换文本、应用后新选区 */
 export interface WrapResult {
@@ -184,181 +188,242 @@ export function applyWrap(
   return true
 }
 
-export function AddEditDialog() {
-  const dialog = useApp((s) => s.dialog)
+export interface CardFormProps {
+  /** add：初始牌组（null = 取第一个牌组）；edit：忽略，牌组只读展示卡所在牌组名 */
+  mode: 'add' | 'edit'
+  deckId: string | null
+  cardId: string | null
+  /** 卡片内容版本：edit 回填后宿主可用 key 重挂载；本组件只管表单内状态 */
+  onSubmitted?: (kind: 'add' | 'edit') => void
+  /** 用户主动取消（Esc / 取消按钮）；宿主决定关弹窗还是仅重置 */
+  onCancelled?: () => void
+  /** 提交按钮文字与标题（弹窗窗口标题栏由 main 设置） */
+  submitLabel?: string
+  title?: string
+  /** 底部左侧提示（主窗口弹窗显示快捷键说明；子窗口传 false 隐藏） */
+  showHint?: boolean
+  /** add 模式提交成功后是否保留表单（主窗口连续新增）；子窗口固定 false */
+  keepAfterAdd?: boolean
+}
+
+/** 表单主体：弹窗壳与子窗口共用。牌组选择/内容编辑/校验/提交全在这里，宿主只接 onSubmitted/onCancelled */
+export function CardForm(props: CardFormProps) {
+  const { mode, deckId, cardId, onSubmitted, onCancelled, submitLabel, title, showHint = true, keepAfterAdd = false } = props
   const decks = useApp((s) => s.decks)
-  const closeDialog = useApp((s) => s.closeDialog)
   const reload = useApp((s) => s.reload)
   const bumpContent = useApp((s) => s.bumpContent)
 
-  const [deckId, setDeckId] = useState('')
+  const [deck, setDeck] = useState('')
   const [front, setFront] = useState('')
   const [back, setBack] = useState('')
-  const [loaded, setLoaded] = useState(false)
+  const [loaded, setLoaded] = useState(mode === 'add')
+  const [editDeckId, setEditDeckId] = useState<string | null>(null)
   const frontRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
-    if (!dialog) return
-    // 只在弹窗打开时初始化一次。decks 不能进依赖：App 的 60s 轮询与切视图都会 reload()
-    // 换新 decks 数组引用，若它在依赖里，弹窗开着时正反面输入会被清空
-    // （add：白打；edit：闪断后回退到已保存内容，未保存输入丢失）。
-    // 开窗瞬间的默认牌组用 getState 现取，不建立对 decks 的响应式依赖。
-    setDeckId(dialog.deckId ?? sortedDecks(useApp.getState().decks)[0]?.id ?? '')
+    if (mode !== 'add') return
+    // add：开表单初始化一次。decks 不进依赖：60s 轮询换新数组引用会把已输入内容冲掉
+    setDeck(deckId ?? sortedDecks(useApp.getState().decks)[0]?.id ?? '')
     setFront('')
     setBack('')
-    setLoaded(dialog.mode === 'add')
-    if (dialog.mode === 'edit' && dialog.cardId) {
-      void window.miki.getCard(dialog.cardId).then((card) => {
-        // 回填前确认仍是同一个弹窗会话：防止快速取消→再开新弹窗时旧 promise 串场覆盖
-        if (card && useApp.getState().dialog === dialog) {
-          setFront(card.front)
-          setBack(card.back)
-        }
-        setLoaded(true)
-      })
-    }
-  }, [dialog])
+    setLoaded(true)
+  }, [mode, deckId])
 
-  // 内容就绪（add：立即；edit：回填完成）后聚焦正面输入框，光标落到内容末尾，
-  // 打开即可续写。edit 的 setFront 与 setLoaded 同批 flush，本 effect 跑在 commit 后，
-  // frontRef 上已是回填后的完整内容
+  // add 模式：表单先于牌组列表就绪（子窗口 mount 后异步 reload）时，列表到达后补选第一个牌组。
+  // 只补空值，不动已选项；不重置正反面输入
   useEffect(() => {
-    if (!dialog || !loaded) return
+    if (mode !== 'add' || deck) return
+    const first = sortedDecks(decks)[0]?.id
+    if (first) setDeck(first)
+  }, [mode, deck, decks])
+
+  useEffect(() => {
+    if (mode !== 'edit' || !cardId) return
+    let alive = true
+    setLoaded(false)
+    void window.miki.getCard(cardId).then((card) => {
+      if (!alive) return
+      if (card) {
+        setFront(card.front)
+        setBack(card.back)
+        setEditDeckId(card.deckId) // 牌组名从 decks 派生（decks 异步到达后自动补显）
+      }
+      setLoaded(true)
+    })
+    return () => {
+      alive = false
+    }
+  }, [mode, cardId])
+
+  // 内容就绪后聚焦正面输入框，光标落到内容末尾，打开即可续写
+  useEffect(() => {
+    if (!loaded) return
     const el = frontRef.current
     if (!el) return
     el.focus()
     const end = el.value.length
     el.setSelectionRange(end, end)
-  }, [dialog, loaded])
-
-  if (!dialog) return null
+  }, [loaded, mode])
 
   const submit = async () => {
     if (front.trim() === '' && back.trim() === '') return
-    if (dialog.mode === 'add') {
-      if (!deckId) return
-      await window.miki.addCard(deckId, front, back)
-      // 连续新增：保留弹窗，清空输入继续录下一张
-      setFront('')
-      setBack('')
-      frontRef.current?.focus()
-    } else if (dialog.cardId) {
-      await window.miki.updateCard(dialog.cardId, front, back)
+    if (mode === 'add') {
+      if (!deck) return
+      await window.miki.addCard(deck, front, back)
+      if (keepAfterAdd) {
+        // 连续新增：保留表单，清空输入继续录下一张
+        setFront('')
+        setBack('')
+        frontRef.current?.focus()
+      }
+    } else if (cardId) {
+      await window.miki.updateCard(cardId, front, back)
       bumpContent() // 学习页当前卡就地重取内容（同卡保留提问/答案相位）
-      closeDialog()
     }
+    onSubmitted?.(mode)
     await reload()
+    if (mode === 'edit' || !keepAfterAdd) onCancelled?.()
   }
 
-  return (
-    <div className="overlay">
-      <div
-        className="modal dialog-wide"
-        onKeyDown={(e) => {
-          if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'b') {
-            // ⌘/Ctrl+B：选区加粗开关键（正反面输入框内）
-            const el = e.target instanceof HTMLTextAreaElement ? e.target : null
-            if (el) {
-              e.preventDefault()
-              applyWrap(el, el === frontRef.current ? setFront : setBack, boldSelection)
-            }
-            return
-          }
-          if (e.key === '`' && !e.metaKey && !e.ctrlKey && !e.altKey) {
-            // 反引号：单按包裹 / 三连按出代码块（正反面输入框内）
-            const el = e.target instanceof HTMLTextAreaElement ? e.target : null
-            if (el) {
-              e.preventDefault()
-              applyWrap(el, el === frontRef.current ? setFront : setBack, tickSelection)
-            }
-            return
-          }
-          if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey && !e.altKey) {
-            // 普通回车：列表项行末续行 / 空列表项退出列表，其余走默认换行（组合输入中不接管）
-            const el = e.target instanceof HTMLTextAreaElement ? e.target : null
-            if (el && !e.nativeEvent.isComposing) {
-              const handled = applyWrap(el, el === frontRef.current ? setFront : setBack, enterContinueList)
-              if (handled) e.preventDefault()
-            }
-            return
-          }
-          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-            e.preventDefault()
-            void submit()
-          }
-          if (e.key === 'Escape') closeDialog()
-        }}
-      >
-        <h3>{dialog.mode === 'add' ? '添加卡片' : '编辑卡片'}</h3>
-        {dialog.mode === 'add' && (
-          <div className="form-row">
-            <label>牌组</label>
-            <select value={deckId} onChange={(e) => setDeckId(e.target.value)}>
-              {sortedDecks(decks).map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.name}
-                </option>
-              ))}
-            </select>
+  const form = (
+    <>
+      <h3>{title ?? (mode === 'add' ? '添加卡片' : '编辑卡片')}</h3>
+      {mode === 'add' && (
+        <div className="form-row">
+          <label>牌组</label>
+          <select value={deck} onChange={(e) => setDeck(e.target.value)}>
+            {sortedDecks(decks).map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+      {mode === 'edit' && editDeckId && decks.length > 0 && (
+        <div className="form-row">
+          <label>牌组</label>
+          <input value={decks.find((d) => d.id === editDeckId)?.name ?? '（牌组不存在）'} readOnly />
+        </div>
+      )}
+      {loaded && (
+        <>
+          <div className="dual">
+            <div>
+              <div className="tag">
+                <span>正面（Markdown）</span>
+              </div>
+              <textarea
+                ref={frontRef}
+                value={front}
+                onChange={(e) => setFront(e.target.value)}
+                placeholder="问题 / 提示"
+              />
+            </div>
+            <div>
+              <div className="tag">
+                <span>正面预览</span>
+              </div>
+              <div className="preview">
+                <Md source={front} />
+              </div>
+            </div>
           </div>
-        )}
-        {loaded && (
-          <>
-            <div className="dual">
-              <div>
-                <div className="tag">
-                  <span>正面（Markdown）</span>
-                </div>
-                <textarea
-                  ref={frontRef}
-                  value={front}
-                  onChange={(e) => setFront(e.target.value)}
-                  placeholder="问题 / 提示"
-                />
+          <div className="dual">
+            <div>
+              <div className="tag">
+                <span>反面（Markdown）</span>
               </div>
-              <div>
-                <div className="tag">
-                  <span>正面预览</span>
-                </div>
-                <div className="preview">
-                  <Md source={front} />
-                </div>
+              <textarea
+                value={back}
+                onChange={(e) => setBack(e.target.value)}
+                placeholder="答案"
+              />
+            </div>
+            <div>
+              <div className="tag">
+                <span>反面预览</span>
+              </div>
+              <div className="preview">
+                <Md source={back} />
               </div>
             </div>
-            <div className="dual">
-              <div>
-                <div className="tag">
-                  <span>反面（Markdown）</span>
-                </div>
-                <textarea
-                  value={back}
-                  onChange={(e) => setBack(e.target.value)}
-                  placeholder="答案"
-                />
-              </div>
-              <div>
-                <div className="tag">
-                  <span>反面预览</span>
-                </div>
-                <div className="preview">
-                  <Md source={back} />
-                </div>
-              </div>
-            </div>
-          </>
-        )}
-        <div className="actions">
+          </div>
+        </>
+      )}
+      <div className="actions">
+        {showHint && (
           <span style={{ color: 'var(--text-dim)', fontSize: 12, marginRight: 'auto', alignSelf: 'center' }}>
             <kbd className="kbd">⌘</kbd>+<kbd className="kbd">B</kbd> 加粗 · <kbd className="kbd">`</kbd> 行内代码（连按三下出代码块） ·{' '}
             <kbd className="kbd">↩</kbd> 列表续行 · <kbd className="kbd">⌘</kbd>+<kbd className="kbd">↩</kbd> 提交 ·{' '}
             <kbd className="kbd">esc</kbd> 关闭
           </span>
-          <button onClick={closeDialog}>取消</button>
-          <button className="primary" onClick={() => void submit()}>
-            {dialog.mode === 'add' ? '添加' : '确认'}
-          </button>
-        </div>
+        )}
+        <button onClick={() => onCancelled?.()}>{keepAfterAdd ? '关闭' : '取消'}</button>
+        <button className="primary" onClick={() => void submit()}>
+          {submitLabel ?? (mode === 'add' ? '添加' : '确认')}
+        </button>
       </div>
+    </>
+  )
+
+  // 键盘处理对两个宿主一致；Esc 交给宿主关闭（onCancelled），这里只管编辑键与提交
+  const onKeyDown = (e: ReactKeyboardEvent) => {
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'b') {
+      const el = e.target instanceof HTMLTextAreaElement ? e.target : null
+      if (el) {
+        e.preventDefault()
+        applyWrap(el, el === frontRef.current ? setFront : setBack, boldSelection)
+      }
+      return
+    }
+    if (e.key === '`' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      const el = e.target instanceof HTMLTextAreaElement ? e.target : null
+      if (el) {
+        e.preventDefault()
+        applyWrap(el, el === frontRef.current ? setFront : setBack, tickSelection)
+      }
+      return
+    }
+    if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      // 普通回车：列表项行末续行 / 空列表项退出列表，其余走默认换行（组合输入中不接管）
+      const el = e.target instanceof HTMLTextAreaElement ? e.target : null
+      if (el && !e.nativeEvent.isComposing) {
+        const handled = applyWrap(el, el === frontRef.current ? setFront : setBack, enterContinueList)
+        if (handled) e.preventDefault()
+      }
+      return
+    }
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault()
+      void submit()
+    }
+    if (e.key === 'Escape') onCancelled?.()
+  }
+
+  return (
+    <div className="modal dialog-wide" onKeyDown={onKeyDown}>
+      {form}
+    </div>
+  )
+}
+
+/** 主窗口 DOM 弹窗壳：从 store.dialog 读取状态渲染 CardForm（原有行为不变） */
+export function AddEditDialog() {
+  const dialog = useApp((s) => s.dialog)
+  const closeDialog = useApp((s) => s.closeDialog)
+
+  if (!dialog) return null
+  const d: DialogState = dialog
+  return (
+    <div className="overlay">
+      <CardForm
+        mode={d.mode}
+        deckId={d.deckId}
+        cardId={d.cardId}
+        keepAfterAdd={d.mode === 'add'}
+        onCancelled={closeDialog}
+      />
     </div>
   )
 }

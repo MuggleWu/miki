@@ -123,7 +123,7 @@ export function Study() {
         return
       }
       if (e.key.toLowerCase() === 'e' && payload?.card) {
-        openDialog({ mode: 'edit', deckId: payload.card.deckId, cardId: payload.card.id })
+        openDialog({ mode: 'edit', deckId: null, cardId: payload.card.id })
       }
     }
     window.addEventListener('keydown', h)

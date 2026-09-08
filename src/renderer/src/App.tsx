@@ -1,4 +1,5 @@
 // App：tab 路由 + 全局快捷键（A/B/T/S/D，NF3 输入互斥）+ 主题（浅色默认）
+// 卡片添加/编辑改为独立弹窗子窗口（main 进程管理）：这里只负责请求开/关 + 同步开关状态 + 数据刷新
 import { useEffect } from 'react'
 import { isTypingTarget, useApp } from './store'
 import { Home } from './home/Home'
@@ -6,7 +7,6 @@ import { Study } from './study/Study'
 import { Browser } from './browser/Browser'
 import { Stats } from './stats/Stats'
 import { Settings } from './settings/Settings'
-import { AddEditDialog } from './components/AddEditDialog'
 
 export default function App() {
   const tab = useApp((s) => s.tab)
@@ -16,6 +16,25 @@ export default function App() {
   const setTab = useApp((s) => s.setTab)
   const openBrowser = useApp((s) => s.openBrowser)
   const openDialog = useApp((s) => s.openDialog)
+
+  // 卡片弹窗子窗口状态同步：主窗口 store.dialog 只是标志镜像（快捷键屏蔽 + Esc 判断）。
+  // 开窗时调用方已先经 store.openDialog 记状态，这里只处理「窗口侧关闭」（弹窗内 Esc/⌘W/提交完成）
+  useEffect(() => {
+    const off = window.miki.onCardDialogVisibility((visible) => {
+      if (!visible) useApp.setState({ dialog: null })
+    })
+    return off
+  }, [])
+
+  // 弹窗子窗口提交卡片后（add/edit）：刷新全局数据 + 当前视图数据。
+  // bumpData 驱动学习页/卡片库/统计页重取；reload 刷牌组计数与首页数字
+  useEffect(() => {
+    const off = window.miki.onCardsChanged(() => {
+      void reload()
+      useApp.getState().bumpData()
+    })
+    return off
+  }, [reload])
 
   // 启动与每次切视图都重取全局数据（牌组计数 / 今天已学）：
   // 学习页 ⌘D 删除、答题等操作只刷新本视图，不主动刷牌组列表——靠切视图即时刷新，不必等 60s 定时器
@@ -56,7 +75,7 @@ export default function App() {
       const key = e.key.toLowerCase()
       const s = useApp.getState()
       if (key === 'escape') {
-        if (s.dialog) s.closeDialog()
+        if (s.dialog) s.closeDialog() // 关的是独立子窗口（store 桥接 IPC，主窗口 DOM 已无弹窗层）
         return
       }
       // 弹窗打开时屏蔽单字母快捷键，避免穿透操作背后的界面
@@ -64,6 +83,7 @@ export default function App() {
       if (key === 'a') {
         e.preventDefault()
         const deckId = s.studyDeckId ?? s.selectedDeckId ?? s.decks[0]?.id ?? null
+        // 请求主进程开卡片弹窗子窗口（store.openDialog 桥接 IPC 并记状态）
         openDialog({ mode: 'add', deckId, cardId: null })
       } else if (key === 'b') {
         e.preventDefault()
@@ -127,8 +147,6 @@ export default function App() {
         {tab === 'stats' && <Stats />}
         {tab === 'settings' && <Settings />}
       </div>
-
-      <AddEditDialog />
     </div>
   )
 }

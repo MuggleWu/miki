@@ -54,6 +54,18 @@ export interface MikiApi {
   previewIntervals(cardId: string): Promise<number[]>
   /** 订阅工作区外部变更（git pull / 他机写入）后主进程热加载完成事件；返回退订函数 */
   onWorkspaceChanged(cb: () => void): () => void
+  /** 请求打开卡片添加/编辑弹窗子窗口（已开着则聚焦并切换到新载荷） */
+  openCardDialog(payload: unknown): Promise<void>
+  /** 请求关闭卡片弹窗子窗口（未开着时 no-op） */
+  closeCardDialog(): Promise<void>
+  /** 弹窗子窗口提交后通知：主进程转发给主窗口刷新数据（kind=add/edit） */
+  notifyCardsChanged(kind: 'add' | 'edit'): Promise<void>
+  /** 订阅弹窗子窗口推送的载荷（主进程在弹窗窗口加载完成/重复打开时下发） */
+  onCardDialogPayload(cb: (payload: unknown) => void): () => void
+  /** 订阅卡片数据变更（弹窗子窗口提交后触发；主窗口收到后刷新牌组计数与当前视图） */
+  onCardsChanged(cb: (p: { kind: 'add' | 'edit' }) => void): () => void
+  /** 订阅弹窗开关状态（主窗口据此同步 store.dialog：快捷键屏蔽 + Esc 关弹窗） */
+  onCardDialogVisibility(cb: (visible: boolean) => void): () => void
 }
 
 export const IPC = {
@@ -82,5 +94,14 @@ export const IPC = {
   getCards: 'miki:get-cards',
   previewIntervals: 'miki:preview-intervals',
   /** main → renderer 事件：工作区外部变更已热加载，UI 应刷新当前视图 */
-  workspaceChanged: 'miki:workspace-changed'
+  workspaceChanged: 'miki:workspace-changed',
+  /** renderer（主窗口/弹窗窗口）→ main：打开/关闭卡片弹窗子窗口 */
+  openCardDialog: 'miki:open-card-dialog',
+  closeCardDialog: 'miki:close-card-dialog',
+  /** renderer（弹窗窗口）→ main：提交后通知，main 转发主窗口 */
+  notifyCardsChanged: 'miki:notify-cards-changed',
+  /** main → renderer：弹窗载荷下发（弹窗窗口）/开关状态（主窗口）/卡片数据变更（主窗口） */
+  cardDialogPayload: 'miki:card-dialog-payload',
+  cardDialogVisibility: 'miki:card-dialog-visibility',
+  cardsChanged: 'miki:cards-changed'
 } as const

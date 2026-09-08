@@ -3,11 +3,14 @@ import * as path from 'node:path'
 import * as fs from 'node:fs'
 import { WorkspaceService } from './workspace'
 import { startApiServer } from './api-server'
+import { CardDialogManager, type CardDialogWindowLike } from './card-dialog'
 import { IPC } from '../shared/ipc'
+import { withCardDialogHash } from '../shared/card-dialog'
 import type { MikiConfig, QueryParams, Rating, SortKey, StatsParams, WindowState } from '../shared/types'
 
 let ws: WorkspaceService
 let win: BrowserWindow | null = null
+let dialogManager: CardDialogManager | null = null
 
 // 原生头行（系统标题栏）颜色跟随应用内主题：themeSource 影响原生控件外观，
 // 与渲染层 data-theme 同源（config.theme），避免深色内容配浅色头行
@@ -104,6 +107,63 @@ function createWindow(): void {
   }
 }
 
+function dialogUrl(): string {
+  const devUrl = process.env.ELECTRON_RENDERER_URL
+  return withCardDialogHash(devUrl ? `${devUrl}/` : `file://${path.join(__dirname, '../renderer/index.html')}`)
+}
+
+function setupCardDialogManager(): void {
+  dialogManager = new CardDialogManager({
+    createWindow: ({ bounds, title }) => {
+      const dw = new BrowserWindow({
+        x: bounds.x,
+        y: bounds.y,
+        width: bounds.width,
+        height: bounds.height,
+        minWidth: 520,
+        minHeight: 380,
+        title,
+        parent: win ?? undefined,
+        show: false, // ready-to-show 后再显示，避免白窗闪烁
+        backgroundColor: ws.config.theme === 'dark' ? '#101014' : '#f5f6f8',
+        webPreferences: {
+          preload: path.join(__dirname, '../preload/index.js'),
+          contextIsolation: true,
+          nodeIntegration: false,
+          sandbox: true
+        }
+      })
+      // 弹窗窗口内的外部导航一律拒掉（同主窗口策略；正常流程不会发生）
+      dw.webContents.on('will-navigate', (e) => e.preventDefault())
+      dw.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+      return dw as unknown as CardDialogWindowLike
+    },
+    getParentBounds: () => {
+      if (!win || win.isDestroyed()) return null
+      const b = win.getBounds()
+      return { x: b.x, y: b.y, width: b.width, height: b.height }
+    },
+    getWorkArea: (parent) => screen.getDisplayMatching(parent).workArea,
+    getSavedBounds: () => ws.config.cardDialogWindow,
+    buildUrl: dialogUrl,
+    notifyMainWindow: (channel, ...args) => {
+      if (win && !win.isDestroyed()) win.webContents.send(channel, ...args)
+    },
+    saveBounds: (b) => ws.saveConfig({ cardDialogWindow: b })
+  })
+
+  const mgr = dialogManager as CardDialogManager // 以下 handler 均在 setup 完成后才会被调用
+  ipcMain.handle(IPC.openCardDialog, (_e, payload: unknown) => {
+    mgr.open(payload)
+  })
+  ipcMain.handle(IPC.closeCardDialog, () => {
+    mgr.close()
+  })
+  ipcMain.handle(IPC.notifyCardsChanged, (_e, kind: unknown) => {
+    mgr.notifyCardsChanged(kind)
+  })
+}
+
 app.whenReady().then(() => {
   // 单实例锁：双开（Raycast/Dock 启动 + dev 实例）会并发写同一工作区的事件日志与检查点
   if (!app.requestSingleInstanceLock()) {
@@ -180,10 +240,12 @@ app.whenReady().then(() => {
   ipcMain.handle(IPC.previewIntervals, (_e, cardId: string) => ws.previewIntervals(cardId))
 
   createWindow()
+  setupCardDialogManager()
 
   // 工作区热加载：git pull / 他机写入后主进程自动重载内存态，通知渲染进程刷新当前视图
   ws.onExternalChange(() => {
     if (win && !win.isDestroyed()) win.webContents.send(IPC.workspaceChanged)
+    dialogManager?.relayWorkspaceChanged() // 弹窗窗口的牌组下拉同步刷新
   })
   ws.startWatching()
 
@@ -193,6 +255,11 @@ app.whenReady().then(() => {
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
+  })
+
+  // 主窗口关闭：先关弹窗子窗口（child 不阻止 window-all-closed 判定，但显式关保证 close 落盘）
+  win?.on('closed', () => {
+    dialogManager?.close()
   })
 })
 
