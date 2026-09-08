@@ -9,7 +9,7 @@ Launching: the packaged app lives at `/Applications/Miki.app` (type `miki` in Ra
 ## Decks (Home)
 
 - "Create deck" adds a new one; the two lines below the page show today's reviews / lifetime review count, plus shortcut hints (chips style).
-- Table columns: deck name / new / learning / due; sorted by name (number-aware, `1 xxx` before `2 xxx`).
+- Table columns: deck name / total / new / due; sorted by name (number-aware, `1 xxx` before `2 xxx`). Due = learning/review cards that are due right now (excludes new, not-yet-due and suspended cards); the total includes suspended cards.
 - The "…" menu at the end of each row: **Rename** / **Delete**. Deleting a deck keeps its cards in the data files, but they disappear from every view; deck deletion is irreversible.
 
 ## Study
@@ -17,8 +17,9 @@ Launching: the packaged app lives at `/Applications/Miki.app` (type `miki` in Ra
 - `Space` reveals the answer; after revealing, `Space` or `3` rates Good, `1` Again, `2` Hard, `4` Easy.
 - Each rating button shows a live preview of the next due date it would produce (previews ignore interval fuzzing for stable display).
 - Queue order: learning queue (minute-level steps, slots back in when due) → cards due today → new cards. As long as any review card due today is unfinished (including ones due later today), no new cards are dealt — finish the old, then the new. Learning comebacks slot back in when due without blocking new cards. Daily reviews are unlimited.
-- Add/edit dialog: front/back Markdown inputs grow with content (no fixed-height inner scrolling); when content overflows, the dialog itself scrolls vertically. Select text and press `⌘B` (Windows `Ctrl+B`) to toggle bold (with no selection, inserts `****`); `⌘Z` undoes inside the dialog.
-- Backtick `` ` `` (front/back inputs in the add/edit dialog and the browser editor panel): single press with no selection inserts a pair (cursor centered), with a selection wraps inline code; three consecutive presses produce a fenced code block (with a selection, wraps it with ``` lines above and below; without, creates an empty block with the cursor on the content line). Detection is text-pattern based with no key-interval limit: after two presses the text looks like `` ``|`` ``, and the third press converts automatically.
+- Add/edit happens in a standalone child window: drag it out of the main window (including onto another screen); its position and size are remembered across launches. Front/back Markdown inputs grow with content (no fixed-height inner scrolling); when content overflows, the window itself scrolls vertically. Select text and press `⌘B` (Windows `Ctrl+B`) to toggle bold (with no selection, inserts `****`); `⌘Z` undoes. In add mode the form stays open after submitting, so you can keep adding cards.
+- Backtick `` ` `` (front/back inputs in the add/edit window and the browser editor panel): single press with no selection inserts a pair (cursor centered), with a selection wraps inline code; three consecutive presses produce a fenced code block (with a selection, wraps it with ``` lines above and below; without, creates an empty block with the cursor on the content line). Detection is text-pattern based with no key-interval limit: after two presses the text looks like `` ``|`` ``, and the third press converts automatically.
+- List continuation: pressing Enter at the end of a list line inserts the same-level marker automatically (ordered lists increment, indentation is kept); Enter on an empty list item exits the list. Works in both the add/edit window and the browser editor panel.
 - `A` adds a card, `E` edits the current card, `⌘D` deletes the current card (soft delete), `⌘Z` undoes the last answer or deletion (multi-step).
 - Card faces support Markdown, KaTeX math and syntax highlighting; typeface and size are adjustable in Settings.
 - A card whose cumulative Again count reaches the leech threshold is auto-suspended (⏸) and leaves the queue; unsuspend it in the Browser.
@@ -56,8 +57,8 @@ Launching: the packaged app lives at `/Applications/Miki.app` (type `miki` in Ra
 | Undo last answer / delete | `⌘Z` | `Ctrl+Z` |
 | Select all (Browser) | `⌘A` | `Ctrl+A` |
 | Focus browser search | `⌘F` | `Ctrl+F` |
-| Confirm add/edit dialog | `⌘Enter` | `Ctrl+Enter` |
-| Close dialog / exit add mode | `Esc` | `Esc` |
+| Confirm add/edit window | `⌘Enter` | `Ctrl+Enter` |
+| Close add/edit window | `Esc` | `Esc` |
 
 Single-key shortcuts are ignored while typing in a text field, so `Ctrl+C/V` etc. keep working inside inputs.
 

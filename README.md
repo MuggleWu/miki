@@ -16,6 +16,7 @@ It is a very small open-source project. Perhaps by the time I grow old, no one i
 
 - **FSRS-6 scheduling** — ported from py-fsrs v6.3.2, verified against 550+ generated conformance vectors; every rating button previews the next due date before you commit
 - **Five views** — decks (table sorted by name), study, card browser, stats (forecast / heatmap / reviews / card states / intervals), and settings
+- **Standalone card window** — add/edit happens in a child window that can be dragged out of the main window (even onto another screen); its position and size are remembered across launches, and add mode supports continuous card entry
 - **Leech handling** — a card that reaches the lapse threshold is auto-suspended: it leaves the queue and all counts, shows as ⏸ in the browser, and can be unsuspended with one click
 - **Card browser** — multi-keyword AND search, configurable columns with drag-resizable widths and rotate sort, resizable side/panel dividers, inline editor with live Markdown preview, and virtual scrolling that stays smooth with tens of thousands of cards; due shown in two columns — relative ("in 5 minutes") and absolute ("2026-09-06 16:49")
 - **Study fonts** — configurable typeface and size for the card face, with a live sample in Settings; defaults follow the system font at 16px, matching Obsidian
