@@ -75,14 +75,22 @@ export interface Deck {
 
 // ---------- DTO ----------
 
+/** 统计页状态分布（computeStats 填充） */
 export interface DeckCounts {
   new: number
   learning: number
   review: number
 }
 
+/** 首页牌组表三列口径：总数=牌组内未删卡（含暂停）；未学习=新卡；到期=此刻已到期、点进去立刻能刷的学习/复习卡（不含新卡、不含未到期、不含暂停） */
+export interface DeckTableCounts {
+  total: number
+  new: number
+  due: number
+}
+
 export interface DeckInfo extends Deck {
-  counts: DeckCounts
+  counts: DeckTableCounts
 }
 
 export interface StudyPayload {
@@ -189,6 +197,14 @@ export interface StudyFont {
   fontSize: number
 }
 
+/** 添加/编辑卡片弹窗的状态（主窗口 store 与弹窗子窗口共用） */
+export interface DialogState {
+  mode: 'add' | 'edit'
+  deckId: string | null
+  /** edit 模式的卡 ID */
+  cardId: string | null
+}
+
 export interface MikiConfig {
   workspacePath: string
   theme: Theme
@@ -212,6 +228,8 @@ export interface MikiConfig {
   }
   /** 主窗口尺寸/位置/最大化（resize/move 防抖落盘，下次启动恢复） */
   window: WindowState
+  /** 添加/编辑卡片弹窗子窗口的位置/尺寸（可选：旧 config 无此字段，首次开窗居中于主窗口） */
+  cardDialogWindow?: { x: number | null; y: number | null; width: number; height: number }
 }
 
 export const DEFAULT_CONFIG: Omit<MikiConfig, 'workspacePath'> = {

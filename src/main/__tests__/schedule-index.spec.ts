@@ -5,7 +5,7 @@ import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import { WorkspaceService } from '../workspace'
-import { deckCounts, pickNext, remainingCount } from '../../core/queue'
+import { pickNext, remainingCount } from '../../core/queue'
 import type { Card, Rating } from '../../shared/types'
 
 const dirs: string[] = []
@@ -36,6 +36,21 @@ function refCards(w: WorkspaceService, deckId: string): Card[] {
 }
 
 /** 对拍：学习页取卡/剩余 + 首页三列计数，全牌组逐一核对 */
+/** 首页三列参考口径：总数=未删卡（含暂停）；未学习=新卡；到期=此刻已到期的学习/复习卡 */
+function refTableCounts(list: Card[], now: number): { total: number; new: number; due: number } {
+  let total = 0
+  let nw = 0
+  let due = 0
+  for (const c of list) {
+    if (c.deletedAt) continue
+    total++
+    if (c.suspended) continue
+    if (!c.fsrs) nw++
+    else if (c.fsrs.due <= now) due++
+  }
+  return { total, new: nw, due }
+}
+
 function assertIndexMatchesScan(w: WorkspaceService): void {
   const now = Date.now()
   const eot = w.endOfToday()
@@ -47,7 +62,7 @@ function assertIndexMatchesScan(w: WorkspaceService): void {
     expect(study.remaining, `remaining mismatch deck=${deck.name}`).toBe(remainingCount(list, eot))
     const info = w.deckInfos().find((x) => x.id === deck.id)
     expect(info).toBeDefined()
-    expect(info!.counts, `deckCounts mismatch deck=${deck.name}`).toEqual(deckCounts(list, eot))
+    expect(info!.counts, `deckCounts mismatch deck=${deck.name}`).toEqual(refTableCounts(list, now))
   }
 }
 

@@ -1,4 +1,4 @@
-// 首页（H 域）：牌组表、选中态、行操作、今日统计、创建牌组；数字列宽可拖、三列徽章配色
+// 首页（H 域）：牌组表、选中态、行操作、今日统计、创建牌组；数字列宽可拖，三列口径=总数/未学习/到期
 import { useState } from 'react'
 import { sortedDecks, useApp } from '../store'
 import { PromptModal } from '../components/PromptModal'
@@ -37,15 +37,15 @@ export function Home() {
           <tr>
             <th>牌组</th>
             <th className="num">
-              未学习
+              总数
               <ColResizer width={homeColWidths[0]} onResize={(w) => setHomeColWidth(0, w)} />
             </th>
             <th className="num">
-              学习中
+              未学习
               <ColResizer width={homeColWidths[1]} onResize={(w) => setHomeColWidth(1, w)} />
             </th>
             <th className="num">
-              待复习
+              到期
               <ColResizer width={homeColWidths[2]} onResize={(w) => setHomeColWidth(2, w)} />
             </th>
             <th style={{ width: 44 }}></th>
@@ -68,13 +68,13 @@ export function Home() {
             >
               <td>{d.name}</td>
               <td className="num">
+                {d.counts.total > 0 ? <span className="badge badge-total">{d.counts.total}</span> : 0}
+              </td>
+              <td className="num">
                 {d.counts.new > 0 ? <span className="badge badge-new">{d.counts.new}</span> : 0}
               </td>
               <td className="num">
-                {d.counts.learning > 0 ? <span className="badge badge-learn">{d.counts.learning}</span> : 0}
-              </td>
-              <td className="num">
-                {d.counts.review > 0 ? <span className="badge badge-review">{d.counts.review}</span> : 0}
+                {d.counts.due > 0 ? <span className="badge badge-due">{d.counts.due}</span> : 0}
               </td>
               <td
                 onClick={(e) => {

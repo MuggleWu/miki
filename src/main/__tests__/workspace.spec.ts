@@ -323,7 +323,7 @@ describe('saveConfig', () => {
 })
 
 describe('计数与统计入口', () => {
-  it('deckInfos 新卡计未学习；answer 后 todayCount 增加', () => {
+  it('deckInfos 三列口径：新卡计未学习；answer 后 todayCount 增加', () => {
     const w = newWs(tmpKept())
     const d = w.addDeck('计数组').id
     w.addCards(d, [
@@ -331,13 +331,89 @@ describe('计数与统计入口', () => {
       { front: '计数二', back: '' }
     ])
     const info = w.deckInfos().find((x) => x.id === d)!
-    expect(info.counts.new).toBe(2)
-    expect(info.counts.learning).toBe(0)
-    expect(info.counts.review).toBe(0)
+    expect(info.counts).toEqual({ total: 2, new: 2, due: 0 })
 
     const before = w.todayCount()
     w.answer(queryAll(w, '计数一').rows[0].id, 3)
     expect(w.todayCount()).toBe(before + 1)
+  })
+
+  it('首页三列（总数/未学习/到期）：总数含暂停卡；到期只数此刻已到期的学习/复习卡（用户痛点：学习中≠能刷）', () => {
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(new Date('2026-10-06T10:00:00'))
+      const w = newWs(tmpKept())
+      const d = w.addDeck('三列组').id
+      const [a, b] = w.addCards(d, [
+        { front: '列一', back: '' },
+        { front: '列二', back: '' }
+      ])
+      const info = () => w.deckInfos().find((x) => x.id === d)!
+      expect(info().counts).toEqual({ total: 2, new: 2, due: 0 })
+
+      w.answer(a.id, 3) // 进入学习流：due = +10min 学习步长，此刻未到期
+      expect(info().counts).toEqual({ total: 2, new: 1, due: 0 })
+      expect(w.getStudy(d).card!.id).not.toBe(a.id) // 取卡也不出它：旧「学习中」列的值就是这种错觉来源
+
+      vi.setSystemTime(new Date('2026-10-06T10:11:00')) // 越过学习步长 → 到期
+      expect(info().counts).toEqual({ total: 2, new: 1, due: 1 })
+      expect(w.getStudy(d).card!.id).toBe(a.id)
+
+      w.setCardSuspended(b.id, true) // 暂停：总数仍在（牌组成员），未学习归零
+      expect(info().counts).toEqual({ total: 2, new: 0, due: 1 })
+      w.setCardSuspended(b.id, false)
+      expect(info().counts).toEqual({ total: 2, new: 1, due: 1 })
+
+      w.deleteCards([b.id])
+      expect(info().counts).toEqual({ total: 1, new: 0, due: 1 })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('到期随时间推进自动增长：次日复习卡今晨为 0，到点后计入（假时钟）', () => {
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(new Date('2026-10-06T10:00:00'))
+      const w = newWs(tmpKept())
+      const d = w.addDeck('推进组').id
+      const c = w.addCard(d, '推进卡', '')
+      w.answer(c.id, 4) // Easy 毕业 → review，due 在数日后
+      expect(w.deckInfos().find((x) => x.id === d)!.counts.due).toBe(0)
+      expect(w.deckInfos().find((x) => x.id === d)!.counts.total).toBe(1)
+
+      vi.setSystemTime(new Date('2026-11-06T10:00:00')) // +31 天，跨天重建索引
+      expect(w.deckInfos().find((x) => x.id === d)!.counts.due).toBe(1)
+      expect(w.getStudy(d).card!.id).toBe(c.id)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('到期列与取卡一致：堆已构建（进过学习页）后 due-now 计数仍准确，undo/重复条目不重复计', () => {
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(new Date('2026-10-06T10:00:00'))
+      const w = newWs(tmpKept())
+      const d = w.addDeck('堆遍历组').id
+      const [a, b] = w.addCards(d, [
+        { front: '堆一', back: '' },
+        { front: '堆二', back: '' }
+      ])
+      w.answer(a.id, 3) // 学习中，due +10min
+      w.getStudy(d) // ensureBuilt：之后 deckInfos 走堆遍历路径
+      expect(w.deckInfos().find((x) => x.id === d)!.counts.due).toBe(0)
+
+      vi.setSystemTime(new Date('2026-10-06T10:11:00'))
+      expect(w.deckInfos().find((x) => x.id === d)!.counts.due).toBe(1)
+
+      w.answer(b.id, 2) // b 也进入学习流，due +1min（第一步长）
+      w.undo() // 撤销 → b 回新卡：堆里同时存在 b 的新旧条目
+      const counts = w.deckInfos().find((x) => x.id === d)!.counts
+      expect(counts).toEqual({ total: 2, new: 1, due: 1 })
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('totalAnswered 历史累计：undo 抵消，跨天累加', () => {

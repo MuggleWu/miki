@@ -27,7 +27,7 @@ curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8727/api/decks
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/api/health` | 探活（免 token） |
-| GET | `/api/decks` | 牌组列表（含各状态计数） |
+| GET | `/api/decks` | 牌组列表（counts：总数 total / 未学习 new / 到期 due，此刻口径） |
 | POST | `/api/decks` | 建牌组：`{"name"}`；批量 `{"names": [...]}`
 | PATCH | `/api/decks/:id` | 重命名 `{"name"}`
 | DELETE | `/api/decks/:id` | 删牌组（其下卡片随之隐藏） |

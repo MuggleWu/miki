@@ -11,6 +11,7 @@ import {
   type Deck,
   type DeckCounts,
   type DeckInfo,
+  type DeckTableCounts,
   type MikiConfig,
   type QueryParams,
   type QueryResult,
@@ -38,6 +39,8 @@ interface DeckIndex {
   /** 新卡，key = createdAt */
   fresh: MinHeap
   counts: {
+    /** 首页「总数」列：未删卡（含暂停卡），与浏览器口径一致 */
+    total: number
     new: number
     learningAll: number
     learningDueToday: number
@@ -506,7 +509,7 @@ export class WorkspaceService {
         learning: new MinHeap(),
         review: new MinHeap(),
         fresh: new MinHeap(),
-        counts: { new: 0, learningAll: 0, learningDueToday: 0, reviewDueToday: 0 },
+        counts: { total: 0, new: 0, learningAll: 0, learningDueToday: 0, reviewDueToday: 0 },
         built: false
       }
       this.idx.set(deckId, x)
@@ -531,8 +534,13 @@ export class WorkspaceService {
     let tie = 0
     for (const c of this.cards.values()) {
       c.tie = tie++ // tie 全量分配（含排除卡），保持与 Map 插入序一致
-      if (c.deletedAt || c.suspended || hidden.has(c.deckId)) continue
-      this.classPush(c, this.deckIdx(c.deckId), eot)
+      if (c.deletedAt || hidden.has(c.deckId)) continue
+      const ix = this.deckIdx(c.deckId)
+      if (c.suspended) {
+        ix.counts.total++ // 暂停卡不计学习计数，但仍是牌组成员（进总数）
+        continue
+      }
+      this.classPush(c, ix, eot)
     }
     this.orderCounter = tie
   }
@@ -540,6 +548,7 @@ export class WorkspaceService {
   /** 按当前状态加计数 +（堆已构建时）入堆（调用方保证卡未删未暂停、牌组未删）；tie 取卡上分配好的插入序 */
   private classPush(c: Card, ix: DeckIndex, eot: number): void {
     if (c.tie == null) c.tie = ++this.orderCounter
+    ix.counts.total++
     const st = displayState(c)
     if (st === 'new') {
       ix.counts.new++
@@ -587,10 +596,11 @@ export class WorkspaceService {
     return ix
   }
 
-  /** 按变更前状态减计数（堆条目不删，弹出时惰性失效） */
+  /** 按变更前状态减计数（堆条目不删，弹出时惰性失效）。总数只排除已删除卡（暂停卡仍是牌组成员）；学习/复习计数连暂停一起排除 */
   private unclassCounts(before: Card, eot: number, deckId: string): void {
-    if (before.deletedAt || before.suspended) return
     const ix = this.deckIdx(deckId)
+    if (!before.deletedAt) ix.counts.total--
+    if (before.deletedAt || before.suspended) return
     const st = displayState(before)
     if (st === 'new') {
       ix.counts.new--
@@ -612,8 +622,12 @@ export class WorkspaceService {
     const eot = endOfLocalDay(now)
     if (before) this.unclassCounts(before, eot, deckIdBefore ?? before.deckId)
     const hidden = new Set(this.decks.filter((d) => d.deletedAt).map((d) => d.id))
-    if (!card.deletedAt && !card.suspended && !hidden.has(card.deckId)) {
-      this.classPush(card, this.deckIdx(card.deckId), eot)
+    if (!card.deletedAt && !hidden.has(card.deckId)) {
+      if (card.suspended) {
+        this.deckIdx(card.deckId).counts.total++ // 暂停卡只进总数，学习/复习计数不含它
+      } else {
+        this.classPush(card, this.deckIdx(card.deckId), eot)
+      }
     }
   }
 
@@ -670,13 +684,45 @@ export class WorkspaceService {
       .filter((d) => !d.deletedAt)
       .map((d) => {
         const ix = this.deckIdx(d.id)
-        const counts: DeckCounts = {
+        const counts: DeckTableCounts = {
+          total: ix.counts.total,
           new: ix.counts.new,
-          learning: ix.counts.learningAll,
-          review: ix.counts.reviewDueToday
+          due: this.dueNowOf(d.id, ix)
         }
-        return { ...d, counts: sortCounts(counts, Date.now()) }
+        return { ...d, counts }
       })
+  }
+
+  /** 「到期」列：此刻 due <= now 的学习/复习卡数（不含新卡/未到期/暂停卡）。到期随时间推进无法增量维护，读时计算——
+   * 堆已构建时从根 DFS，key > now 剪枝（堆性质：子节点 key >= 父节点）；条目可能含失效/重复（惰性失效遗留），按卡 id 去重后以卡的真实 due 判定。
+   * 未构建时走一次全量扫描。 */
+  private dueNowOf(deckId: string, ix: DeckIndex): number {
+    const now = Date.now()
+    if (!ix.built) {
+      let n = 0
+      for (const c of this.cards.values()) {
+        if (c.deckId !== deckId || c.deletedAt || c.suspended) continue
+        if (c.fsrs && c.fsrs.due <= now) n++
+      }
+      return n
+    }
+    const seen = new Set<string>()
+    let n = 0
+    for (const h of [ix.learning, ix.review]) {
+      const stack = [0]
+      while (stack.length > 0) {
+        const i = stack.pop()!
+        const e = h.at(i)
+        if (!e || e.key > now) continue
+        const c = this.cards.get(e.id)
+        if (c && !c.deletedAt && !c.suspended && c.deckId === deckId && !seen.has(c.id)) {
+          seen.add(c.id)
+          if (c.fsrs && c.fsrs.due <= now) n++
+        }
+        stack.push(2 * i + 1, 2 * i + 2)
+      }
+    }
+    return n
   }
 
   private todayStartMs(): number {
@@ -1175,10 +1221,6 @@ export class WorkspaceService {
       now: Date.now()
     })
   }
-}
-
-function sortCounts(c: DeckCounts, _now: number): DeckCounts {
-  return c
 }
 
 // 抑制未使用告警（MONTH_MS 预留给日志切月策略）

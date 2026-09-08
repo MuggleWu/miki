@@ -126,9 +126,9 @@ input { user-select: text; }
   display: inline-block; min-width: 26px; text-align: center; padding: 1px 9px;
   border-radius: 999px; font-size: 12px; font-weight: 600;
 }
+.deck-table .badge-total { color: var(--text-dim); background: color-mix(in srgb, var(--text-dim) 13%, transparent); }
 .deck-table .badge-new { color: var(--accent); background: color-mix(in srgb, var(--accent) 13%, transparent); }
-.deck-table .badge-learn { color: var(--warn); background: color-mix(in srgb, var(--warn) 16%, transparent); }
-.deck-table .badge-review { color: var(--ok); background: color-mix(in srgb, var(--ok) 15%, transparent); }
+.deck-table .badge-due { color: var(--ok); background: color-mix(in srgb, var(--ok) 15%, transparent); }
 .col-resizer {
   position: absolute; right: -4px; top: 0; bottom: 0; width: 8px; cursor: col-resize; z-index: 3;
 }
@@ -298,3 +298,22 @@ input { user-select: text; }
    这里只管降级路径（引擎未就绪时转义纯文本，沿用 .hljs 类）与代码块基础版式 */
 .hljs { color: var(--text); }
 .md pre.shiki { margin: 0.6em 0; }
+
+/* ---------- 卡片弹窗子窗口（独立 BrowserWindow，#card-dialog 路由） ---------- */
+/* 无顶栏无遮罩：表单即窗口内容，body 背景与主题面板一致 */
+.dialog-window {
+  padding: 20px;
+  height: 100vh;
+  box-sizing: border-box;
+  overflow: auto;
+}
+.dialog-window .modal {
+  min-width: 0; max-width: none; width: 100%;
+  min-height: 0; max-height: none;
+  border: none; box-shadow: none; padding: 0; background: transparent;
+  resize: none; overflow: visible;
+}
+.dialog-window-loading {
+  display: flex; align-items: center; justify-content: center;
+  height: 100vh; color: var(--text-dim); font-size: 13px;
+}

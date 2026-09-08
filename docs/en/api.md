@@ -27,7 +27,7 @@ curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8727/api/decks
 | Method | Path | Description |
 |---|---|---|
 | GET | `/api/health` | Liveness (no token) |
-| GET | `/api/decks` | Deck list (with per-state counts) |
+| GET | `/api/decks` | Deck list (counts: total / new / due-now) |
 | POST | `/api/decks` | Create a deck: `{"name"}`; batch: `{"names": [...]}` |
 | PATCH | `/api/decks/:id` | Rename `{"name"}` |
 | DELETE | `/api/decks/:id` | Delete a deck (its cards are hidden with it) |

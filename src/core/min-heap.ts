@@ -30,6 +30,11 @@ export class MinHeap {
     return this.a[0]
   }
 
+  /** 只读访问内部槽位（堆数组非全序，供到期计数等遍历统计用，不承诺顺序） */
+  at(i: number): HeapEntry | undefined {
+    return this.a[i]
+  }
+
   pop(): HeapEntry | undefined {
     const a = this.a
     const top = a[0]
