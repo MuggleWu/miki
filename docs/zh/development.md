@@ -1,5 +1,7 @@
 # 开发指南
 
+[English](../en/development.md) | 简体中文
+
 ## 环境与命令
 
 要求 Node.js 18+（本仓库在 Node 24 上开发）。

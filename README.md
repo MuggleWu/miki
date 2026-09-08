@@ -17,7 +17,7 @@ It is a very small open-source project. Perhaps by the time I grow old, no one i
 - **FSRS-6 scheduling** — ported from py-fsrs v6.3.2, verified against 550+ generated conformance vectors; every rating button previews the next due date before you commit
 - **Five views** — decks (table sorted by name), study, card browser, stats (forecast / heatmap / reviews / card states / intervals), and settings
 - **Leech handling** — a card that reaches the lapse threshold is auto-suspended: it leaves the queue and all counts, shows as ⏸ in the browser, and can be unsuspended with one click
-- **Card browser** — multi-keyword AND search, configurable columns with drag-resizable widths and rotate sort, resizable side/panel dividers, inline editor with live Markdown preview, and virtual scrolling that stays smooth with tens of thousands of cards; due shown in two columns — relative ("5 分钟后") and absolute ("2026-09-06 16:49")
+- **Card browser** — multi-keyword AND search, configurable columns with drag-resizable widths and rotate sort, resizable side/panel dividers, inline editor with live Markdown preview, and virtual scrolling that stays smooth with tens of thousands of cards; due shown in two columns — relative ("in 5 minutes") and absolute ("2026-09-06 16:49")
 - **Study fonts** — configurable typeface and size for the card face, with a live sample in Settings; defaults follow the system font at 16px, matching Obsidian
 - **Rich card content** — Markdown + KaTeX + syntax highlighting
 - **Event-sourced review log** — append-only NDJSON; undo works by compensating events with self-contained snapshots
@@ -63,11 +63,11 @@ Runs on macOS, Windows and Linux (standard Electron window, no platform-specific
 
 `npm run pack:mac` builds a standalone app with electron-builder: `release/mac-arm64/Miki.app` — Dock and menu show Miki with the app icon (appId `com.mugglewu.miki`); local builds are unsigned. Copy it to `/Applications` and launch from **Raycast (type `miki`)**, Spotlight, or the Dock; the app is single-instance — launching it again just focuses the existing window.
 
-Workspace resolution for the packaged app: `MIKI_WORKSPACE` env → `~/Library/Application Support/Miki/workspace.json` (`{"workspacePath": …}`) → defaults to `~/miki-base`. For the packaging workflow and LaunchServices registration details, see the "打包" (Packaging) section in [docs/development.md](docs/development.md).
+Workspace resolution for the packaged app: `MIKI_WORKSPACE` env → `~/Library/Application Support/Miki/workspace.json` (`{"workspacePath": …}`) → defaults to `~/miki-base`. For the packaging workflow and LaunchServices registration details, see the "Packaging" section in [docs/en/development.md](docs/en/development.md).
 
 ## HTTP API & MCP
 
-Miki ships a local HTTP API for humans and AI agents to manage decks and cards programmatically (CRUD, including batch operations). It listens on `127.0.0.1:8727` only, requires a bearer token, and rejects browser-originated cross-site requests. See [docs/api.md](docs/api.md).
+Miki ships a local HTTP API for humans and AI agents to manage decks and cards programmatically (CRUD, including batch operations). It listens on `127.0.0.1:8727` only, requires a bearer token, and rejects browser-originated cross-site requests. See [docs/en/api.md](docs/en/api.md).
 
 For MCP clients, a thin stdio wrapper is included:
 
@@ -79,12 +79,21 @@ It exposes tools such as `list_decks`, `add_cards`, `search_cards`, `update_card
 
 ## Documentation
 
-More docs (in Chinese) live in [docs/](docs/):
+Docs live in [docs/](docs/) in two languages:
 
-- [使用手册](docs/usage.md) — views, interactions and the full shortcut list
-- [工作区数据格式](docs/data-format.md) — file layouts, event schema and replay rules
-- [HTTP API](docs/api.md) — endpoints, auth and safety boundaries
-- [开发指南](docs/development.md) — project structure, tests and the FSRS vector harness
+**English** ([docs/en/](docs/en/)):
+
+- [User guide](docs/en/usage.md) — views, interactions and the full shortcut list
+- [Workspace data format](docs/en/data-format.md) — file layouts, event schema and replay rules
+- [HTTP API](docs/en/api.md) — endpoints, auth and safety boundaries
+- [Development guide](docs/en/development.md) — project structure, tests and the FSRS vector harness
+
+**简体中文** ([docs/zh/](docs/zh/)):
+
+- [使用手册](docs/zh/usage.md) — 五视图操作、鼠标交互与快捷键总表
+- [工作区数据格式](docs/zh/data-format.md) — 目录结构、事件协议与重放规则
+- [HTTP API](docs/zh/api.md) — 端点、认证与安全边界
+- [开发指南](docs/zh/development.md) — 项目结构、测试组织与 FSRS 基准向量
 
 ## Workspace format
 
@@ -99,7 +108,7 @@ cards/<deck-id>.delta.ndjson      # card delta journal (edits / moves / tombston
 review-log/<yyyy-mm>.ndjson       # append-only review events (answer / delete / undo / reset / suspend)
 ```
 
-`review-log` is the source of truth for scheduling; the card base file + delta form a checkpointed record of card truth, aligned to the event watermark. See [docs/data-format.md](docs/data-format.md) for the full schema, compaction rules and replay protocol.
+`review-log` is the source of truth for scheduling; the card base file + delta form a checkpointed record of card truth, aligned to the event watermark. See [docs/en/data-format.md](docs/en/data-format.md) for the full schema, compaction rules and replay protocol.
 
 ## Acknowledgements
 

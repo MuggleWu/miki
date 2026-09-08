@@ -1,5 +1,7 @@
 # 工作区数据格式
 
+[English](../en/data-format.md) | 简体中文
+
 Miki 的全部数据存放在一个纯文件夹（下称「工作区」）里，与代码和应用完全分离，可以用 git、网盘或任意同步工具管理。本文描述每个文件的格式与不变量，供备份、迁移或第三方程序读取。
 
 工作区路径的解析顺序：环境变量 `MIKI_WORKSPACE` → `userData/workspace.json` 里记录的路径 → 默认 `~/miki-base`。

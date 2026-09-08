@@ -1,5 +1,7 @@
 # 使用手册
 
+[English](../en/usage.md) | 简体中文
+
 五个视图：**牌组**（首页）→ 学习 → 卡片库 → 统计 → 设置。单字母快捷键 `S` `B` `T` `D` 直接跳转，`D` 回首页。
 
 启动：安装版为 `/Applications/Miki.app`（Raycast 输入 `miki` 或 Spotlight/Dock 直接启动，全局单实例——重复启动会唤起已有窗口）；开发调试用 `npm run dev`。

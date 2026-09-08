@@ -63,11 +63,11 @@ npm start          # 运行构建产物
 
 `npm run pack:mac` 用 electron-builder 产出独立 App：`release/mac-arm64/Miki.app`——Dock 与菜单栏显示 Miki、自带应用图标（appId `com.mugglewu.miki`），本地构建不做签名。复制到 `/Applications` 后即可从 **Raycast（输入 `miki`）**、Spotlight 或 Dock 启动；应用全局单实例，重复启动只唤起已有窗口。
 
-打包版的工作区解析：`MIKI_WORKSPACE` 环境变量 → `~/Library/Application Support/Miki/workspace.json`（`{"workspacePath": …}`）→ 缺省 `~/miki-base`。打包流程、LaunchServices 注册等工作区配置细节见 [docs/development.md](docs/development.md)「打包」一节。
+打包版的工作区解析：`MIKI_WORKSPACE` 环境变量 → `~/Library/Application Support/Miki/workspace.json`（`{"workspacePath": …}`）→ 缺省 `~/miki-base`。打包流程、LaunchServices 注册等工作区配置细节见 [docs/zh/development.md](docs/zh/development.md)「打包」一节。
 
 ## HTTP API 与 MCP
 
-Miki 内置本机 HTTP API，供人和 AI 程序化管理牌组与卡片（增删改查，含批量）。只监听 `127.0.0.1:8727`，必须携带 token，拒绝浏览器发起的跨站请求。详见 [docs/api.md](docs/api.md)。
+Miki 内置本机 HTTP API，供人和 AI 程序化管理牌组与卡片（增删改查，含批量）。只监听 `127.0.0.1:8727`，必须携带 token，拒绝浏览器发起的跨站请求。详见 [docs/zh/api.md](docs/zh/api.md)。
 
 MCP 客户端可用附带的 stdio 薄壳接入：
 
@@ -79,12 +79,14 @@ MIKI_TOKEN=<config.json 中的 api.token> node scripts/mcp-server.mjs
 
 ## 文档
 
-更多文档在 [docs/](docs/)：
+更多文档在 [docs/](docs/)（分 `en` / `zh` 两个语种目录）：
 
-- [使用手册](docs/usage.md) — 五视图操作、鼠标交互与快捷键总表
-- [工作区数据格式](docs/data-format.md) — 目录结构、事件协议与重放规则
-- [HTTP API](docs/api.md) — 端点、认证与安全边界
-- [开发指南](docs/development.md) — 项目结构、测试组织与 FSRS 基准向量
+- [使用手册](docs/zh/usage.md) — 五视图操作、鼠标交互与快捷键总表
+- [工作区数据格式](docs/zh/data-format.md) — 目录结构、事件协议与重放规则
+- [HTTP API](docs/zh/api.md) — 端点、认证与安全边界
+- [开发指南](docs/zh/development.md) — 项目结构、测试组织与 FSRS 基准向量
+
+English versions live in [docs/en/](docs/en/).
 
 ## 工作区格式
 
@@ -99,7 +101,7 @@ cards/<deck-id>.delta.ndjson       # 卡片增量变更（编辑 / 移动 / 墓�
 review-log/<yyyy-mm>.ndjson        # 只追加的复习事件（answer / delete / undo / reset / suspend）
 ```
 
-`review-log` 是调度状态的真理来源；卡片基文件 + delta 是内容真理的检查点形式，两者以事件水位对齐。完整字段、压实规则与重放协议见 [docs/data-format.md](docs/data-format.md)。
+`review-log` 是调度状态的真理来源；卡片基文件 + delta 是内容真理的检查点形式，两者以事件水位对齐。完整字段、压实规则与重放协议见 [docs/zh/data-format.md](docs/zh/data-format.md)。
 
 ## 致谢
 

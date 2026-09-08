@@ -3,7 +3,7 @@
 // 用法：node scripts/mcp-server.mjs
 //   环境变量 MIKI_TOKEN（必填，见 miki 工作区 config.json 的 api.token）
 //   环境变量 MIKI_PORT（可选，默认 8727）
-// 所有工具只读转发到 http://127.0.0.1:<port>/api，安全边界与 HTTP API 相同（见 docs/api.md）。
+// 所有工具只读转发到 http://127.0.0.1:<port>/api，安全边界与 HTTP API 相同（见 docs/en/api.md / docs/zh/api.md）。
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod'
