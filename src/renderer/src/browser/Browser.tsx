@@ -6,7 +6,7 @@ import { Md } from '../md'
 import { rotateSort } from '../../../core/query'
 import { isTypingTarget, sortedDecks, useApp } from '../store'
 import { ColResizer, VResizer, isDragResizing } from '../components/drag'
-import { applyWrap, tickSelection } from '../components/AddEditDialog'
+import { applyWrap, enterContinueList, tickSelection } from '../components/AddEditDialog'
 import type { BrowserColumn, CardRow, SortKey } from '../../../shared/types'
 
 const COLUMN_LABEL: Record<BrowserColumn, string> = {
@@ -469,6 +469,12 @@ export function Browser() {
                             applyWrap(el, (v) => { setEditFront(v); scheduleSave(v, editBack) }, tickSelection)
                           }
                         }
+                        if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey && !e.altKey && !e.nativeEvent.isComposing) {
+                          const el = e.target instanceof HTMLTextAreaElement ? e.target : null
+                          if (el && applyWrap(el, (v) => { setEditFront(v); scheduleSave(v, editBack) }, enterContinueList)) {
+                            e.preventDefault()
+                          }
+                        }
                       }}
                     />
                     <div className="preview">
@@ -488,6 +494,12 @@ export function Browser() {
                           if (el) {
                             e.preventDefault()
                             applyWrap(el, (v) => { setEditBack(v); scheduleSave(editFront, v) }, tickSelection)
+                          }
+                        }
+                        if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey && !e.altKey && !e.nativeEvent.isComposing) {
+                          const el = e.target instanceof HTMLTextAreaElement ? e.target : null
+                          if (el && applyWrap(el, (v) => { setEditBack(v); scheduleSave(editFront, v) }, enterContinueList)) {
+                            e.preventDefault()
                           }
                         }
                       }}

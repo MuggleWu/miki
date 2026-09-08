@@ -123,15 +123,55 @@ export function tickSelection(value: string, start: number, end: number): WrapRe
   return tripleBacktick(value, start, end) ?? backtickSelection(value, start, end)
 }
 
-/** 把 wrapSelection 的结果应用到文本框：优先 execCommand（保留原生撤销栈，⌘Z 可回退），失败退回直改 */
+/** Enter 列表续行：光标在列表项行末回车，下一行补同级标记（保留缩进，有序列表数字 +1）；
+ * 空列表项（标记后无内容）回车视为退出列表，删除标记只留缩进。
+ * 有选区、光标不在行末、非列表行返回 null，走默认换行 */
+export function enterContinueList(value: string, start: number, end: number): WrapResult | null {
+  if (start !== end) return null
+  const nl = value.indexOf('\n', start)
+  const lineEnd = nl === -1 ? value.length : nl
+  if (end !== lineEnd) return null
+  const lineStart = value.lastIndexOf('\n', start - 1) + 1
+  // 标记后至少一个空白才算列表项（-abc 不算），标记后的空白首字符随续行沿用
+  const m = /^([ \t]*)([-*+]|\d{1,9}[.)])([ \t]+)(.*)$/.exec(value.slice(lineStart, lineEnd))
+  if (!m) return null
+  const [, indent, marker, space, rest] = m
+  if (rest === '') {
+    // 空列表项：整行删成只剩缩进（再回车就是普通空行）
+    return {
+      text: value.slice(0, lineStart) + indent + value.slice(lineEnd),
+      replaceStart: lineStart,
+      replaceEnd: lineEnd,
+      replacement: indent,
+      selStart: lineStart + indent.length,
+      selEnd: lineStart + indent.length
+    }
+  }
+  const ordered = /^(\d{1,9})([.)])$/.exec(marker)
+  const nextMarker = ordered ? String(Number(ordered[1]) + 1) + ordered[2] : marker
+  const ins = '\n' + indent + nextMarker + space[0]
+  return {
+    text: value.slice(0, start) + ins + value.slice(start),
+    replaceStart: start,
+    replaceEnd: start,
+    replacement: ins,
+    selStart: start + ins.length,
+    selEnd: start + ins.length
+  }
+}
+
+/** 把 wrap 类编辑（bold/backtick/list）的结果应用到文本框：优先 execCommand（保留原生撤销栈，
+ * ⌘Z 可回退），失败退回直改。fn 返回 null 表示不接管（如 Enter 非列表行），不动文本框返回 false，
+ * 返回 true 表示已接管（调用方需据此 preventDefault） */
 export function applyWrap(
   el: HTMLTextAreaElement,
   setText: (v: string) => void,
-  fn: (value: string, start: number, end: number) => WrapResult
-): void {
+  fn: (value: string, start: number, end: number) => WrapResult | null
+): boolean {
   const { selectionStart: s, selectionEnd: e } = el
-  if (s == null || e == null) return
+  if (s == null || e == null) return false
   const r = fn(el.value, s, e)
+  if (!r) return false
   el.focus()
   el.setSelectionRange(r.replaceStart, r.replaceEnd)
   try {
@@ -141,6 +181,7 @@ export function applyWrap(
   }
   setText(r.text) // execCommand 成功时与原生 input 事件同值（no-op），失败时兜底同步受控状态
   requestAnimationFrame(() => el.setSelectionRange(r.selStart, r.selEnd))
+  return true
 }
 
 export function AddEditDialog() {
@@ -232,6 +273,15 @@ export function AddEditDialog() {
             }
             return
           }
+          if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+            // 普通回车：列表项行末续行 / 空列表项退出列表，其余走默认换行（组合输入中不接管）
+            const el = e.target instanceof HTMLTextAreaElement ? e.target : null
+            if (el && !e.nativeEvent.isComposing) {
+              const handled = applyWrap(el, el === frontRef.current ? setFront : setBack, enterContinueList)
+              if (handled) e.preventDefault()
+            }
+            return
+          }
           if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
             e.preventDefault()
             void submit()
@@ -300,7 +350,8 @@ export function AddEditDialog() {
         <div className="actions">
           <span style={{ color: 'var(--text-dim)', fontSize: 12, marginRight: 'auto', alignSelf: 'center' }}>
             <kbd className="kbd">⌘</kbd>+<kbd className="kbd">B</kbd> 加粗 · <kbd className="kbd">`</kbd> 行内代码（连按三下出代码块） ·{' '}
-            <kbd className="kbd">⌘</kbd>+<kbd className="kbd">↩</kbd> 提交 · <kbd className="kbd">esc</kbd> 关闭
+            <kbd className="kbd">↩</kbd> 列表续行 · <kbd className="kbd">⌘</kbd>+<kbd className="kbd">↩</kbd> 提交 ·{' '}
+            <kbd className="kbd">esc</kbd> 关闭
           </span>
           <button onClick={closeDialog}>取消</button>
           <button className="primary" onClick={() => void submit()}>
