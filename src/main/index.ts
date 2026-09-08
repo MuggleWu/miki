@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, screen, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, nativeTheme, screen, shell } from 'electron'
 import * as path from 'node:path'
 import * as fs from 'node:fs'
 import { WorkspaceService } from './workspace'
@@ -8,6 +8,12 @@ import type { MikiConfig, QueryParams, Rating, SortKey, StatsParams, WindowState
 
 let ws: WorkspaceService
 let win: BrowserWindow | null = null
+
+// 原生头行（系统标题栏）颜色跟随应用内主题：themeSource 影响原生控件外观，
+// 与渲染层 data-theme 同源（config.theme），避免深色内容配浅色头行
+function applyNativeTheme(theme: 'light' | 'dark'): void {
+  nativeTheme.themeSource = theme
+}
 
 function resolveWorkspace(): string {
   // 1) 环境变量（开发/多工作区切换） 2) userData 配置 3) 默认 ~/miki-base
@@ -39,6 +45,7 @@ function clampToWorkArea(st: WindowState): { x?: number; y?: number; width: numb
 
 function createWindow(): void {
   const restored = clampToWorkArea(ws.config.window)
+  applyNativeTheme(ws.config.theme)
   win = new BrowserWindow({
     x: restored.x,
     y: restored.y,
@@ -154,6 +161,7 @@ app.whenReady().then(() => {
   })
   ipcMain.handle(IPC.saveTheme, (_e, theme: 'light' | 'dark') => {
     ws.saveConfig({ theme })
+    applyNativeTheme(theme) // 头行随应用内主题即时切换
   })
   ipcMain.handle(IPC.saveConfig, (_e, patch: Partial<MikiConfig>) => ws.saveConfig(patch))
   ipcMain.handle(IPC.setCardSuspended, (_e, cardId: string, suspended: boolean) =>
