@@ -3,11 +3,13 @@
 // 虚拟滚动（B6）：行是单行 nowrap，行高恒定，首帧后实测一次；只渲染可视窗口行，上下用 spacer tr 撑开
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Md } from '../md'
-import { createSeqGuard } from '../staleGuard'
 import { rotateSort } from '../../../core/query'
 import { isTypingTarget, sortedDecks, useApp } from '../store'
 import { ColResizer, VResizer, isDragResizing } from '../components/drag'
 import { applyWrap, enterContinueList, tickSelection } from '../components/AddEditDialog'
+import { createPaginator } from './paginate'
+import { createDebouncedPersist } from './debouncedPersist'
+import type { DebouncedPersist } from './debouncedPersist'
 import type { BrowserColumn, CardRow, SortKey } from '../../../shared/types'
 
 const COLUMN_LABEL: Record<BrowserColumn, string> = {
@@ -46,10 +48,6 @@ const ALL_COLUMNS = Object.keys(COLUMN_LABEL) as BrowserColumn[]
 const ROW_H_ESTIMATE = 33
 /** 视口上下各多渲染的行数，滚动时不露白 */
 const OVERSCAN = 8
-/** 分页拉取（B6 取数侧）：首屏与每次追加的行数；滚动近底增量取，替代一次拉 10 万行 */
-const PAGE_SIZE = 400
-/** 距已取尾部多少 px 内预取下一页 */
-const AHEAD_PX = 600
 
 const STATE_LABEL: Record<string, string> = { new: '未学习', learning: '学习中', review: '待复习' }
 
@@ -91,8 +89,16 @@ export function Browser() {
 
   const keywords = browserKeywords
   const [debouncedKw, setDebouncedKw] = useState(browserKeywords)
-  const [rows, setRows] = useState<CardRow[]>([])
+  // 异步竞态防护：条件变化/定时刷新并发时，旧响应晚到不得覆盖新条件的表格
+  // （守卫链在 paginate.ts：dataVer/viewSig/loaded 基点三守卫 + seq 竞态防护）
+  const paginator = useMemo(() => createPaginator((p) => window.miki.queryCards(p)), [])
+  const [rows, setRowsState] = useState<CardRow[]>([])
   const [total, setTotal] = useState(0)
+
+  const syncFromPaginator = useCallback(() => {
+    setRowsState([...paginator.rows])
+    setTotal(paginator.total)
+  }, [paginator])
   const [columns, setColumns] = useState<BrowserColumn[]>(() => {
     // 老配置只有 due 列：在「距现在」后补「到期时间」，两个到期视图都可见
     const saved = config?.browser.columns
@@ -147,55 +153,11 @@ export function Browser() {
   }, [keywords])
 
   // 异步竞态防护：条件变化/定时刷新并发时，旧响应晚到不得覆盖新条件的表格
-  const querySeq = useRef(createSeqGuard())
-  // 分页追加三守卫：dataVer（发生过新查询/刷新即弃）、viewSig（参数变了即弃）、
-  // loadedRef（追加基点被别的取数动过即弃）——保证追加页与当前 rows 同参数、同代际、无缝隙
-  const dataVer = useRef(0)
-  const viewSig = useRef('')
-  const loadingMore = useRef(false)
-  const loadedRef = useRef(0)
-  const totalRef = useRef(0)
-  totalRef.current = total
-
   const query = useCallback(async () => {
-    const seq = querySeq.current.next()
     const kws = debouncedKw.split(/\s+/).filter(Boolean)
-    const sig = `${browserDeckId ?? ''}|${kws.join('\u0001')}|${JSON.stringify(sort)}`
-    const sameView = sig === viewSig.current
-    viewSig.current = sig
-    dataVer.current++
-    // 同视图刷新（60s/操作后/热加载）：取已加载前缀保住滚动位置；条件变化：只取首页
-    const want = sameView ? Math.max(PAGE_SIZE, loadedRef.current) : PAGE_SIZE
-    const r = await window.miki.queryCards({ deckId: browserDeckId, keywords: kws, sort, offset: 0, limit: want })
-    if (!querySeq.current.isLatest(seq)) return
-    loadedRef.current = r.rows.length
-    setRows(r.rows)
-    setTotal(r.total)
-  }, [browserDeckId, debouncedKw, sort])
-
-  const loadMore = useCallback(async () => {
-    if (loadingMore.current || loadedRef.current >= totalRef.current) return
-    loadingMore.current = true
-    try {
-      const ver = dataVer.current
-      const sig = viewSig.current
-      const offsetBase = loadedRef.current
-      const kws = debouncedKw.split(/\s+/).filter(Boolean)
-      const r = await window.miki.queryCards({
-        deckId: browserDeckId,
-        keywords: kws,
-        sort,
-        offset: offsetBase,
-        limit: PAGE_SIZE
-      })
-      if (dataVer.current !== ver || viewSig.current !== sig || loadedRef.current !== offsetBase) return
-      loadedRef.current += r.rows.length
-      setRows((prev) => [...prev, ...r.rows])
-      setTotal(r.total)
-    } finally {
-      loadingMore.current = false
-    }
-  }, [browserDeckId, debouncedKw, sort])
+    await paginator.refresh({ deckId: browserDeckId, keywords: kws, sort })
+    syncFromPaginator()
+  }, [browserDeckId, debouncedKw, sort, paginator, syncFromPaginator])
 
   useEffect(() => {
     void query()
@@ -233,25 +195,23 @@ export function Browser() {
 
   // 离开时选中态持久化（跨启动恢复）：左树牌组 + 内容区主选中卡。
   // 防抖落盘：连续选中（键盘/点击快扫）不逐次写 config.json，停 600ms 或卸载才写最终值
-  const saveSelTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const selValue = useMemo(
+    () => ({ selectedDeckId: browserDeckId, selectedCardId: selectedId }),
+    [browserDeckId, selectedId]
+  )
+  const selPersistRef = useRef<DebouncedPersist<typeof selValue> | null>(null)
+  if (selPersistRef.current === null) {
+    selPersistRef.current = createDebouncedPersist((v) => {
+      void window.miki.saveConfig({ browser: v })
+    })
+  }
   useEffect(() => {
-    if (saveSelTimer.current) clearTimeout(saveSelTimer.current)
-    saveSelTimer.current = setTimeout(() => {
-      saveSelTimer.current = null
-      void window.miki.saveConfig({
-        browser: { selectedDeckId: browserDeckId, selectedCardId: selectedId }
-      })
-    }, 600)
+    const p = selPersistRef.current
+    if (p) p.push(selValue)
     return () => {
-      if (saveSelTimer.current) {
-        clearTimeout(saveSelTimer.current)
-        saveSelTimer.current = null
-        void window.miki.saveConfig({
-          browser: { selectedDeckId: browserDeckId, selectedCardId: selectedId }
-        })
-      }
+      if (p) p.dispose()
     }
-  }, [browserDeckId, selectedId])
+  }, [selValue])
 
   // 外部焦点定位（学习页 B 键）
   useEffect(() => {
@@ -453,12 +413,7 @@ export function Browser() {
               const el = e.currentTarget
               setScrollTop(el.scrollTop)
               // 近底部预取下一页（B6 取数侧分页）：距已取尾部 AHEAD_PX 内增量追加
-              if (
-                loadedRef.current < totalRef.current &&
-                el.scrollTop + el.clientHeight >= loadedRef.current * rowH - AHEAD_PX
-              ) {
-                void loadMore()
-              }
+              void paginator.onScroll(el.scrollTop, el.clientHeight, rowH)
             }}
             style={gridWidth != null ? { width: gridWidth, flex: '0 0 auto' } : undefined}
           >
