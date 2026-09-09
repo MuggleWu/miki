@@ -91,11 +91,14 @@ function columnValue(card: Card, deckName: string, col: BrowserColumn): Comparab
   }
 }
 
+/** 中文排序单例：localeCompare 每次调用都新建 Collator，热路径差一个数量级 */
+const zhCollator = new Intl.Collator('zh-Hans-CN')
+
 function cmp(a: Comparable, b: Comparable): number {
   if (a == null && b == null) return 0
   if (a == null) return -1
   if (b == null) return 1
-  if (typeof a === 'string' && typeof b === 'string') return a.localeCompare(b, 'zh-Hans-CN')
+  if (typeof a === 'string' && typeof b === 'string') return zhCollator.compare(a, b)
   return (a as number) - (b as number)
 }
 
@@ -111,4 +114,24 @@ export function compareByKeys(
     if (r !== 0) return k.asc ? r : -r
   }
   return a.id < b.id ? -1 : a.id > b.id ? 1 : 0
+}
+
+/** 装饰排序（decorate-sort-undecorate）：排序前一趟预取全部排序键，
+ * 比较器只比预取值——不再每次比较重复调 columnValue/displayState/localeCompare。
+ * keys 为空时跳过排序直接返回原数组引用。 */
+export function sortByKeys(
+  list: Card[],
+  keys: SortKey[],
+  deckNameOf: (card: Card) => string
+): Card[] {
+  if (keys.length === 0) return list
+  const decorated = list.map((c) => ({ card: c, keys: keys.map((k) => columnValue(c, deckNameOf(c), k.col)) }))
+  decorated.sort((x, y) => {
+    for (let i = 0; i < keys.length; i++) {
+      const r = cmp(x.keys[i], y.keys[i])
+      if (r !== 0) return keys[i].asc ? r : -r
+    }
+    return x.card.id < y.card.id ? -1 : x.card.id > y.card.id ? 1 : 0
+  })
+  return decorated.map((d) => d.card)
 }
