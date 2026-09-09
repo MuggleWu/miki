@@ -275,6 +275,17 @@ describe('http api 牌组与卡片 CRUD', () => {
     await authed('POST', '/api/cards/suspend', { cardId: cardIds[1], suspended: false })
   })
 
+  it('suspend 非布尔 suspended 一律 400，不发生强转副作用', async () => {
+    for (const bad of ['false', 'true', 0, 1, null]) {
+      const r = await authed('POST', '/api/cards/suspend', { cardId: cardIds[0], suspended: bad })
+      expect(r.status).toBe(400)
+    }
+    // 未受副作用影响：卡仍处于未暂停态
+    expect(ws.getCard(cardIds[0])!.suspended).toBe(false)
+    // 缺 suspended 字段同样 400
+    expect((await authed('POST', '/api/cards/suspend', { cardId: cardIds[0] })).status).toBe(400)
+  })
+
   it('批量移动到另一牌组', async () => {
     const decks = (await authed('GET', '/api/decks')).json as { decks: { id: string; name: string }[] }
     const target = decks.decks.find((d) => d.name === 'API 组 B')!.id

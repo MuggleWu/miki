@@ -188,7 +188,9 @@ function buildRoutes(ws: WorkspaceService): [string, string, Handler][] {
     ({ body }) => {
       const b = body as { cardId?: unknown; suspended?: unknown }
       if (typeof b.cardId !== 'string') throw new ApiError(400, 'cardId 不能为空')
-      const card = ws.setCardSuspended(b.cardId, Boolean(b.suspended))
+      // 严格布尔：裸 HTTP 传 "false" 会被 Boolean() 强转成 true，想解除实际执行了暂停
+      if (typeof b.suspended !== 'boolean') throw new ApiError(400, 'suspended 必须是布尔值')
+      const card = ws.setCardSuspended(b.cardId, b.suspended)
       if (!card) throw new ApiError(404, '卡片不存在')
       return card
     }
