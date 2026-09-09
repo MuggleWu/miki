@@ -114,12 +114,6 @@ input { user-select: text; }
 .content { flex: 1; overflow: hidden; display: flex; }
 
 /* ---------- 工作区（多用户档案） ---------- */
-.topbar .ws-name {
-  background: transparent; border: 1px solid var(--border); border-radius: 6px;
-  color: var(--text-dim); font-size: 12px; padding: 3px 8px; cursor: pointer;
-  max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.topbar .ws-name:hover { color: var(--text); }
 .ws-list { list-style: none; margin: 0 0 4px; padding: 0; }
 .ws-list li {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;

@@ -30,6 +30,12 @@ function MainApp() {
   const openBrowser = useApp((s) => s.openBrowser)
   const openDialog = useApp((s) => s.openDialog)
 
+  // 窗口标题携带当前工作区名（Miki - 工作区名），多工作区时便于区分窗口；
+  // 引导页（config 未就绪）保持默认 Miki
+  useEffect(() => {
+    document.title = config ? `Miki - ${workspaceName(config.workspacePath)}` : 'Miki'
+  }, [config])
+
   // 卡片弹窗子窗口状态同步：主窗口 store.dialog 只是标志镜像（快捷键屏蔽 + Esc 判断）。
   // 开窗时调用方已先经 store.openDialog 记状态，这里只处理「窗口侧关闭」（弹窗内 Esc/⌘W/提交完成）
   useEffect(() => {
@@ -132,15 +138,6 @@ function MainApp() {
     <div className="app">
       <div className="topbar">
         <span className="logo">miki</span>
-        {config && (
-          <button
-            className="ws-name"
-            title={`${config.workspacePath}（点击进设置页管理多工作区）`}
-            onClick={() => setTab('settings')}
-          >
-            {workspaceName(config.workspacePath)}
-          </button>
-        )}
         <button className={`tab ${tab === 'home' ? 'active' : ''}`} onClick={() => setTab('home')}>
           牌组
         </button>
