@@ -9,7 +9,10 @@
 //      端口    = MIKI_PORT 环境变量 → userData/miki-api.json（实际监听端口，含顺延）→ config.json 的 api.port
 //      userData 可用 MIKI_USER_DATA 覆盖（macOS ~/Library/Application Support/Miki / Windows %APPDATA%/Miki / Linux ~/.config/Miki）
 // 自动发现使 MCP 始终跟随 miki 的当前工作区；切换工作区后重启 MCP 即可（或配 MIKI_WORKSPACE 指定档案）。
-// 所有工具只读转发到 http://127.0.0.1:<port>/api，安全边界与 HTTP API 相同（见 docs/en/api.md / docs/zh/api.md）。
+// 薄壳把本机 HTTP API 包装成 MCP 工具，供 AI 客户端直接操作牌组与卡片。
+// 读工具（decks/cards/stats/openapi）只读转发；写工具（add/update/move/suspend/
+// delete/reset）转发到同名 HTTP 写接口——安全边界与 HTTP API 相同：仅本机回环 +
+// Bearer token，见 docs/en/api.md / docs/zh/api.md。
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod'
@@ -50,7 +53,22 @@ function pidAlive(pid) {
   }
 }
 
-function resolveConnection() {
+/** 端口文件身份校验：runtime 文件含 nonce，/api/health 回显同一 nonce 才可信。
+ * pid 复用（强杀残留后被无关进程撞上同一 pid）时 kill(pid,0) 探不出真身，nonce 对不上即回退配置端口 */
+async function nonceMatches(base, expected) {
+  try {
+    const c = new AbortController()
+    const t = setTimeout(() => c.abort(), 800)
+    const res = await fetch(`${base}/health`, { signal: c.signal })
+    clearTimeout(t)
+    const json = await res.json().catch(() => null)
+    return !!json && json.nonce === expected
+  } catch {
+    return false
+  }
+}
+
+async function resolveConnection() {
   // 1) 显式 token：旧行为，端口只认环境变量与默认值
   if (process.env.MIKI_TOKEN) {
     return {
@@ -83,14 +101,19 @@ function resolveConnection() {
     )
     process.exit(1)
   }
-  // 端口：显式 env > 运行时端口文件（含顺延实际值，pid 校验防过期）> 配置端口
+  // 端口：显式 env > 运行时端口文件（pid 存活 + nonce 对上才采信）> 配置端口
   const runtime = readJson(path.join(userData, 'miki-api.json'))
-  const runtimePort = runtime && typeof runtime.port === 'number' && pidAlive(runtime.pid) ? runtime.port : null
-  const port = process.env.MIKI_PORT || runtimePort || cfg.api.port || 8727
+  const cfgPort = cfg.api.port || 8727
+  let port = cfgPort
+  if (!process.env.MIKI_PORT && runtime && typeof runtime.port === 'number' && pidAlive(runtime.pid)) {
+    const candidate = `http://127.0.0.1:${runtime.port}/api`
+    const stale = runtime.nonce ? !(await nonceMatches(candidate, runtime.nonce)) : false
+    if (!stale) port = runtime.port
+  }
   return { mode: 'auto', base: `http://127.0.0.1:${port}/api`, workspace: workspaceDir, token: cfg.api.token }
 }
 
-const conn = resolveConnection()
+const conn = await resolveConnection()
 const TOKEN = conn.token
 console.error(
   `miki MCP ${VERSION}：${conn.mode === 'auto' ? '自动发现' : '显式 token'} 模式 → ${conn.base}` +
@@ -124,7 +147,8 @@ async function call(method, path, body) {
 const server = new McpServer({ name: 'miki', version: VERSION })
 
 const deckId = z.string().describe('牌组 ID')
-const cardIds = z.array(z.string()).describe('卡片 ID 列表')
+// 批量上限：单次 500 张——防一次误传全库 id 打爆逐卡 HTTP；更大批次请分多次调用
+const cardIds = z.array(z.string()).max(500).describe('卡片 ID 列表（单次最多 500）')
 
 server.tool('list_decks', '列出全部牌组及各状态卡片计数', {}, async () => ({
   content: [{ type: 'text', text: JSON.stringify(await call('GET', '/decks'), null, 2) }]

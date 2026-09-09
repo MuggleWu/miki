@@ -6,7 +6,7 @@
 //   4. 不暴露 answer/undo/配置写等学习与设置动作，只开放牌组与卡片 CRUD + 统计
 import * as http from 'node:http'
 import * as fs from 'node:fs'
-import { timingSafeEqual, createHash } from 'node:crypto'
+import { timingSafeEqual, createHash, randomUUID } from 'node:crypto'
 import type { WorkspaceService } from './workspace'
 import type { QueryParams, SortKey } from '../shared/types'
 import type { BrowserColumn } from '../shared/types'
@@ -49,10 +49,10 @@ interface Ctx {
 type Handler = (ctx: Ctx) => unknown
 
 /** 路由表：method + '/api/...' 路径（:段 为路径参数），按注册顺序匹配 */
-function buildRoutes(ws: WorkspaceService): [string, string, Handler][] {
+function buildRoutes(ws: WorkspaceService, serverNonce: string): [string, string, Handler][] {
   const routes: [string, string, Handler][] = []
 
-  routes.push(['GET', '/api/health', () => ({ ok: true, name: 'miki' })])
+  routes.push(['GET', '/api/health', () => ({ ok: true, name: 'miki', nonce: serverNonce })])
   routes.push(['GET', '/api/openapi.json', () => openApiDoc])
 
   // ---------- 牌组 ----------
@@ -333,7 +333,10 @@ export function startApiServer(ws: WorkspaceService, opts: { runtimeInfoPath?: s
   const { enabled, port } = ws.config.api
   if (!enabled) return null
   const token = ws.config.api.token
-  const routes = buildRoutes(ws)
+  // 本次启动随机 nonce：写入运行时文件并在 health 回显。pid 复用（强杀残留后被新进程
+  // 撞上同一 pid）时 kill(pid,0) 甄别不了身份，外部工具靠比对 nonce 判断文件是否过期
+  const serverNonce = randomUUID()
+  const routes = buildRoutes(ws, serverNonce)
 
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1')
@@ -397,9 +400,12 @@ export function startApiServer(ws: WorkspaceService, opts: { runtimeInfoPath?: s
     const addr = server.address()
     const actualPort = typeof addr === 'object' && addr ? addr.port : port
     if (opts.runtimeInfoPath) {
-      // 原子写运行时信息：外部工具（MCP wrapper）读它拿实际端口，pid 用于甄别过期文件
+      // 原子写运行时信息：外部工具（MCP wrapper）读它拿实际端口；pid + nonce 联合甄别过期文件
       try {
-        atomicWrite(opts.runtimeInfoPath, JSON.stringify({ port: actualPort, pid: process.pid, startedAt: Date.now() }))
+        atomicWrite(
+          opts.runtimeInfoPath,
+          JSON.stringify({ port: actualPort, pid: process.pid, nonce: serverNonce, startedAt: Date.now() })
+        )
       } catch (err) {
         console.error(`[miki] 运行时端口文件写入失败: ${String((err as Error).message ?? err)}`)
       }
