@@ -5,11 +5,21 @@
 //   3. 除 /api/health 外必须携带 Bearer token（workspace 首次启动生成，config.json 查看）
 //   4. 不暴露 answer/undo/配置写等学习与设置动作，只开放牌组与卡片 CRUD + 统计
 import * as http from 'node:http'
-import { timingSafeEqual } from 'node:crypto'
+import * as path from 'node:path'
+import * as fs from 'node:fs'
+import { timingSafeEqual, createHash } from 'node:crypto'
 import type { WorkspaceService } from './workspace'
 import type { QueryParams, SortKey } from '../shared/types'
+import type { BrowserColumn } from '../shared/types'
+import { openApiDoc } from './api-openapi'
 
 const MAX_BODY_BYTES = 5 * 1024 * 1024
+
+/** sort 列白名单：与卡片库 BrowserColumn 一致，挡住拼写错误导致的静默排序失效 */
+const SORT_COLUMNS: readonly BrowserColumn[] = [
+  'front', 'deckName', 'state', 'due', 'dueAbs', 'interval',
+  'stability', 'difficulty', 'reps', 'lapses', 'createdAt', 'updatedAt'
+]
 
 class ApiError extends Error {
   constructor(
@@ -33,6 +43,7 @@ function buildRoutes(ws: WorkspaceService): [string, string, Handler][] {
   const routes: [string, string, Handler][] = []
 
   routes.push(['GET', '/api/health', () => ({ ok: true, name: 'miki' })])
+  routes.push(['GET', '/api/openapi.json', () => openApiDoc])
 
   // ---------- 牌组 ----------
   routes.push(['GET', '/api/decks', () => ({ decks: ws.deckInfos() })])
@@ -78,14 +89,19 @@ function buildRoutes(ws: WorkspaceService): [string, string, Handler][] {
     const deckId = typeof b.deckId === 'string' ? b.deckId : ''
     if (!ws.deckInfos().some((d) => d.id === deckId)) throw new ApiError(404, '目标牌组不存在')
     if (Array.isArray(b.items)) {
-      const items = b.items.map((it) => normalizeContent(it))
+      const items = b.items.map((it) => {
+        const c = normalizeContent(it)
+        requireCardContent(c.front, c.back)
+        return c
+      })
       return { cards: ws.addCards(deckId, items) }
     }
-    return ws.addCard(deckId, String(b.front ?? ''), String(b.back ?? ''))
+    const single = normalizeContent(b)
+    requireCardContent(single.front, single.back)
+    return ws.addCard(deckId, single.front, single.back)
   }])
   routes.push(['PATCH', '/api/cards/:id', ({ params, body }) => {
-    const { front, back } = normalizeContent(body)
-    const card = ws.updateCard(params.id, front, back)
+    const card = ws.updateCard(params.id, parseContentPatch(body))
     if (!card) throw new ApiError(404, '卡片不存在')
     return card
   }])
@@ -93,9 +109,10 @@ function buildRoutes(ws: WorkspaceService): [string, string, Handler][] {
     const items = (body as { items?: unknown }).items
     if (!Array.isArray(items)) throw new ApiError(400, 'items 必须是数组')
     return ws.updateCards(items.map((it) => {
-      const { cardId, front, back } = it as { cardId?: unknown; front?: unknown; back?: unknown }
-      if (typeof cardId !== 'string' || !cardId) throw new ApiError(400, 'items[].cardId 必须是非空字符串')
-      return { cardId, front: String(front ?? ''), back: String(back ?? '') }
+      const o = (it ?? {}) as { cardId?: unknown; front?: unknown; back?: unknown }
+      if (typeof o.cardId !== 'string' || !o.cardId) throw new ApiError(400, 'items[].cardId 必须是非空字符串')
+      const patch = parseContentPatch(o, 'items[]')
+      return { cardId: o.cardId, ...patch }
     }))
   }])
   routes.push(['POST', '/api/cards/move', ({ body }) => {
@@ -138,12 +155,39 @@ function normalizeContent(it: unknown): { front: string; back: string } {
   return { front: String(b.front ?? ''), back: String(b.back ?? '') }
 }
 
+/** 新卡内容校验：与 UI 口径一致——正反都为空才拒绝（允许仅背面卡，如cloze类） */
+function requireCardContent(front: string, back: string): void {
+  if (front.trim() === '' && back.trim() === '') throw new ApiError(400, 'front 与 back 不能都为空')
+}
+
+/** 部分更新解析：只透传请求里出现的字段（undefined = 保留原值），无任何内容字段则 400 */
+function parseContentPatch(body: unknown, label = ''): { front?: string; back?: string } {
+  const b = (body ?? {}) as { front?: unknown; back?: unknown }
+  const patch: { front?: string; back?: string } = {}
+  if (b.front !== undefined) patch.front = String(b.front)
+  if (b.back !== undefined) patch.back = String(b.back)
+  if (patch.front === undefined && patch.back === undefined) {
+    throw new ApiError(400, `${label ? label + '：' : ''}至少提供 front 或 back 之一（未提供的字段保留原值）`)
+  }
+  return patch
+}
+
 function parseQuery(q: URLSearchParams): QueryParams {
   const keywords = (q.get('q') ?? '')
     .split(/[\s,]+/)
     .map((s) => s.trim())
     .filter(Boolean)
   const sort = parseSort(q.get('sort'))
+  // 到期窗口：数字按 ms epoch；非数字尝试按日期解析（YYYY-MM-DD 或 ISO 字符串），降低 AI/脚本传参出错率
+  const dueBound = (key: string): number | null => {
+    const raw = q.get(key)
+    if (raw == null || raw === '') return null
+    const n = Number(raw)
+    if (Number.isFinite(n)) return n
+    const t = Date.parse(raw)
+    if (Number.isNaN(t)) throw new ApiError(400, `${key} 必须是 ms 时间戳或日期字符串（如 2026-09-30）`)
+    return t
+  }
   const num = (key: string): number | undefined => {
     const raw = q.get(key)
     if (raw == null || raw === '') return undefined
@@ -159,8 +203,8 @@ function parseQuery(q: URLSearchParams): QueryParams {
     limit: num('limit'),
     offset: num('offset'),
     state: state === 'new' || state === 'learning' || state === 'review' || state === 'suspended' ? state : null,
-    dueAfter: num('dueAfter') ?? null,
-    dueBefore: num('dueBefore') ?? null
+    dueAfter: dueBound('dueAfter'),
+    dueBefore: dueBound('dueBefore')
   }
 }
 
@@ -170,6 +214,9 @@ function parseSort(raw: string | null): SortKey[] {
   for (const part of raw.split(',')) {
     const [col, dir] = part.trim().split(':')
     if (!col) continue
+    if (!SORT_COLUMNS.includes(col as BrowserColumn)) {
+      throw new ApiError(400, `sort 列 ${col} 不允许（可选：${SORT_COLUMNS.join('/')}）`)
+    }
     keys.push({ col: col as SortKey['col'], asc: dir !== 'desc' })
   }
   return keys.length > 0 ? keys : [{ col: 'updatedAt', asc: false }]
@@ -177,9 +224,9 @@ function parseSort(raw: string | null): SortKey[] {
 
 function tokenOk(expected: string, got: string | undefined): boolean {
   if (!got) return false
-  const a = Buffer.from(expected)
-  const b = Buffer.from(got)
-  return a.length === b.length && timingSafeEqual(a, b)
+  // 双方先做等长 SHA-256 再比对：避免 timingSafeEqual 前置长度比较泄漏 token 长度
+  const h = (s: string) => createHash('sha256').update(s, 'utf-8').digest()
+  return timingSafeEqual(h(expected), h(got))
 }
 
 function readBody(req: http.IncomingMessage): Promise<unknown> {
@@ -189,8 +236,9 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
     req.on('data', (chunk: Buffer) => {
       size += chunk.length
       if (size > MAX_BODY_BYTES) {
+        // 不 destroy：暂停读取让 413 响应能送达客户端，响应结束后 Node 会关闭未消费完的连接
+        req.pause()
         reject(new ApiError(413, '请求体过大'))
-        req.destroy()
         return
       }
       chunks.push(chunk)
@@ -207,8 +255,9 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
   })
 }
 
-/** 启动本机 API；config.api.enabled=false 时返回 null。端口被占用时依次顺延重试 */
-export function startApiServer(ws: WorkspaceService): http.Server | null {
+/** 启动本机 API；config.api.enabled=false 时返回 null。端口被占用时依次顺延重试。
+ *  opts.runtimeInfoPath 提供时，监听成功后把实际端口写入该文件（原子写），供 MCP wrapper 等外部工具自动发现 */
+export function startApiServer(ws: WorkspaceService, opts: { runtimeInfoPath?: string } = {}): http.Server | null {
   const { enabled, port } = ws.config.api
   if (!enabled) return null
   const token = ws.config.api.token
@@ -236,13 +285,15 @@ export function startApiServer(ws: WorkspaceService): http.Server | null {
       if (!['GET', 'POST', 'PATCH', 'DELETE', 'HEAD'].includes(method)) {
         return send(405, { error: '方法不允许' })
       }
-      // 鉴权：health 免 token 便于探活，其余必须携带
-      if (url.pathname !== '/api/health') {
+      // 鉴权：health/openapi 免 token（无敏感信息，便于探活与接口自发现），其余必须携带
+      if (url.pathname !== '/api/health' && url.pathname !== '/api/openapi.json') {
         const auth = req.headers.authorization ?? ''
         const bearer = auth.startsWith('Bearer ') ? auth.slice(7) : undefined
         const header = req.headers['x-miki-token'] as string | undefined
         if (!tokenOk(token, bearer) && !tokenOk(token, header)) {
-          return send(401, { error: '未授权：缺少或错误的 token（见 config.json 的 api.token）' })
+          return send(401, {
+            error: '未授权：缺少或错误的 token。token 存放在当前工作区 config.json 的 api.token；若刚切换过工作区，旧 token 属于另一个工作区，请改读当前工作区的 config.json'
+          })
         }
       }
       if (method === 'HEAD') return send(200, { ok: true })
@@ -271,7 +322,26 @@ export function startApiServer(ws: WorkspaceService): http.Server | null {
   server.on('listening', () => {
     const addr = server.address()
     const actualPort = typeof addr === 'object' && addr ? addr.port : port
+    if (opts.runtimeInfoPath) {
+      // 原子写运行时信息：外部工具（MCP wrapper）读它拿实际端口，pid 用于甄别过期文件
+      try {
+        const tmp = `${opts.runtimeInfoPath}.tmp`
+        fs.writeFileSync(tmp, JSON.stringify({ port: actualPort, pid: process.pid, startedAt: Date.now() }))
+        fs.renameSync(tmp, opts.runtimeInfoPath)
+      } catch (err) {
+        console.error(`[miki] 运行时端口文件写入失败: ${String((err as Error).message ?? err)}`)
+      }
+    }
     console.log(`[miki] HTTP API: http://127.0.0.1:${actualPort}/api （token 见 config.json 的 api.token）`)
+  })
+  server.on('close', () => {
+    if (opts.runtimeInfoPath) {
+      try {
+        fs.rmSync(opts.runtimeInfoPath, { force: true })
+      } catch {
+        // 清理失败不影响退出
+      }
+    }
   })
   tryListen()
   return server

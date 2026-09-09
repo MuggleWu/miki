@@ -82,11 +82,13 @@ npm start          # 运行构建产物
 
 Miki 内置本机 HTTP API，供人和 AI 程序化管理牌组与卡片（增删改查，含批量）。只监听 `127.0.0.1:8727`，必须携带 token，拒绝浏览器发起的跨站请求。详见 [docs/zh/api.md](docs/zh/api.md)。
 
-MCP 客户端可用附带的 stdio 薄壳接入：
+MCP 客户端可用附带的 stdio 薄壳接入——推荐自动发现（无需配置，始终跟随当前工作区；切换工作区后重启 MCP 即可）：
 
 ```bash
-MIKI_TOKEN=<config.json 中的 api.token> node scripts/mcp-server.mjs
+node scripts/mcp-server.mjs
 ```
+
+也可显式指定 token 与端口（旧行为）：`MIKI_TOKEN=<config.json 中的 api.token> node scripts/mcp-server.mjs`。
 
 提供 `list_decks`、`add_cards`、`search_cards`、`update_cards`、`move_cards`、`delete_cards`、`reset_progress`、`get_stats` 等工具。
 

@@ -266,7 +266,7 @@ export function Browser() {
       if (!selected) return
       if (saveTimer.current) clearTimeout(saveTimer.current)
       saveTimer.current = setTimeout(async () => {
-        await window.miki.updateCard(selected.id, front, back)
+        await window.miki.updateCard(selected.id, { front, back })
         await query()
       }, 800)
     },

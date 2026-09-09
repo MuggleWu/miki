@@ -82,11 +82,13 @@ Workspace resolution for the packaged app: `MIKI_WORKSPACE` env → `current` in
 
 Miki ships a local HTTP API for humans and AI agents to manage decks and cards programmatically (CRUD, including batch operations). It listens on `127.0.0.1:8727` only, requires a bearer token, and rejects browser-originated cross-site requests. See [docs/en/api.md](docs/en/api.md).
 
-For MCP clients, a thin stdio wrapper is included:
+For MCP clients, a thin stdio wrapper is included — auto-discovery is recommended (zero config, always follows the current workspace; restart the MCP after switching workspaces):
 
 ```bash
-MIKI_TOKEN=<token from config.json> node scripts/mcp-server.mjs
+node scripts/mcp-server.mjs
 ```
+
+Explicit token & port (legacy behavior) also work: `MIKI_TOKEN=<token from config.json> node scripts/mcp-server.mjs`.
 
 It exposes tools such as `list_decks`, `add_cards`, `search_cards`, `update_cards`, `move_cards`, `delete_cards`, `reset_progress` and `get_stats`.
 

@@ -48,7 +48,8 @@ function startServices(root: string): void {
   })
   ws.startWatching()
 
-  apiServer = startApiServer(ws)
+  // 运行时端口文件放 userData（非工作区）：记录实际监听端口，供 MCP wrapper 等外部工具自动发现
+  apiServer = startApiServer(ws, { runtimeInfoPath: path.join(app.getPath('userData'), 'miki-api.json') })
 }
 
 /** 恢复上次窗口状态：把保存的普通态 bounds 钳回可见显示器的工作区（外接屏拔掉/分辨率变化时不出屏） */
@@ -311,7 +312,7 @@ app.whenReady().then(() => {
   )
   ipcMain.handle(IPC.undo, () => ws.undo())
   ipcMain.handle(IPC.addCard, (_e, deckId: string, front: string, back: string) => ws.addCard(deckId, front, back))
-  ipcMain.handle(IPC.updateCard, (_e, cardId: string, front: string, back: string) => ws.updateCard(cardId, front, back))
+  ipcMain.handle(IPC.updateCard, (_e, cardId: string, patch: { front?: string; back?: string }) => ws.updateCard(cardId, patch))
   ipcMain.handle(IPC.getCard, (_e, cardId: string) => ws.getCard(cardId))
   ipcMain.handle(IPC.deleteCard, (_e, cardId: string) => ws.deleteCard(cardId))
   ipcMain.handle(IPC.queryCards, (_e, params: QueryParams) => ws.queryCards(params))
@@ -333,7 +334,7 @@ app.whenReady().then(() => {
   ipcMain.handle(IPC.addCards, (_e, deckId: string, items: { front: string; back: string }[]) =>
     ws.addCards(deckId, items)
   )
-  ipcMain.handle(IPC.updateCards, (_e, items: { cardId: string; front: string; back: string }[]) =>
+  ipcMain.handle(IPC.updateCards, (_e, items: { cardId: string; front?: string; back?: string }[]) =>
     ws.updateCards(items)
   )
   ipcMain.handle(IPC.deleteCards, (_e, cardIds: string[]) => ws.deleteCards(cardIds))

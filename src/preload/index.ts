@@ -11,7 +11,7 @@ const api: MikiApi = {
     ipcRenderer.invoke(IPC.answer, cardId, rating, durationMs),
   undo: () => ipcRenderer.invoke(IPC.undo),
   addCard: (deckId: string, front: string, back: string) => ipcRenderer.invoke(IPC.addCard, deckId, front, back),
-  updateCard: (cardId: string, front: string, back: string) => ipcRenderer.invoke(IPC.updateCard, cardId, front, back),
+  updateCard: (cardId: string, patch: { front?: string; back?: string }) => ipcRenderer.invoke(IPC.updateCard, cardId, patch),
   getCard: (cardId: string) => ipcRenderer.invoke(IPC.getCard, cardId),
   deleteCard: (cardId: string) => ipcRenderer.invoke(IPC.deleteCard, cardId),
   queryCards: (params: unknown) => ipcRenderer.invoke(IPC.queryCards, params),
@@ -26,7 +26,7 @@ const api: MikiApi = {
   resetProgress: (cardIds: string[]) => ipcRenderer.invoke(IPC.resetProgress, cardIds),
   addCards: (deckId: string, items: { front: string; back: string }[]) =>
     ipcRenderer.invoke(IPC.addCards, deckId, items),
-  updateCards: (items: { cardId: string; front: string; back: string }[]) =>
+  updateCards: (items: { cardId: string; front?: string; back?: string }[]) =>
     ipcRenderer.invoke(IPC.updateCards, items),
   deleteCards: (cardIds: string[]) => ipcRenderer.invoke(IPC.deleteCards, cardIds),
   getCards: (cardIds: string[]) => ipcRenderer.invoke(IPC.getCards, cardIds),

@@ -4,7 +4,7 @@
 
 Miki 在启动时内置一个**只监听本机回环地址**的 HTTP API，供人和 AI 程序化操作牌组与卡片（增删改查，含批量）。学习动作（答题/撤销）与配置写入不通过此接口暴露。
 
-- 地址：`http://127.0.0.1:<port>/api`，端口默认 `8727`（被占用时依次顺延，实际端口见启动日志）
+- 地址：`http://127.0.0.1:<port>/api`，端口默认 `8727`（被占用时依次顺延，实际端口见启动日志，同时写入 `userData/miki-api.json` 运行时文件，含 `port` 与 `pid`）
 - 开关与端口：工作区 `config.json` 的 `api.enabled` / `api.port`，改后重启应用生效
 - 认证 token：工作区 `config.json` 的 `api.token`（首次启动自动生成，长期不变）
 
@@ -16,7 +16,7 @@ curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8727/api/decks
 ## 安全边界
 
 1. **只监听 127.0.0.1**，不对局域网/公网开放。
-2. **Bearer token 必填**（`Authorization: Bearer <token>` 或 `X-Miki-Token: <token>`）；服务端用时序安全比较。`GET /api/health` 是唯一免 token 的端点，仅用于探活。
+2. **Bearer token 必填**（`Authorization: Bearer <token>` 或 `X-Miki-Token: <token>`）；服务端用时序安全比较。`GET /api/health` 与 `GET /api/openapi.json` 免 token（无敏感信息，用于探活与接口自发现）。
 3. **带 `Origin` 或 `Referer` 的请求一律 403**——浏览器网页发起的跨站调用（CSRF）无法到达本接口；curl / 脚本 / AI 工具正常情况下不带这些头，不受影响。
 4. **Host 校验**：只接受 `127.0.0.1:<port>` 与 `localhost:<port>`（端口跟随实际监听端口——配置端口被占用顺延后，以启动日志报出的实际端口为准），防 DNS rebinding。
 5. **能力面收窄**：无答题、撤销、配置修改端点；写操作只覆盖牌组/卡片 CRUD。
@@ -27,6 +27,7 @@ curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8727/api/decks
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/api/health` | 探活（免 token） |
+| GET | `/api/openapi.json` | OpenAPI 3.1 接口自描述（免 token，供 AI agent 免读文档自发现） |
 | GET | `/api/decks` | 牌组列表（counts：总数 total / 未学习 new / 到期 due，此刻口径） |
 | POST | `/api/decks` | 建牌组：`{"name"}`；批量 `{"names": [...]}`
 | PATCH | `/api/decks/:id` | 重命名 `{"name"}`
@@ -50,8 +51,8 @@ curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8727/api/decks
 | `deckId` | 限定牌组；缺省 = 全部 |
 | `q` | 关键词，逗号或空格分隔，多词 AND（匹配正面/反面） |
 | `state` | `new` / `learning` / `review` / `suspended` |
-| `dueAfter` / `dueBefore` | 到期时间窗（ms epoch）；无调度进度的卡不在窗口内 |
-| `sort` | 如 `updatedAt:desc,front:asc`（列：front/deckName/state/due/dueAbs/interval/stability/difficulty/reps/lapses/createdAt/updatedAt） |
+| `dueAfter` / `dueBefore` | 到期时间窗：ms 时间戳或日期字符串（如 `2026-09-30`）；无调度进度的卡不在窗口内 |
+| `sort` | 如 `updatedAt:desc,front:asc`（列必须来自白名单：front/deckName/state/due/dueAbs/interval/stability/difficulty/reps/lapses/createdAt/updatedAt，非法列 400） |
 | `limit` / `offset` | 分页，默认 limit 5000 |
 
 响应：`{"rows": [...], "total": 总数}`（`rows` 为卡片视图行，含状态、到期、稳定性等）。
@@ -61,4 +62,4 @@ curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8727/api/decks
 - **批量导入制卡**用 `POST /api/cards/add` 的 `items` 形式，一次几十张，服务端一次落盘。
 - 批量端点对不存在的 ID 返回 `missing` 计数而不是整批失败，方便校对输入。
 - 删除是软删、移动保留进度、重置不可撤销——AI 自动化时优先用前两者。
-- MCP 接入：`node scripts/mcp-server.mjs`（环境变量 `MIKI_TOKEN`，可选 `MIKI_PORT`，默认 8727），在支持 MCP 的客户端里注册后即可获得 `list_decks` / `add_cards` / `search_cards` 等工具。
+- MCP 接入：`node scripts/mcp-server.mjs`。推荐**自动发现**：不设 `MIKI_TOKEN` 时，wrapper 自动定位当前工作区（`MIKI_WORKSPACE` → `userData/workspace.json` 的 `current`）并读取其 `config.json` 拿 token，端口优先读 `userData/miki-api.json` 运行时文件——切换工作区后重启 MCP 即可跟随。也可显式指定 `MIKI_TOKEN`（可选 `MIKI_PORT`）保持旧行为。工具含 `list_decks` / `add_cards` / `search_cards`（默认每页 50，日期参数接受 `YYYY-MM-DD`）/ `update_cards`（部分更新）/ `rename_deck` / `set_suspended`（批量）/ `api_schema` 等，另提供只读资源 `miki://decks`、`miki://stats` 与制卡 prompt 模板 `make-cards`（最小知识原则）。

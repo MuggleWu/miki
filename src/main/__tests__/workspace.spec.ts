@@ -565,3 +565,33 @@ describe('工作区热加载（外部变更，git pull / 他机写入）', () =>
     expect(r.restoredCardId).toBeNull()
   })
 })
+
+describe('部分更新（updateCard/updateCards 未提供字段保留原值）', () => {
+  it('单卡：只传 back，front 保留', () => {
+    const d = tmpKept()
+    const w = newWs(d)
+    const deck = w.addDeck('部分更新')
+    const card = w.addCard(deck.id, '旧正面', '旧背面')
+    const updated = w.updateCard(card.id, { back: '新背面' })
+    expect(updated).toMatchObject({ front: '旧正面', back: '新背面' })
+    // 重放后依然一致（delta 行是全量内容，服务层负责合并 patch）
+    const w2 = newWs(d)
+    expect(w2.getCard(card.id)).toMatchObject({ front: '旧正面', back: '新背面' })
+  })
+
+  it('批量：逐条部分更新 + 空串显式清空 + missing 计数', () => {
+    const d = tmpKept()
+    const w = newWs(d)
+    const deck = w.addDeck('部分更新批量')
+    const a = w.addCard(deck.id, 'A1', 'A2')
+    const b = w.addCard(deck.id, 'B1', 'B2')
+    const r = w.updateCards([
+      { cardId: a.id, front: 'A1改' },
+      { cardId: b.id, back: '' },
+      { cardId: 'missing', front: 'x' }
+    ])
+    expect(r).toEqual({ updated: 2, missing: 1 })
+    expect(w.getCard(a.id)).toMatchObject({ front: 'A1改', back: 'A2' })
+    expect(w.getCard(b.id)).toMatchObject({ front: 'B1', back: '' })
+  })
+})

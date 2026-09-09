@@ -76,9 +76,18 @@ describe('http api 安全链', () => {
     expect(r.json).toMatchObject({ ok: true, name: 'miki' })
   })
 
-  it('缺 token 与错 token 都 401', async () => {
+  it('openapi 免 token 可取，且结构自洽', async () => {
+    const r = await request('GET', '/api/openapi.json')
+    expect(r.status).toBe(200)
+    const doc = r.json as { openapi: string; paths: Record<string, unknown> }
+    expect(doc.openapi).toMatch(/^3\./)
+    expect(Object.keys(doc.paths)).toContain('/cards/add')
+  })
+
+  it('缺 token 与错 token 都 401，提示含工作区线索', async () => {
     const noToken = await request('GET', '/api/decks')
     expect(noToken.status).toBe(401)
+    expect((noToken.json as { error: string }).error).toContain('工作区')
     const badToken = await request('GET', '/api/decks', { token: 'wrong' })
     expect(badToken.status).toBe(401)
   })
@@ -149,9 +158,13 @@ describe('http api 牌组与卡片 CRUD', () => {
     cardIds.push(...cards.map((c) => c.id))
   })
 
-  it('加卡到不存在的牌组 404', async () => {
+  it('加卡到不存在的牌组 404；正反都为空 400（单张与批量一致）', async () => {
     const r = await authed('POST', '/api/cards/add', { deckId: 'nope', items: [{ front: 'x', back: 'y' }] })
     expect(r.status).toBe(404)
+    expect((await authed('POST', '/api/cards/add', { deckId, front: '', back: '  ' })).status).toBe(400)
+    expect(
+      (await authed('POST', '/api/cards/add', { deckId, items: [{ front: 'ok', back: 'y' }, { front: '', back: '' }] })).status
+    ).toBe(400)
   })
 
   it('查询：关键词/状态/到期窗口/分页', async () => {
@@ -167,24 +180,38 @@ describe('http api 牌组与卡片 CRUD', () => {
     expect((due.json as { total: number }).total).toBe(0) // 新卡无调度进度，不在到期窗口内
   })
 
-  it('单张取卡与单张改内容', async () => {
+  it('单张取卡与单张部分改内容', async () => {
     const got = await authed('GET', `/api/cards/${cardIds[0]}`)
     expect(got.status).toBe(200)
     expect((got.json as { id: string }).id).toBe(cardIds[0])
     expect((await authed('GET', '/api/cards/not-exist')).status).toBe(404)
 
-    const patched = await authed('PATCH', `/api/cards/${cardIds[0]}`, { front: '正面一改', back: '背面一' })
+    // 只传 front：back 保留原值（部分更新）
+    const patched = await authed('PATCH', `/api/cards/${cardIds[0]}`, { front: '正面一改' })
     expect((patched.json as { front: string }).front).toBe('正面一改')
+    expect((patched.json as { back: string }).back).toBe('背面一')
+    // PATCH 不带任何内容字段 400
+    expect((await authed('PATCH', `/api/cards/${cardIds[0]}`, {})).status).toBe(400)
   })
 
-  it('批量改内容与缺失计数', async () => {
+  it('批量部分改内容与缺失计数；sort 非法列 400；due 参数接受日期字符串', async () => {
     const r = await authed('POST', '/api/cards/update', {
       items: [
-        { cardId: cardIds[0], front: '批量一', back: 'b' },
+        { cardId: cardIds[0], front: '批量一' }, // 只改正面
         { cardId: 'missing-id', front: 'x', back: 'y' }
       ]
     })
     expect(r.json).toEqual({ updated: 1, missing: 1 })
+    const after = (await authed('GET', `/api/cards/${cardIds[0]}`)).json as { front: string; back: string }
+    expect(after).toEqual({ ...after, front: '批量一', back: '背面一' })
+    // items 里没有任何内容字段 → 400
+    expect((await authed('POST', '/api/cards/update', { items: [{ cardId: cardIds[0] }] })).status).toBe(400)
+
+    expect((await authed('GET', '/api/cards?sort=nope:asc')).status).toBe(400)
+    const due = await authed('GET', `/api/cards?dueBefore=${encodeURIComponent('2026-09-30')}`)
+    expect(due.status).toBe(200)
+    const badDue = await authed('GET', '/api/cards?dueBefore=not-a-date')
+    expect(badDue.status).toBe(400)
   })
 
   it('暂停后按状态过滤命中', async () => {
@@ -252,7 +279,8 @@ describe('端口被占用顺延后，Host 校验跟随实际监听端口', () =>
     const ws2 = new WorkspaceService()
     ws2.init(tmp2)
     ws2.config.api.port = OCCUPIED
-    server2 = startApiServer(ws2)
+    const runtimeFile = path.join(tmp2, 'miki-api.json')
+    server2 = startApiServer(ws2, { runtimeInfoPath: runtimeFile })
 
     // 等顺延监听成功（health 打探实际端口，最多 2s）
     let ready = false
@@ -265,6 +293,11 @@ describe('端口被占用顺延后，Host 校验跟随实际监听端口', () =>
       }
     }
     expect(ready).toBe(true)
+
+    // 运行时文件记录顺延后的实际端口，供外部工具自动发现
+    const runtime = JSON.parse(fs.readFileSync(runtimeFile, 'utf-8')) as { port: number; pid: number }
+    expect(runtime.port).toBe(OCCUPIED + 1)
+    expect(runtime.pid).toBeGreaterThan(0)
 
     expect(await probe(OCCUPIED + 1, `127.0.0.1:${OCCUPIED}`)).toBe(403) // 配置端口（已被占）不是合法 Host
     expect(await probe(OCCUPIED + 1, `127.0.0.1:${OCCUPIED + 1}`)).toBe(200) // 实际监听端口放行

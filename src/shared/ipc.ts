@@ -29,7 +29,7 @@ export interface MikiApi {
   answer(cardId: string, rating: Rating, durationMs?: number): Promise<StudyPayload & { answeredCardId: string }>
   undo(): Promise<UndoResult>
   addCard(deckId: string, front: string, back: string): Promise<Card>
-  updateCard(cardId: string, front: string, back: string): Promise<Card | null>
+  updateCard(cardId: string, patch: { front?: string; back?: string }): Promise<Card | null>
   getCard(cardId: string): Promise<Card | null>
   deleteCard(cardId: string): Promise<void>
   queryCards(params: QueryParams): Promise<QueryResult>
@@ -46,7 +46,7 @@ export interface MikiApi {
   /** 批量新增卡片（同批共用时间戳、一次落盘），返回创建的卡（含 id） */
   addCards(deckId: string, items: { front: string; back: string }[]): Promise<Card[]>
   /** 批量更新正面/反面，返回更新数与不存在的 ID 数 */
-  updateCards(items: { cardId: string; front: string; back: string }[]): Promise<{ updated: number; missing: number }>
+  updateCards(items: { cardId: string; front?: string; back?: string }[]): Promise<{ updated: number; missing: number }>
   /** 批量软删（可撤销），返回删除数与不存在的 ID 数 */
   deleteCards(cardIds: string[]): Promise<{ deleted: number; missing: number }>
   /** 按 ID 批量取卡片完整内容（保持入参顺序，跳过不存在的 ID） */

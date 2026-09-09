@@ -45,7 +45,7 @@ describe('检查点 + delta 写路径', () => {
     const w = newWs(d)
     const deck = w.addDeck('delta 组').id
     const c = w.addCard(deck, '原反面', '')
-    w.updateCard(c.id, '新正面', '新反面')
+    w.updateCard(c.id, { front: '新正面', back: '新反面' })
     const deltaFile = path.join(d, 'cards', `${deck}.delta.ndjson`)
     expect(fs.existsSync(deltaFile)).toBe(true)
 

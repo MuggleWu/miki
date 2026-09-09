@@ -904,8 +904,9 @@ export class WorkspaceService {
     return cards
   }
 
-  /** 批量更新内容：delta 追加（O(变更)），按牌组分组一次落盘；返回更新数与不存在的 ID 数 */
-  updateCards(items: { cardId: string; front: string; back: string }[]): { updated: number; missing: number } {
+  /** 批量更新内容：delta 追加（O(变更)），按牌组分组一次落盘；front/back 未提供的字段保留原值；
+   *  返回更新数与不存在的 ID 数 */
+  updateCards(items: { cardId: string; front?: string; back?: string }[]): { updated: number; missing: number } {
     const now = Date.now()
     let updated = 0
     let missing = 0
@@ -916,8 +917,8 @@ export class WorkspaceService {
         missing++
         continue
       }
-      card.front = it.front
-      card.back = it.back
+      if (it.front !== undefined) card.front = it.front
+      if (it.back !== undefined) card.back = it.back
       card.updatedAt = now
       updated++
       const list = touched.get(card.deckId) ?? []
@@ -962,11 +963,12 @@ export class WorkspaceService {
     return out
   }
 
-  updateCard(cardId: string, front: string, back: string): Card | null {
+  /** 单卡改内容：patch 未提供的字段保留原值（部分更新），提供的字段整体覆盖（含清空为空串） */
+  updateCard(cardId: string, patch: { front?: string; back?: string }): Card | null {
     const card = this.cards.get(cardId)
     if (!card) return null
-    card.front = front
-    card.back = back
+    if (patch.front !== undefined) card.front = patch.front
+    if (patch.back !== undefined) card.back = patch.back
     card.updatedAt = Date.now()
     this.appendCardDelta(card.deckId, [card])
     return card

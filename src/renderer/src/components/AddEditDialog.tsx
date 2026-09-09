@@ -277,7 +277,7 @@ export function CardForm(props: CardFormProps) {
         frontRef.current?.focus()
       }
     } else if (cardId) {
-      await window.miki.updateCard(cardId, front, back)
+      await window.miki.updateCard(cardId, { front, back })
       bumpContent() // 学习页当前卡就地重取内容（同卡保留提问/答案相位）
     }
     onSubmitted?.(mode)
