@@ -22,6 +22,7 @@ import {
   type Rating,
   type ReviewEvent,
   type StatsParams,
+  type StatsPayload,
   type StudyPayload,
   type UndoResult
 } from '../shared/types'
@@ -59,6 +60,9 @@ export class WorkspaceService {
   private todayAnswers = 0
   /** 历史累计净答题数：dailyAgg total 总和的运行镜像（启动算一次，answer ++ / undo --），免去每次 loadWorkspace 全遍历聚合 */
   private totalAnsweredCache = 0
+  /** 统计结果缓存：键 = `deckId|range|日期键|seq`。computeStats 全库扫 O(卡数)，统计页每开一次/切一次条件都重付；
+   * seq 单调递增且调度/删除/答题全走事件，同 seq 同日内结果确定，键不命中即失效。上限 8 组（全部牌组×两档之外还容纳单牌组切换） */
+  private statsCache = new Map<string, StatsPayload>()
   /** 受管文件路径规则（init 时按工作区根目录创建） */
   private paths!: WorkspacePaths
   /** 牌组调度索引（due 最小堆 + 增量计数器）：卡库/卡桶/软删牌组经 host 回调每次取当前值——
@@ -201,6 +205,7 @@ export class WorkspaceService {
     this.statsCheckpoint = 0
     this.todayAnswers = 0
     this.totalAnsweredCache = 0
+    this.statsCache = new Map() // 冷启动/热加载共用此链：聚合与 seq 全部重建，旧统计缓存一律作废
     const file = this.paths.statsFile()
     if (!fs.existsSync(file)) return
     try {
@@ -1030,13 +1035,20 @@ export class WorkspaceService {
   // ---------- 统计 ----------
 
   getStats(params: StatsParams) {
-    return computeStats({
+    const key = `${params.deckId ?? ''}|${params.range}|${localDateKey(Date.now())}|${this.seq}`
+    const hit = this.statsCache.get(key)
+    if (hit) return hit
+    const payload = computeStats({
       cards: this.cards.values(), // 迭代器直传：computeStats 内部边遍历边过滤，免去整库展开拷贝
       dailyAgg: this.dailyAgg,
       deckId: params.deckId,
       range: params.range,
       now: Date.now()
     })
+    // 上限 8 组：覆盖 全部/单牌组 × 年/全部 的常用组合，超出即全清（命中失效成本低且罕见）
+    if (this.statsCache.size >= 8) this.statsCache.clear()
+    this.statsCache.set(key, payload)
+    return payload
   }
 }
 
