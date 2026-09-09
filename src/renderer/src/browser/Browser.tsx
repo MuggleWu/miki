@@ -187,11 +187,26 @@ export function Browser() {
     if (h > 0 && Math.abs(h - rowH) > 0.5) setRowH(h)
   }, [rows, rowH])
 
-  // 离开时选中态持久化（跨启动恢复）：左树牌组 + 内容区主选中卡
+  // 离开时选中态持久化（跨启动恢复）：左树牌组 + 内容区主选中卡。
+  // 防抖落盘：连续选中（键盘/点击快扫）不逐次写 config.json，停 600ms 或卸载才写最终值
+  const saveSelTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => {
-    void window.miki.saveConfig({
-      browser: { selectedDeckId: browserDeckId, selectedCardId: selectedId }
-    })
+    if (saveSelTimer.current) clearTimeout(saveSelTimer.current)
+    saveSelTimer.current = setTimeout(() => {
+      saveSelTimer.current = null
+      void window.miki.saveConfig({
+        browser: { selectedDeckId: browserDeckId, selectedCardId: selectedId }
+      })
+    }, 600)
+    return () => {
+      if (saveSelTimer.current) {
+        clearTimeout(saveSelTimer.current)
+        saveSelTimer.current = null
+        void window.miki.saveConfig({
+          browser: { selectedDeckId: browserDeckId, selectedCardId: selectedId }
+        })
+      }
+    }
   }, [browserDeckId, selectedId])
 
   // 外部焦点定位（学习页 B 键）
