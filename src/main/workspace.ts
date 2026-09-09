@@ -532,6 +532,7 @@ export class WorkspaceService {
     if (deck) {
       deck.name = name
       this.saveDecks()
+      // 统计缓存不含牌组名，rename 无需失效（此注释声明该不变量）
     }
     return deck ?? null
   }
@@ -547,6 +548,7 @@ export class WorkspaceService {
       deck.deletedAt = Date.now()
       this.hiddenCache = null
       this.saveDecks()
+      // 统计缓存无需失效：computeStats 只按 card.deckId 过滤，软删牌组的卡仍计在全库统计（既有口径）
     }
   }
 
@@ -646,6 +648,8 @@ export class WorkspaceService {
     this.deckBucket(deckId).push(card)
     this.appendCardRows(deckId, [card])
     this.sched.reindexCard(card, null)
+    // 加卡不走事件（不推 seq），统计缓存键感知不到新卡：状态分布的新卡数会 stale
+    this.statsCache.clear()
     return card
   }
 
@@ -674,6 +678,7 @@ export class WorkspaceService {
     // 批量路径：reindexCard 的公共量（跨天检测/当日界/隐藏牌组/堆索引）hoist 出来，逐卡只做计数+入堆；
     // 新卡 deletedAt=null 且未暂停，走 addCardsNew 与逐卡调 reindexCard 完全同口径
     this.sched.addCardsNew(deckId, cards, now)
+    this.statsCache.clear() // 加卡不走事件（不推 seq），统计缓存键感知不到新卡
     return cards
   }
 
@@ -813,6 +818,7 @@ export class WorkspaceService {
       for (const t of touched) targetBucket.push(t.card)
       for (const [deckId, ids] of bySource) this.appendCardTombstones(deckId, ids)
       this.sched.reindexBatch(touched)
+      this.statsCache.clear() // 移卡不走事件（不推 seq），deckId 变化对统计缓存不可见
     }
     return moved
   }

@@ -378,6 +378,30 @@ describe('saveConfig', () => {
 })
 
 describe('计数与统计入口', () => {
+  it('统计缓存在非事件写路径（加卡/移卡/删牌组）后失效：新卡数与牌组归属即时可见', () => {
+    const w = newWs(tmpKept())
+    const d1 = w.addDeck('缓存甲').id
+    const d2 = w.addDeck('缓存乙').id
+    w.addCards(d1, [{ front: '缓存一', back: '' }])
+    // 预热缓存（全库 + d1 两把键），此后加卡不推 seq，必须靠显式失效
+    expect(w.getStats({ deckId: null, range: 'year' }).stateCounts.new).toBe(1)
+    expect(w.getStats({ deckId: d1, range: 'year' }).stateCounts.new).toBe(1)
+
+    w.addCards(d1, [{ front: '缓存二', back: '' }])
+    expect(w.getStats({ deckId: null, range: 'year' }).stateCounts.new).toBe(2)
+    expect(w.getStats({ deckId: d1, range: 'year' }).stateCounts.new).toBe(2)
+
+    w.addCard(d2, '缓存三', '')
+    expect(w.getStats({ deckId: null, range: 'year' }).stateCounts.new).toBe(3)
+    expect(w.getStats({ deckId: d2, range: 'year' }).stateCounts.new).toBe(1)
+
+    // 移卡跨牌组：d1 减、d2 增，缓存键（seq 不变）感知不到 deckId 变化
+    const moved = queryAll(w, '缓存二').rows[0]
+    w.moveCards([moved.id], d2)
+    expect(w.getStats({ deckId: d1, range: 'year' }).stateCounts.new).toBe(1)
+    expect(w.getStats({ deckId: d2, range: 'year' }).stateCounts.new).toBe(2)
+  })
+
   it('deckInfos 三列口径：新卡计未学习；answer 后 todayCount 增加', () => {
     const w = newWs(tmpKept())
     const d = w.addDeck('计数组').id
