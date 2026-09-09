@@ -692,6 +692,26 @@ describe('工作区热加载（外部变更，git pull / 他机写入）', () =>
 })
 
 describe('部分更新（updateCard/updateCards 未提供字段保留原值）', () => {
+  it('lowerCache 失效：改面后旧词不再命中、新词命中，改回恢复', () => {
+    const d = tmpKept()
+    const w = newWs(d)
+    const deck = w.addDeck('小写缓存').id
+    const card = w.addCard(deck, 'Old Front', '')
+    const q = (kw: string) => queryAll(w, kw).rows.length
+    // 预热缓存：旧词命中
+    expect(q('old')).toBe(1)
+    w.updateCard(card.id, { front: 'New Front' })
+    // 缓存若不失效：旧词仍命中（脏读）、新词搜不到
+    expect(q('old')).toBe(0)
+    expect(q('new')).toBe(1)
+    w.updateCard(card.id, { front: 'Old Front' })
+    expect(q('old')).toBe(1)
+    // 批量路径同样失效
+    w.updateCards([{ cardId: card.id, front: 'Batch Front' }])
+    expect(q('old')).toBe(0)
+    expect(q('batch')).toBe(1)
+  })
+
   it('单卡：只传 back，front 保留', () => {
     const d = tmpKept()
     const w = newWs(d)
