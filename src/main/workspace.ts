@@ -505,6 +505,11 @@ export class WorkspaceService {
 
   // ---------- 调度索引（due 最小堆 + 增量计数器） ----------
 
+  /** 软删牌组 id 集：这些牌组下的卡不算学习计数、不进学习队列（四处共用） */
+  private hiddenDeckIds(): Set<string> {
+    return new Set(this.decks.filter((d) => d.deletedAt).map((d) => d.id))
+  }
+
   private deckIdx(deckId: string): DeckIndex {
     let x = this.idx.get(deckId)
     if (!x) {
@@ -533,7 +538,7 @@ export class WorkspaceService {
   private rebuildIndexes(now: number): void {
     const eot = endOfLocalDay(now)
     this.idx = new Map()
-    const hidden = new Set(this.decks.filter((d) => d.deletedAt).map((d) => d.id))
+    const hidden = this.hiddenDeckIds()
     let tie = 0
     for (const c of this.cards.values()) {
       c.tie = tie++ // tie 全量分配（含排除卡），保持与 Map 插入序一致
@@ -590,7 +595,7 @@ export class WorkspaceService {
     const ix = this.deckIdx(deckId)
     if (ix.built) return ix
     ix.built = true
-    const hidden = new Set(this.decks.filter((d) => d.deletedAt).map((d) => d.id))
+    const hidden = this.hiddenDeckIds()
     for (const c of this.cards.values()) {
       if (c.deckId !== deckId || c.deletedAt || c.suspended || hidden.has(c.deckId)) continue
       if (c.tie == null) c.tie = ++this.orderCounter
@@ -624,7 +629,7 @@ export class WorkspaceService {
     this.ensureDay(now)
     const eot = endOfLocalDay(now)
     if (before) this.unclassCounts(before, eot, deckIdBefore ?? before.deckId)
-    const hidden = new Set(this.decks.filter((d) => d.deletedAt).map((d) => d.id))
+    const hidden = this.hiddenDeckIds()
     if (!card.deletedAt && !hidden.has(card.deckId)) {
       if (card.suspended) {
         this.deckIdx(card.deckId).counts.total++ // 暂停卡只进总数，学习/复习计数不含它
@@ -1111,7 +1116,7 @@ export class WorkspaceService {
 
   private deckCards(deckId: string | null): Card[] {
     const out: Card[] = []
-    const hidden = new Set(this.decks.filter((d) => d.deletedAt).map((d) => d.id))
+    const hidden = this.hiddenDeckIds()
     for (const c of this.cards.values()) {
       if (c.deletedAt || hidden.has(c.deckId)) continue
       if (deckId != null && c.deckId !== deckId) continue
