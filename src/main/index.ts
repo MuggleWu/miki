@@ -123,7 +123,8 @@ function setupCardDialogManager(): void {
         minWidth: 520,
         minHeight: 380,
         title,
-        parent: win ?? undefined,
+        // 不设 parent：父子关系会强制子窗口常驻父窗之上（点父窗也压不下去），与常规 z 序相悖；
+        // 主窗口关闭时已在其 closed 事件里显式关掉本窗，不依赖父子联动
         show: false, // ready-to-show 后再显示，避免白窗闪烁
         backgroundColor: ws.config.theme === 'dark' ? '#101014' : '#f5f6f8',
         webPreferences: {
@@ -136,6 +137,11 @@ function setupCardDialogManager(): void {
       // 弹窗窗口内的外部导航一律拒掉（同主窗口策略；正常流程不会发生）
       dw.webContents.on('will-navigate', (e) => e.preventDefault())
       dw.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+      // 点标题栏（尤其从别的窗口切回来时）webContents 可能不是 firstResponder，
+      // 键盘（Esc、输入）会整体失灵；窗口每次聚焦都把焦点补回渲染层
+      dw.on('focus', () => {
+        if (!dw.isDestroyed() && !dw.webContents.isFocused()) dw.webContents.focus()
+      })
       return dw as unknown as CardDialogWindowLike
     },
     getParentBounds: () => {

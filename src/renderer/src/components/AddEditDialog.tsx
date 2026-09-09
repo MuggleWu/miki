@@ -398,7 +398,7 @@ export function CardForm(props: CardFormProps) {
       e.preventDefault()
       void submit()
     }
-    if (e.key === 'Escape') onCancelled?.()
+    if (e.key === 'Escape' && !e.nativeEvent.isComposing) onCancelled?.() // 组合输入中的 Esc 只取消候选词，不关窗
   }
 
   return (

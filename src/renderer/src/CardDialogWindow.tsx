@@ -31,6 +31,16 @@ export function CardDialogWindow() {
     return () => clearTimeout(t)
   }, [dialog])
 
+  // Esc 关窗用 window 级监听兜底：焦点漂到表单外（点空白处、下拉收起后落到 body）时，
+  // React 的 onKeyDown 收不到键盘事件，Esc 就失灵；组合输入中的 Esc 是取消候选词，不关窗
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !e.isComposing && e.keyCode !== 229) void window.miki.closeCardDialog()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
   if (!dialog) return <div className="dialog-window-loading">加载中…</div>
   return (
     <div className="dialog-window">
