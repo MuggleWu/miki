@@ -369,14 +369,10 @@ export function startApiServer(ws: WorkspaceService, opts: { runtimeInfoPath?: s
           })
         }
       }
-      // HEAD 探活与正常路由走同一套鉴权/校验，只省响应体（GET 语义）
-      if (method === 'HEAD') {
-        const headMatch = matchRoute(routes, 'GET', url.pathname)
-        if (!headMatch) return send(404, { error: '未知接口' })
-        return send(200, { ok: true })
-      }
-
-      const match = matchRoute(routes, method, url.pathname)
+      // HEAD 镜像 GET 语义：同一路由匹配 + handler 执行（GET 全只读），状态码逐一对齐
+      // （未知卡 404、非法参数 400 都如实返回）；响应体由 Node http 对 HEAD 自动省略
+      const lookupMethod = method === 'HEAD' ? 'GET' : method
+      const match = matchRoute(routes, lookupMethod, url.pathname)
       if (!match) return send(404, { error: '未知接口' })
       const body = method === 'POST' || method === 'PATCH' ? await readBody(req) : undefined
       const data = await match.handler({ params: match.params, query: url.searchParams, body })

@@ -273,6 +273,15 @@ describe('http api 牌组与卡片 CRUD', () => {
     )
   })
 
+  it('HEAD 镜像 GET 语义：状态码逐一对齐（含 404/400），不再是存在即 200', async () => {
+    const d = ws.addDeck('HEAD 语义组').id
+    const c = ws.addCard(d, 'HEAD 卡', '')
+    expect((await authed('HEAD', `/api/cards/${c.id}`)).status).toBe(200)
+    expect((await authed('HEAD', '/api/cards/not-exist')).status).toBe(404)
+    expect((await authed('HEAD', '/api/cards?sort=nope:asc')).status).toBe(400)
+    expect((await authed('HEAD', '/api/no-such-route')).status).toBe(404)
+  })
+
   it('暂停后按状态过滤命中', async () => {
     await authed('POST', '/api/cards/suspend', { cardId: cardIds[1], suspended: true })
     const suspended = await authed('GET', '/api/cards?state=suspended')
