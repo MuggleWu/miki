@@ -246,16 +246,33 @@ server.tool(
   '批量暂停或解除暂停卡片',
   { cardIds, suspended: z.boolean() },
   async ({ cardIds, suspended }) => {
+    // 并发逐卡请求，单项失败不中断其余；结果按卡汇报，计数只算真实成功的
+    const settled = await Promise.allSettled(
+      cardIds.map((cardId) => call('POST', '/cards/suspend', { cardId, suspended }).then(() => cardId))
+    )
     const results = []
-    for (const cardId of cardIds) {
-      results.push(await call('POST', '/cards/suspend', { cardId, suspended }))
-    }
+    let ok = 0
+    settled.forEach((r, i) => {
+      const cardId = cardIds[i]
+      if (r.status === 'fulfilled') {
+        ok++
+        results.push({ cardId, ok: true })
+      } else {
+        results.push({ cardId, ok: false, error: r.reason instanceof Error ? r.reason.message : String(r.reason) })
+      }
+    })
     return {
       content: [
         {
           type: 'text',
           text: JSON.stringify(
-            { suspended: suspended ? cardIds.length : 0, unsuspended: suspended ? 0 : cardIds.length, cards: results },
+            {
+              succeeded: ok,
+              failed: cardIds.length - ok,
+              suspended: suspended ? ok : 0,
+              unsuspended: suspended ? 0 : ok,
+              cards: results
+            },
             null,
             2
           )
