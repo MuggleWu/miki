@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest'
 import { replayCard } from '../replay'
 import { deckCounts, pickNext, remainingCount } from '../queue'
-import { compareByKeys, filterCards, rotateSort, toRow } from '../query'
+import { compareByKeys, filterCards, rotateSort, sortByKeys, toRow } from '../query'
 import { bumpDailyAgg, computeStats, type DailyAgg } from '../stats'
 import { FsrScheduler, DEFAULT_FSRS_PARAMS } from '../fsrs'
 import type { Card, CardContent, QueryParams, ReviewEvent, SortKey } from '../../shared/types'
@@ -377,6 +377,41 @@ describe('query', () => {
     expect(sorted.map((c) => c.id)).toEqual(['b', 'a'])
     const keys2: SortKey[] = [{ col: 'reps', asc: false }]
     expect(compareByKeys(b, a, keys2, deckOf)).toBeLessThan(0)
+  })
+
+  it('sortByKeys 装饰排序与 compareByKeys 直接比较逐元素对拍；null 值/降序/中文序/id 决胜', () => {
+    const deckOf = () => '牌组甲'
+    // null（无 fsrs → due/interval/stability 为 null）、同键值（逼 id 决胜）、中文、降序混合
+    const mkDue = (id: string, due: number | null, front: string): Card => {
+      const base = mk(id, front, '', T0 + 3)
+      return due == null ? base : { ...base, fsrs: { state: FSRS_STATE.Review, step: null, stability: 3, difficulty: 5, due, lastReview: T0 } as Card['fsrs'] }
+    }
+    const list = [
+      mkDue('n1', null, '中文甲'),
+      mkDue('r1', T0 + 5, '中文乙'),
+      mkDue('r2', T0 + 5, '中文丙'), // due 同 → id 决胜
+      mkDue('r3', T0 + 2, 'apple'),
+      mkDue('r4', T0 + 9, 'Banana')
+    ]
+    const keySets: SortKey[][] = [
+      [{ col: 'due', asc: true }],
+      [{ col: 'due', asc: false }],
+      [{ col: 'front', asc: true }],
+      [{ col: 'front', asc: false }],
+      [{ col: 'due', asc: true }, { col: 'front', asc: false }],
+      [] // 空键：跳过排序返回原引用
+    ]
+    for (const keys of keySets) {
+      const decorated = sortByKeys([...list], keys, deckOf)
+      const direct = [...list].sort((x, y) => compareByKeys(x, y, keys, deckOf))
+      expect(decorated.map((c) => c.id)).toEqual(direct.map((c) => c.id))
+    }
+    // null 恒排最前（升降序皆然），同 due 按 id 决胜，中文按拼音（乙 yǐ < 丙 bǐng？—— localeCompare 定序，只锁确定性）
+    expect(sortByKeys([...list], [{ col: 'due', asc: true }], deckOf).map((c) => c.id)).toEqual(['n1', 'r3', 'r1', 'r2', 'r4'])
+    expect(sortByKeys([...list], [{ col: 'due', asc: false }], deckOf).map((c) => c.id)).toEqual(['r4', 'r1', 'r2', 'r3', 'n1'])
+    // 空键返回原数组引用
+    const original = [list[1], list[0]]
+    expect(sortByKeys(original, [], deckOf)).toBe(original)
   })
 
   it('toRow 展示状态', () => {
