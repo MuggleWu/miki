@@ -2,10 +2,10 @@
 import { describe, expect, it } from 'vitest'
 import { replayCard } from '../replay'
 import { deckCounts, pickNext, remainingCount } from '../queue'
-import { compareByKeys, filterByKeywords, rotateSort, toRow } from '../query'
+import { compareByKeys, filterCards, rotateSort, toRow } from '../query'
 import { bumpDailyAgg, computeStats, type DailyAgg } from '../stats'
 import { FsrScheduler, DEFAULT_FSRS_PARAMS } from '../fsrs'
-import type { Card, CardContent, ReviewEvent, SortKey } from '../../shared/types'
+import type { Card, CardContent, QueryParams, ReviewEvent, SortKey } from '../../shared/types'
 import { FSRS_STATE } from '../../shared/types'
 
 const DAY = 86_400_000
@@ -305,9 +305,41 @@ describe('query', () => {
   ]
 
   it('多关键词 AND、大小写不敏感，正反面都搜', () => {
-    expect(filterByKeywords(cards, ['增值税']).map((c) => c.id)).toEqual(['c1', 'c2'])
-    expect(filterByKeywords(cards, ['增值', '行测']).map((c) => c.id)).toEqual(['c2'])
-    expect(filterByKeywords(cards, ['ABC']).length).toBe(0)
+    // filterCards 关键词路径：小写化在函数内做，lowerOf 只需原样返回文本
+    const ids = (params: Partial<QueryParams>) =>
+      filterCards(cards, { deckId: null, keywords: [], sort: [], ...params }, (c) => [c.front.toLowerCase(), c.back.toLowerCase()]).map((c) => c.id)
+    expect(ids({ keywords: ['增值税'] })).toEqual(['c1', 'c2'])
+    expect(ids({ keywords: ['增值', '行测'] })).toEqual(['c2'])
+    expect(ids({ keywords: ['ABC'] })).toEqual([])
+    expect(ids({ keywords: ['增值税', 'FRONT'] })).toEqual(['c2']) // 一词中正面、另一词反面，仍 AND 命中
+  })
+
+  it('B3 单趟过滤：无条件快路径 / 状态合并 / due 窗口排除无调度卡 / suspended 语义', () => {
+    const lowerOf = (c: Card) => [c.front.toLowerCase(), c.back.toLowerCase()] as [string, string]
+    const q = (params: Partial<QueryParams>) =>
+      filterCards(cards, { deckId: null, keywords: [], sort: [], ...params }, lowerOf)
+
+    // 无条件：返回原数组引用（快路径）
+    expect(q({})).toBe(cards)
+
+    // 状态：new（无 fsrs）、suspended、learning 的合并判定
+    const learn = { ...mk('cl', '学习卡', '', T0), fsrs: { state: FSRS_STATE.Learning, step: 0, stability: 1, difficulty: 5, due: T0 + 600_000, lastReview: T0 } as Card['fsrs'] }
+    const withStates = [...cards, learn, { ...mk('cs', '暂停卡', '', T0), suspended: true }]
+    const qAll = (params: Partial<QueryParams>) => filterCards(withStates, { deckId: null, keywords: [], sort: [], ...params }, lowerOf)
+    expect(qAll({ state: 'new' }).map((c) => c.id)).toEqual(['c1', 'c2', 'c3'])
+    expect(qAll({ state: 'learning' }).map((c) => c.id)).toEqual(['cl'])
+    expect(qAll({ state: 'suspended' }).map((c) => c.id)).toEqual(['cs'])
+    // 非 suspended 状态排除暂停卡
+    expect(qAll({ state: 'review' }).map((c) => c.id)).toEqual([])
+
+    // due 窗口：无调度卡一律排除；有调度卡按 due 落窗判定
+    expect(qAll({ dueAfter: T0 + 1, dueBefore: T0 + 2 }).map((c) => c.id)).toEqual([])
+    const learnDue = { ...mk('cd', '到期学习卡', '', T0), fsrs: { state: FSRS_STATE.Learning, step: 0, stability: 1, difficulty: 5, due: T0 + 600_000, lastReview: T0 } as Card['fsrs'] }
+    expect(filterCards([learnDue], { deckId: null, keywords: [], sort: [], dueAfter: T0, dueBefore: T0 + 86_400_000 }, lowerOf).map((c) => c.id)).toEqual(['cd'])
+    expect(filterCards([learnDue], { deckId: null, keywords: [], sort: [], dueAfter: T0 + 86_400_000 }, lowerOf)).toEqual([])
+
+    // 组合：状态 + 关键词单趟同时生效
+    expect(qAll({ state: 'new', keywords: ['税法'] }).map((c) => c.id)).toEqual(['c1'])
   })
 
   it('B4 rotate：点击列提为首位，再点翻转', () => {

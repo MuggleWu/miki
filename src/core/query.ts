@@ -36,17 +36,6 @@ export function toRow(card: Card, deckName: string): CardRow {
   }
 }
 
-/** 多关键词 AND、大小写不敏感，作用于正面/反面 */
-export function filterByKeywords(cards: Card[], keywords: string[]): Card[] {
-  const kws = keywords.map((k) => k.toLowerCase()).filter((k) => k.length > 0)
-  if (kws.length === 0) return cards
-  return cards.filter((c) => {
-    const front = c.front.toLowerCase()
-    const back = c.back.toLowerCase()
-    return kws.every((k) => front.includes(k) || back.includes(k))
-  })
-}
-
 /** 关键词命中判定：每个关键词至少命中正面或反面之一（kws 须已小写非空） */
 export function matchKeywords(front: string, back: string, kws: string[]): boolean {
   for (const k of kws) {
