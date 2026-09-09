@@ -1200,6 +1200,28 @@ export class WorkspaceService {
       bumpDailyAgg(this.dailyAgg, target.deckId, target.t, target.rating, -1)
       if (target.t >= this.todayStartMs()) this.todayAnswers--
     }
+    // leech 还原：该 answer 触发的自动暂停事件紧跟其后（同一批次 seq+1），随撤销一并解除；
+    // 之后再无 suspend 事件（最后一条就是它）才认领——手动暂停/解除过的不归这次撤销管。
+    // 补一条 suspend(false) 事件保证重放一致（重放不含内存恢复逻辑，只认事件流）。
+    if (target.action === 'answer' && target.rating === 1 && card.suspended) {
+      const auto = this.events.find(
+        (e) => e.seq === target.seq + 1 && e.cardId === card.id && e.action === 'suspend' && e.suspended === true
+      )
+      let lastSuspend: ReviewEvent | undefined
+      for (let i = this.events.length - 1; i >= 0; i--) {
+        const e = this.events[i]
+        if (e.cardId === card.id && e.action === 'suspend') {
+          lastSuspend = e
+          break
+        }
+      }
+      if (auto && lastSuspend === auto) {
+        this.appendEvents([
+          { seq: ++this.seq, t: now, action: 'suspend', cardId: card.id, deckId: card.deckId, suspended: false }
+        ])
+        card.suspended = false
+      }
+    }
     if (target.action === 'delete') card.deletedAt = null
     this.reindexCard(card, before)
     return {

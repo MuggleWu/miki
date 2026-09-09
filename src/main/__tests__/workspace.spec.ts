@@ -135,6 +135,60 @@ describe('leech 自动暂停', () => {
     expect(w.getCard(card.id)!.lapses).toBe(5)
     expect(w.getCard(card.id)!.suspended).toBe(false)
   })
+
+  it('undo 还原 leech 自动暂停：撤销触发暂停的 Again 解除暂停并回到队列；重启重放一致', () => {
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(new Date('2026-10-06T10:00:00'))
+      const d0 = tmpKept()
+      const w = newWs(d0)
+      const d = w.addDeck('leech 撤销组').id
+      w.saveConfig({ leechThreshold: 2 })
+      const card = w.addCard(d, 'leech 撤销卡', '')
+      w.answer(card.id, 3)
+      w.answer(card.id, 1)
+      w.answer(card.id, 1) // lapses=2 达阈值 → 自动暂停
+      expect(w.getCard(card.id)!.suspended).toBe(true)
+
+      const r = w.undo() // 撤销最后一次 Again → 该次触发的暂停一并解除
+      expect(r.restoredCardId).toBe(card.id)
+      const c = w.getCard(card.id)!
+      expect(c.suspended).toBe(false)
+      expect(c.lapses).toBe(1)
+      // 回到队列：卡回到倒数第二次 Again 的状态（due +1 分钟），到点后重新可取
+      expect(w.deckInfos().find((x) => x.id === d)!.counts.due).toBe(0)
+      vi.setSystemTime(new Date('2026-10-06T10:11:00'))
+      expect(w.getStudy(d).card?.id).toBe(card.id)
+
+      // 重放一致：重启后仍应保持未暂停
+      const w2 = newWs(d0)
+      expect(w2.getCard(card.id)).toMatchObject({ suspended: false, lapses: 1 })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('undo 不还原与该 answer 无关的暂停：手动暂停后再答题，撤销不动暂停态', () => {
+    const w = newWs(tmpKept())
+    const d = w.addDeck('手动暂停组').id
+    w.saveConfig({ leechThreshold: 2 })
+    const card = w.addCard(d, '手动暂停卡', '')
+    w.setCardSuspended(card.id, true) // 手动暂停（事件在 answer 之前）
+    w.answer(card.id, 1)
+    w.undo()
+    expect(w.getCard(card.id)!.suspended).toBe(true) // 暂停态保留
+
+    // 手动暂停在 leech 自动暂停之后：最后 suspend 不是自动事件，同样不还原
+    const w3 = newWs(tmpKept())
+    const d3 = w.addDeck('后置手动组').id
+    w3.saveConfig({ leechThreshold: 1 })
+    const c3 = w3.addCard(d3, '后置手动卡', '')
+    w3.answer(c3.id, 1) // lapses=1 → 自动暂停
+    w3.setCardSuspended(c3.id, false) // 手动解除（最后 suspend 事件）
+    w3.setCardSuspended(c3.id, true)
+    w3.undo()
+    expect(w3.getCard(c3.id)!.suspended).toBe(true)
+  })
 })
 
 describe('重放一致性（重启恢复）', () => {
