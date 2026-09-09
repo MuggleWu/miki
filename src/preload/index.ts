@@ -53,7 +53,14 @@ const api: MikiApi = {
     const h = (_e: Electron.IpcRendererEvent, visible: boolean) => cb(visible)
     ipcRenderer.on(IPC.cardDialogVisibility, h)
     return () => ipcRenderer.removeListener(IPC.cardDialogVisibility, h)
-  }
+  },
+  workspaceStatus: () => ipcRenderer.invoke(IPC.workspaceStatus),
+  workspaceChooseFolder: () => ipcRenderer.invoke(IPC.workspaceChooseFolder),
+  workspaceConfirm: (p) => ipcRenderer.invoke(IPC.workspaceConfirm, p),
+  workspaceAdd: (p) => ipcRenderer.invoke(IPC.workspaceAdd, p),
+  workspaceSwitch: (p) => ipcRenderer.invoke(IPC.workspaceSwitch, p),
+  workspaceRemove: (p) => ipcRenderer.invoke(IPC.workspaceRemove, p),
+  workspaceReveal: (p) => ipcRenderer.invoke(IPC.workspaceReveal, p)
 }
 
 contextBridge.exposeInMainWorld('miki', api)

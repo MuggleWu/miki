@@ -1,6 +1,8 @@
-// 设置页：刷卡字体（正面/反面）与 leech 阈值；改动即存 config.json
+// 设置页：工作区（多用户档案）、刷卡字体（正面/反面）与 leech 阈值；改动即存 config.json
+import { useEffect, useState } from 'react'
 import { useApp } from '../store'
 import type { MikiConfig } from '../../../shared/types'
+import type { WorkspaceStatus } from '../../../shared/workspace'
 
 const FONT_OPTIONS: { label: string; value: string }[] = [
   { label: '系统默认', value: '' },
@@ -12,6 +14,70 @@ const FONT_OPTIONS: { label: string; value: string }[] = [
 ]
 
 const SAMPLE = 'The only way out is through.\n示例：FSRS-6 调度，稳定度 S=3.2，难度 D=5.5。'
+
+/** 工作区（多用户档案）卡片：当前档案 + 已记住列表的切换/增删；切换写指针后应用自动重启 */
+function WorkspaceCard() {
+  const [st, setSt] = useState<WorkspaceStatus | null>(null)
+  const [error, setError] = useState('')
+  const refresh = () => void window.miki.workspaceStatus().then(setSt)
+  useEffect(refresh, [])
+
+  const run = async (fn: () => Promise<unknown>) => {
+    setError('')
+    await fn()
+    refresh()
+  }
+
+  if (!st) return null
+  return (
+    <section className="settings-card">
+      <h3>工作区（用户档案）</h3>
+      <p className="settings-hint">
+        每个工作区文件夹 = 一份完整档案（牌组、卡片、学习记录与配置各自独立）。
+        切换后应用自动重启载入对应档案；移除只从列表去掉，不删除文件夹内的任何数据。
+      </p>
+      <ul className="ws-list">
+        {st.workspaces.map((w) => {
+          const current = w.path === st.current
+          return (
+            <li key={w.path} className={current ? 'ws-current' : ''}>
+              <span className="ws-list-name" title={w.path}>
+                {w.name}
+                {current && <em>当前</em>}
+              </span>
+              <span className="ws-list-actions">
+                {!current && (
+                  <button onClick={() => void run(() => window.miki.workspaceSwitch(w.path))}>切换</button>
+                )}
+                {current && <button onClick={() => void window.miki.workspaceReveal(w.path)}>打开文件夹</button>}
+                {!current && (
+                  <button className="danger" onClick={() => void run(() => window.miki.workspaceRemove(w.path))}>
+                    移除
+                  </button>
+                )}
+              </span>
+            </li>
+          )
+        })}
+      </ul>
+      {error && <p className="onboarding-error">{error}</p>}
+      <div className="settings-row">
+        <button
+          onClick={() =>
+            void run(async () => {
+              const p = await window.miki.workspaceChooseFolder()
+              if (!p) return
+              const r = await window.miki.workspaceAdd(p)
+              if (!r.ok) setError(r.error ?? '无法使用该文件夹')
+            })
+          }
+        >
+          添加工作区…
+        </button>
+      </div>
+    </section>
+  )
+}
 
 export function Settings() {
   const config = useApp((s) => s.config)
@@ -28,6 +94,7 @@ export function Settings() {
 
   return (
     <div className="settings">
+      <WorkspaceCard />
       <section className="settings-card">
         <h3>刷卡字体</h3>
         <p className="settings-hint">

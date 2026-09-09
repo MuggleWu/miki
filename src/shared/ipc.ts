@@ -12,6 +12,7 @@ import type {
   StudyPayload,
   UndoResult
 } from './types'
+import type { WorkspaceStatus } from './workspace'
 
 /** 深合并的配置补丁：browser 允许只传部分字段（如选中态） */
 export type MikiConfigPatch = Partial<Omit<MikiConfig, 'browser'>> & {
@@ -66,6 +67,20 @@ export interface MikiApi {
   onCardsChanged(cb: (p: { kind: 'add' | 'edit' }) => void): () => void
   /** 订阅弹窗开关状态（主窗口据此同步 store.dialog：快捷键屏蔽 + Esc 关弹窗） */
   onCardDialogVisibility(cb: (visible: boolean) => void): () => void
+  /** 工作区状态：是否需要首次引导 + 当前路径 + 已记住的多工作区列表 */
+  workspaceStatus(): Promise<WorkspaceStatus>
+  /** 打开系统文件夹选择对话框（openDirectory + createDirectory），返回所选路径或 null */
+  workspaceChooseFolder(): Promise<string | null>
+  /** 首次引导确认：创建/复用该文件夹并设为当前工作区（主进程随后完成初始化） */
+  workspaceConfirm(path: string): Promise<{ ok: boolean; error?: string; status: WorkspaceStatus }>
+  /** 登记工作区：文件夹不存在则创建；只进列表不切换 */
+  workspaceAdd(path: string): Promise<{ ok: boolean; error?: string; status: WorkspaceStatus }>
+  /** 切换工作区：写指针后应用自动重启载入新档案 */
+  workspaceSwitch(path: string): Promise<{ ok: boolean; error?: string }>
+  /** 从列表移除工作区（当前生效的不可移除；不删除文件夹内任何数据） */
+  workspaceRemove(path: string): Promise<WorkspaceStatus>
+  /** 在系统文件管理器中显示该工作区文件夹 */
+  workspaceReveal(path: string): Promise<void>
 }
 
 export const IPC = {
@@ -103,5 +118,13 @@ export const IPC = {
   /** main → renderer：弹窗载荷下发（弹窗窗口）/开关状态（主窗口）/卡片数据变更（主窗口） */
   cardDialogPayload: 'miki:card-dialog-payload',
   cardDialogVisibility: 'miki:card-dialog-visibility',
-  cardsChanged: 'miki:cards-changed'
+  cardsChanged: 'miki:cards-changed',
+  /** renderer → main：多工作区（多用户档案）管理 */
+  workspaceStatus: 'miki:workspace-status',
+  workspaceChooseFolder: 'miki:workspace-choose-folder',
+  workspaceConfirm: 'miki:workspace-confirm',
+  workspaceAdd: 'miki:workspace-add',
+  workspaceSwitch: 'miki:workspace-switch',
+  workspaceRemove: 'miki:workspace-remove',
+  workspaceReveal: 'miki:workspace-reveal'
 } as const

@@ -4,7 +4,7 @@ English | [简体中文](../zh/data-format.md)
 
 All of Miki's data lives in a single plain folder (the "workspace"), fully separate from the code and the app, manageable with git, cloud sync, or any other tool. This document describes each file's format and invariants, for backup, migration, or third-party readers.
 
-Workspace path resolution order: the `MIKI_WORKSPACE` env var → the path recorded in `userData/workspace.json` → default `~/miki-base`.
+Workspace path resolution order: the `MIKI_WORKSPACE` env var → `current` in the `userData/workspace.json` pointer file → first-launch onboarding (pick any folder; suggested default `~/miki-base`). The pointer file also holds the multi-workspace registry (`current` + `workspaces[]`) for one-folder-per-user profiles; the legacy `{workspacePath}` format is upgraded automatically.
 
 ```
 <workspace>/

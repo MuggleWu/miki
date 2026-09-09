@@ -1,16 +1,22 @@
-import { app, BrowserWindow, ipcMain, nativeTheme, screen, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme, screen, shell } from 'electron'
 import * as path from 'node:path'
 import * as fs from 'node:fs'
 import { WorkspaceService } from './workspace'
 import { startApiServer } from './api-server'
 import { CardDialogManager, type CardDialogWindowLike } from './card-dialog'
+import { WorkspaceManager } from './workspace-manager'
 import { IPC } from '../shared/ipc'
 import { withCardDialogHash } from '../shared/card-dialog'
+import { defaultWorkspaceSuggestion } from '../shared/workspace'
 import type { MikiConfig, QueryParams, Rating, SortKey, StatsParams, WindowState } from '../shared/types'
 
 let ws: WorkspaceService
 let win: BrowserWindow | null = null
 let dialogManager: CardDialogManager | null = null
+let workspaceManager: WorkspaceManager
+/** 工作区是否已完成初始化（首次启动引导确认前为 false，期间渲染层显示引导页） */
+let workspaceReady = false
+let apiServer: ReturnType<typeof startApiServer> | null = null
 
 // 原生头行（系统标题栏）颜色跟随应用内主题：themeSource 影响原生控件外观，
 // 与渲染层 data-theme 同源（config.theme），避免深色内容配浅色头行
@@ -18,17 +24,31 @@ function applyNativeTheme(theme: 'light' | 'dark'): void {
   nativeTheme.themeSource = theme
 }
 
-function resolveWorkspace(): string {
-  // 1) 环境变量（开发/多工作区切换） 2) userData 配置 3) 默认 ~/miki-base
-  if (process.env.MIKI_WORKSPACE) return process.env.MIKI_WORKSPACE
-  const cfgFile = path.join(app.getPath('userData'), 'workspace.json')
-  try {
-    const stored = JSON.parse(fs.readFileSync(cfgFile, 'utf-8')) as { workspacePath?: string }
-    if (stored.workspacePath) return stored.workspacePath
-  } catch {
-    // 无配置
-  }
-  return path.join(app.getPath('home'), 'miki-base')
+/** userData 指针文件：当前用哪个工作区 + 已记住的多工作区列表（多用户档案） */
+function pointerFile(): string {
+  return path.join(app.getPath('userData'), 'workspace.json')
+}
+
+/** 指针文件原子写（先写 .tmp 再改名，防半写文件） */
+function atomicWriteJson(file: string, data: string): void {
+  const tmp = `${file}.tmp`
+  fs.writeFileSync(tmp, data, 'utf-8')
+  fs.renameSync(tmp, file)
+}
+
+/** 工作区确定后初始化服务并启动热加载与 HTTP API（首次引导路径在确认后才调用） */
+function startServices(root: string): void {
+  ws.init(root)
+  workspaceReady = true
+
+  // 工作区热加载：git pull / 他机写入后主进程自动重载内存态，通知渲染进程刷新当前视图
+  ws.onExternalChange(() => {
+    if (win && !win.isDestroyed()) win.webContents.send(IPC.workspaceChanged)
+    dialogManager?.relayWorkspaceChanged() // 弹窗窗口的牌组下拉同步刷新
+  })
+  ws.startWatching()
+
+  apiServer = startApiServer(ws)
 }
 
 /** 恢复上次窗口状态：把保存的普通态 bounds 钳回可见显示器的工作区（外接屏拔掉/分辨率变化时不出屏） */
@@ -195,8 +215,72 @@ app.whenReady().then(() => {
   }
 
   ws = new WorkspaceService()
-  ws.init(resolveWorkspace())
 
+  // 多工作区（多用户档案）管理：指针文件 = userData/workspace.json，旧 {workspacePath} 格式自动升级
+  workspaceManager = new WorkspaceManager({
+    readPointer: () => {
+      try {
+        return JSON.parse(fs.readFileSync(pointerFile(), 'utf-8'))
+      } catch {
+        return null
+      }
+    },
+    writePointer: (reg) => atomicWriteJson(pointerFile(), JSON.stringify(reg, null, 2)),
+    isDirectory: (p) => {
+      try {
+        return fs.statSync(p).isDirectory()
+      } catch {
+        return false
+      }
+    },
+    makeDirectory: (p) => fs.mkdirSync(p, { recursive: true }),
+    defaultSuggestion: () => defaultWorkspaceSuggestion(app.getPath('home'), path.sep),
+    now: () => Date.now()
+  })
+
+  ipcMain.handle(IPC.workspaceStatus, () => workspaceManager.getStatus(!workspaceReady))
+  ipcMain.handle(IPC.workspaceChooseFolder, async () => {
+    const r = await dialog.showOpenDialog({ properties: ['openDirectory', 'createDirectory'] })
+    return r.canceled || r.filePaths.length === 0 ? null : (r.filePaths[0] ?? null)
+  })
+  ipcMain.handle(IPC.workspaceConfirm, (_e, p: unknown) => {
+    if (workspaceReady) return { ok: true, status: workspaceManager.getStatus(false) }
+    if (typeof p !== 'string' || p === '') {
+      return { ok: false, error: '路径为空', status: workspaceManager.getStatus(true) }
+    }
+    const r = workspaceManager.confirmOnboarding(p)
+    if (r.ok) startServices(p)
+    return { ...r, status: workspaceManager.getStatus(!workspaceReady) }
+  })
+  ipcMain.handle(IPC.workspaceAdd, (_e, p: unknown) => {
+    const r = typeof p === 'string' ? workspaceManager.add(p) : { ok: false, error: '非法路径' }
+    return { ...r, status: workspaceManager.getStatus(!workspaceReady) }
+  })
+  ipcMain.handle(IPC.workspaceSwitch, (_e, p: unknown) => {
+    const r = typeof p === 'string' ? workspaceManager.switchTo(p) : { ok: false, error: '非法路径' }
+    if (r.ok) {
+      // 先回包再重启：渲染层有机会显示「正在重启」提示
+      setTimeout(() => {
+        app.relaunch()
+        app.exit(0)
+      }, 200)
+    }
+    return r
+  })
+  ipcMain.handle(IPC.workspaceRemove, (_e, p: unknown) => {
+    if (typeof p === 'string') void workspaceManager.remove(p)
+    return workspaceManager.getStatus(!workspaceReady)
+  })
+  ipcMain.handle(IPC.workspaceReveal, (_e, p: unknown) => {
+    if (typeof p === 'string') shell.showItemInFolder(p)
+  })
+
+  // 启动解析：MIKI_WORKSPACE 环境变量 > 指针文件 > 首次启动引导（无有效工作区时不初始化服务）
+  const initial = workspaceManager.resolveInitial(process.env.MIKI_WORKSPACE ?? null)
+  if (initial) startServices(initial)
+
+  // 以下数据面 handler 都直接读写 ws：引导完成前渲染层只走 workspace 通道（引导页无其他入口），
+  // 若在 ws.init 前被调用会因 root/config 未定抛错拒绝，不会产生半初始化写损坏
   ipcMain.handle(IPC.loadWorkspace, () => ({
     decks: ws.deckInfos(),
     todayCount: ws.todayCount(),
@@ -253,15 +337,6 @@ app.whenReady().then(() => {
   createWindow()
   setupCardDialogManager()
 
-  // 工作区热加载：git pull / 他机写入后主进程自动重载内存态，通知渲染进程刷新当前视图
-  ws.onExternalChange(() => {
-    if (win && !win.isDestroyed()) win.webContents.send(IPC.workspaceChanged)
-    dialogManager?.relayWorkspaceChanged() // 弹窗窗口的牌组下拉同步刷新
-  })
-  ws.startWatching()
-
-  // 本机 HTTP API（面向人与 AI 的程序化接口），安全边界见 api-server.ts 与 docs/en/api.md（中文版 docs/zh/api.md）
-  const apiServer = startApiServer(ws)
   app.on('will-quit', () => apiServer?.close())
 
   app.on('activate', () => {

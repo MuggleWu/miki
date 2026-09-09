@@ -40,6 +40,7 @@ Launching: the packaged app lives at `/Applications/Miki.app` (type `miki` in Ra
 
 ## Settings
 
+- Workspace (user profile): each workspace folder is one complete profile (decks, cards, review history and config are all independent). Switch or remove entries from the list; "Add workspace…" picks any folder (created if missing); switching restarts the app. The current workspace name shows next to the logo in the top bar — click it to open this page. On first launch, before any workspace exists, an onboarding screen asks you to pick a folder.
 - Study fonts: typeface + size with a live sample; defaults follow the system font at 16px.
 - Leech threshold: how many cumulative Again ratings trigger auto-suspension; `0` disables it.
 - Window size/position/maximized state are remembered across launches: adjustments are saved into the workspace `config.json` automatically, and the next launch restores the most recent size (clamped back into a visible screen if, say, an external display was unplugged).

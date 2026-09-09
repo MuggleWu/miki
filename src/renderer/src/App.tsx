@@ -1,14 +1,27 @@
 // App：tab 路由 + 全局快捷键（A/B/T/S/D，NF3 输入互斥）+ 主题（浅色默认）
-// 卡片添加/编辑改为独立弹窗子窗口（main 进程管理）：这里只负责请求开/关 + 同步开关状态 + 数据刷新
-import { useEffect } from 'react'
+// 卡片添加/编辑为独立弹窗子窗口（main 进程管理）：这里只负责请求开/关 + 同步开关状态 + 数据刷新
+import { useEffect, useState } from 'react'
 import { isTypingTarget, useApp } from './store'
+import { workspaceName } from '../../shared/workspace'
+import { WorkspaceOnboarding } from './WorkspaceOnboarding'
 import { Home } from './home/Home'
 import { Study } from './study/Study'
 import { Browser } from './browser/Browser'
 import { Stats } from './stats/Stats'
 import { Settings } from './settings/Settings'
 
+/** 首次启动引导：无有效工作区指针时引导页接管主窗口，确认后进入主界面 */
 export default function App() {
+  const [needsOnboarding, setNeedsOnboarding] = useState<boolean | null>(null)
+  useEffect(() => {
+    void window.miki.workspaceStatus().then((st) => setNeedsOnboarding(st.needsOnboarding))
+  }, [])
+  if (needsOnboarding === null) return null
+  if (needsOnboarding) return <WorkspaceOnboarding onDone={() => setNeedsOnboarding(false)} />
+  return <MainApp />
+}
+
+function MainApp() {
   const tab = useApp((s) => s.tab)
   const decks = useApp((s) => s.decks)
   const config = useApp((s) => s.config)
@@ -119,6 +132,15 @@ export default function App() {
     <div className="app">
       <div className="topbar">
         <span className="logo">miki</span>
+        {config && (
+          <button
+            className="ws-name"
+            title={`${config.workspacePath}（点击进设置页管理多工作区）`}
+            onClick={() => setTab('settings')}
+          >
+            {workspaceName(config.workspacePath)}
+          </button>
+        )}
         <button className={`tab ${tab === 'home' ? 'active' : ''}`} onClick={() => setTab('home')}>
           牌组
         </button>

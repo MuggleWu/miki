@@ -4,7 +4,7 @@
 
 Miki 的全部数据存放在一个纯文件夹（下称「工作区」）里，与代码和应用完全分离，可以用 git、网盘或任意同步工具管理。本文描述每个文件的格式与不变量，供备份、迁移或第三方程序读取。
 
-工作区路径的解析顺序：环境变量 `MIKI_WORKSPACE` → `userData/workspace.json` 里记录的路径 → 默认 `~/miki-base`。
+工作区路径的解析顺序：环境变量 `MIKI_WORKSPACE` → `userData/workspace.json` 指针文件的 `current` → 首次启动引导（用户任选文件夹，默认建议 `~/miki-base`）。指针文件同时记录多工作区列表（`current` + `workspaces[]`），支持一人一个文件夹的多用户档案，旧版 `{workspacePath}` 格式自动升级。
 
 ```
 <workspace>/

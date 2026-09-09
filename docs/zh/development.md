@@ -21,7 +21,7 @@ npm test           # 全部测试（性能基准默认跳过）
 
 ```
 src/
-├── shared/          # 主/渲染进程共享类型与默认值（types.ts、ipc.ts）
+├── shared/          # 主/渲染进程共享类型与默认值（types.ts、ipc.ts、workspace.ts、card-dialog.ts）
 ├── core/            # 纯函数域逻辑，不碰 Electron / 文件系统
 │   ├── fsrs.ts      #   FSRS-6 调度器（py-fsrs v6.3.2 逐行移植）
 │   ├── replay.ts    #   事件重放（review-log → 卡片状态）
@@ -29,6 +29,7 @@ src/
 │   ├── query.ts     #   卡片库过滤 / 排序 / 视图行
 │   └── stats.ts     #   统计五板块
 ├── main/            # Electron 主进程
+│   ├── workspace-manager.ts #   多工作区（多用户档案）注册表：指针文件读写、引导确认、切换
 │   ├── workspace.ts #   WorkspaceService：唯一写入口（内存态 + 同步落盘）
 │   ├── api-server.ts#   本机 HTTP API（127.0.0.1，token 鉴权）
 │   └── index.ts     #   启动、IPC 注册、窗口
@@ -90,7 +91,7 @@ MIKI_BENCH=1 NODE_OPTIONS=--expose-gc npx vitest run src/main/__tests__/minevent
 
 - `npm run pack:mac`：electron-vite build + electron-builder（`--dir` 目标，配置在 package.json 的 `build` 字段），产物 `release/mac-arm64/Miki.app`（arm64；appId `com.mugglewu.miki`，图标 `resources/icon.png` 1024²，本地构建不做签名 `identity: null`）。
 - 安装：`cp -R release/mac-arm64/Miki.app /Applications/` 后 `open /Applications/Miki.app`；新装应用按名字启动（`open -a Miki` / Raycast 搜 "miki"）需等 LaunchServices 索引，或用 `lsregister -f /Applications/Miki.app` 立即注册。
-- 工作区解析：`MIKI_WORKSPACE` 环境变量 → `~/Library/Application Support/Miki/workspace.json`（`{"workspacePath": ...}`）→ 默认 `~/miki-base`。打包版从 Raycast/Dock 启动无环境变量，靠 workspace.json 指到数据工作区。
+- 工作区解析（`main/workspace-manager.ts`）：`MIKI_WORKSPACE` 环境变量 → 指针文件 `~/Library/Application Support/Miki/workspace.json` 的 `current`（含多工作区注册表 `workspaces[]`，旧 `{workspacePath}` 格式自动升级）→ 都没有时进入首次启动引导（渲染层 `WorkspaceOnboarding`），用户任选文件夹后主进程才 `ws.init` 并启动热加载与 HTTP API。
 - 单实例锁：`app.requestSingleInstanceLock()`，第二个实例静默退出并唤起已有窗口（防 Raycast 与 dev 双开并发写同一工作区）。
 - 工作区热加载（`WorkspaceService.startWatching()`，默认 2s 轮询）：受管文件 = `decks.json` / `config.json` / `stats.json` / `cards/*.ndjson`（含 delta）/ `review-log/*.ndjson`，按 `mtime+size` 指纹与上次快照比对；发现外部变化（git pull、他机写入）后主进程全量重建内存态（与启动加载链同语义），再经 `miki:workspace-changed` 事件通知渲染进程刷新当前视图。要点：
   - **自写豁免**：本机所有写路径（原子写/追加）完成后立即更新快照，不把自己的写入当外部变更——若漏挂一处，也只多一次全量重载，不会死循环（重载结束重扫快照）；

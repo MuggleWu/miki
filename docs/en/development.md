@@ -21,7 +21,7 @@ Test data is fully isolated from development data: tests always use `os.tmpdir()
 
 ```
 src/
-├── shared/          # types & defaults shared by main/renderer (types.ts, ipc.ts)
+├── shared/          # types & defaults shared by main/renderer (types.ts, ipc.ts, workspace.ts, card-dialog.ts)
 ├── core/            # pure-function domain logic; no Electron / file system access
 │   ├── fsrs.ts      #   FSRS-6 scheduler (line-by-line port of py-fsrs v6.3.2)
 │   ├── replay.ts    #   event replay (review-log → card state)
@@ -29,6 +29,7 @@ src/
 │   ├── query.ts     #   browser filtering / sorting / view rows
 │   └── stats.ts     #   the five stats panels
 ├── main/            # Electron main process
+│   ├── workspace-manager.ts #   multi-workspace (multi-profile) registry: pointer file IO, onboarding confirm, switch
 │   ├── workspace.ts #   WorkspaceService: the single write entry (in-memory state + sync persistence)
 │   ├── api-server.ts#   local HTTP API (127.0.0.1, token auth)
 │   └── index.ts     #   startup, IPC registration, window
@@ -90,7 +91,7 @@ Million-card reference numbers (2026-09-06, M-series laptop): answer 0.12ms, und
 
 - `npm run pack:mac`: electron-vite build + electron-builder (`--dir` target, configured in package.json's `build` field), producing `release/mac-arm64/Miki.app` (arm64; appId `com.mugglewu.miki`, icon `resources/icon.png` at 1024², unsigned local builds via `identity: null`).
 - Install: `cp -R release/mac-arm64/Miki.app /Applications/` then `open /Applications/Miki.app`; launching a freshly installed app by name (`open -a Miki` / Raycast "miki") may require LaunchServices indexing, or force registration with `lsregister -f /Applications/Miki.app`.
-- Workspace resolution: `MIKI_WORKSPACE` env → `~/Library/Application Support/Miki/workspace.json` (`{"workspacePath": ...}`) → default `~/miki-base`. The packaged app launched from Raycast/Dock has no env vars, so workspace.json is what points it at the data workspace.
+- Workspace resolution (`main/workspace-manager.ts`): `MIKI_WORKSPACE` env → `current` in the pointer file `~/Library/Application Support/Miki/workspace.json` (holds the multi-workspace registry `workspaces[]`; legacy `{workspacePath}` auto-upgrades) → with neither present, first-launch onboarding (renderer `WorkspaceOnboarding`); only after the user picks a folder does the main process run `ws.init` and start hot reload + the HTTP API.
 - Single-instance lock: `app.requestSingleInstanceLock()`; a second instance exits silently and focuses the existing window (prevents Raycast and dev runs from concurrently writing the same workspace).
 - Workspace hot reload (`WorkspaceService.startWatching()`, 2s polling by default): managed files = `decks.json` / `config.json` / `stats.json` / `cards/*.ndjson` (incl. delta) / `review-log/*.ndjson`, fingerprinted by `mtime+size` against the last snapshot; on external changes (git pull, another machine's writes) the main process fully rebuilds in-memory state (same semantics as the startup load chain) and notifies the renderer via the `miki:workspace-changed` event to refresh the current view. Key points:
   - **Self-write exemption**: every local write path (atomic write / append) updates the snapshot immediately upon completion, so its own writes are never mistaken for external changes — if one path were missed, the worst case is one extra full reload, not a loop (the snapshot is rescanned after each reload);
