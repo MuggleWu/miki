@@ -108,6 +108,8 @@ input { user-select: text; }
   border: 1px solid transparent; background: transparent;
 }
 .tab.active { color: var(--text); background: var(--panel-2); border-color: var(--border); }
+/* 点选 tab 后的橙色焦点圈是浏览器默认 outline，用户不需要该提示 */
+.tab:focus, .tab:focus-visible { outline: none; }
 .theme-btn { margin-left: auto; background: transparent; border: none; font-size: 16px; padding: 4px 8px; }
 .content { flex: 1; overflow: hidden; display: flex; }
 

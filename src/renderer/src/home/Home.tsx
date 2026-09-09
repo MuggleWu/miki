@@ -94,7 +94,7 @@ export function Home() {
           <div className="home-stats">
             今天已学习 <b>{todayCount}</b> 张
             <span className="home-stats-dot">·</span>
-            总共已学习 <b>{totalCount}</b> 张
+            总共已学习 <b>{totalCount}</b> 次
           </div>
           <div className="home-hints">
             <span><kbd className="kbd">S</kbd> 学习</span>
