@@ -14,9 +14,10 @@ import type {
 } from './types'
 import type { WorkspaceStatus } from './workspace'
 
-/** 深合并的配置补丁：browser 允许只传部分字段（如选中态） */
-export type MikiConfigPatch = Partial<Omit<MikiConfig, 'browser'>> & {
+/** 深合并的配置补丁：study/browser 允许只传部分字段（如选中态、只改字号） */
+export type MikiConfigPatch = Partial<Omit<MikiConfig, 'browser' | 'study'>> & {
   browser?: Partial<MikiConfig['browser']>
+  study?: Partial<MikiConfig['study']>
 }
 
 export interface MikiApi {
