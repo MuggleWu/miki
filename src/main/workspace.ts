@@ -321,6 +321,18 @@ export class WorkspaceService {
     this.eventBySeq = new Map()
     this.seq = 0
     const todayKey = localDateKey(Date.now())
+    // 事件时间近似单调：单条目 memo 当日日期键，省每事件的 Date 构造+格式化。
+    // 23h 窗口 <= 最短日长（DST 春拨日），窗口内日期键恒同，跨天必 miss 重算
+    let dayStart = -1
+    let dayKeyCache = ''
+    const dayKeyOf = (t: number): string => {
+      if (t >= dayStart && t < dayStart + 82_800_000) return dayKeyCache
+      const d = new Date(t)
+      d.setHours(0, 0, 0, 0)
+      dayStart = d.getTime()
+      dayKeyCache = localDateKey(t)
+      return dayKeyCache
+    }
     const win = new Map<number, { action: ReviewEvent['action']; rating?: Rating; t: number; deckId: string }>()
     for (const f of files) {
       for (const line of readNdjson(path.join(dir, f))) {
@@ -345,11 +357,11 @@ export class WorkspaceService {
         if (ev.seq > this.statsCheckpoint) {
           if (ev.action === 'answer') {
             bumpDailyAgg(this.dailyAgg, ev.deckId, ev.t, ev.rating, 1)
-            if (localDateKey(ev.t) === todayKey) this.todayAnswers++
+            if (dayKeyOf(ev.t) === todayKey) this.todayAnswers++
             this.totalAnsweredCache++
           } else if (ev.action === 'undo' && wEntry?.action === 'answer') {
             bumpDailyAgg(this.dailyAgg, wEntry.deckId, wEntry.t, wEntry.rating, -1)
-            if (localDateKey(wEntry.t) === todayKey) this.todayAnswers--
+            if (dayKeyOf(wEntry.t) === todayKey) this.todayAnswers--
             this.totalAnsweredCache--
           }
         }
