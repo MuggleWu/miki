@@ -6,6 +6,7 @@
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { randomUUID } from 'node:crypto'
+import { atomicWrite } from './atomic-write'
 import {
   DEFAULT_CONFIG,
   type Card,
@@ -51,12 +52,6 @@ interface DeckIndex {
   }
   /** 堆是否已构建：init/跨天重建只建计数器（首页/统计够用），堆推迟到首次取卡时全量构建 */
   built: boolean
-}
-
-function atomicWrite(file: string, data: string): void {
-  const tmp = file + '.tmp'
-  fs.writeFileSync(tmp, data, { encoding: 'utf-8', mode: 0o600 })
-  fs.renameSync(tmp, file)
 }
 
 /** 压实后的卡片行 = 内容 + 调度检查点快照；旧格式行无 fsrs/reps/lapses 字段（视为零值 + 全量重放）。

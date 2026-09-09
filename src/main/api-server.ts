@@ -12,6 +12,7 @@ import type { WorkspaceService } from './workspace'
 import type { QueryParams, SortKey } from '../shared/types'
 import type { BrowserColumn } from '../shared/types'
 import { openApiDoc } from './api-openapi'
+import { atomicWrite } from './atomic-write'
 
 const MAX_BODY_BYTES = 5 * 1024 * 1024
 
@@ -325,9 +326,7 @@ export function startApiServer(ws: WorkspaceService, opts: { runtimeInfoPath?: s
     if (opts.runtimeInfoPath) {
       // 原子写运行时信息：外部工具（MCP wrapper）读它拿实际端口，pid 用于甄别过期文件
       try {
-        const tmp = `${opts.runtimeInfoPath}.tmp`
-        fs.writeFileSync(tmp, JSON.stringify({ port: actualPort, pid: process.pid, startedAt: Date.now() }))
-        fs.renameSync(tmp, opts.runtimeInfoPath)
+        atomicWrite(opts.runtimeInfoPath, JSON.stringify({ port: actualPort, pid: process.pid, startedAt: Date.now() }))
       } catch (err) {
         console.error(`[miki] 运行时端口文件写入失败: ${String((err as Error).message ?? err)}`)
       }

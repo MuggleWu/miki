@@ -5,6 +5,7 @@ import { WorkspaceService } from './workspace'
 import { startApiServer } from './api-server'
 import { CardDialogManager, type CardDialogWindowLike } from './card-dialog'
 import { WorkspaceManager } from './workspace-manager'
+import { atomicWrite } from './atomic-write'
 import { IPC } from '../shared/ipc'
 import { withCardDialogHash } from '../shared/card-dialog'
 import { defaultWorkspaceSuggestion } from '../shared/workspace'
@@ -18,6 +19,9 @@ let workspaceManager: WorkspaceManager
 let workspaceReady = false
 let apiServer: ReturnType<typeof startApiServer> | null = null
 
+/** 与 styles.css [data-theme] 一致的窗口启动底色，避免加载闪烁 */
+const WINDOW_BG: Record<'light' | 'dark', string> = { dark: '#101014', light: '#f5f6f8' }
+
 // 原生头行（系统标题栏）颜色跟随应用内主题：themeSource 影响原生控件外观，
 // 与渲染层 data-theme 同源（config.theme），避免深色内容配浅色头行
 function applyNativeTheme(theme: 'light' | 'dark'): void {
@@ -29,11 +33,12 @@ function pointerFile(): string {
   return path.join(app.getPath('userData'), 'workspace.json')
 }
 
-/** 指针文件原子写（先写 .tmp 再改名，防半写文件） */
-function atomicWriteJson(file: string, data: string): void {
-  const tmp = `${file}.tmp`
-  fs.writeFileSync(tmp, data, 'utf-8')
-  fs.renameSync(tmp, file)
+/** 点标题栏（尤其从别的窗口切回来时）webContents 可能不是 firstResponder，
+ * 键盘（Esc、输入）会整体失灵；窗口每次聚焦把焦点补回渲染层 */
+function keepWebContentsFocused(w: BrowserWindow): void {
+  w.on('focus', () => {
+    if (!w.isDestroyed() && !w.webContents.isFocused()) w.webContents.focus()
+  })
 }
 
 /** 工作区确定后初始化服务并启动热加载与 HTTP API（首次引导路径在确认后才调用） */
@@ -85,7 +90,7 @@ function createWindow(): void {
     minHeight: 600,
     title: 'Miki',
     // 与主题一致的启动底色，避免加载闪烁
-    backgroundColor: theme === 'dark' ? '#101014' : '#f5f6f8',
+    backgroundColor: WINDOW_BG[theme],
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -96,10 +101,7 @@ function createWindow(): void {
   // 上次是最大化：先按普通尺寸建窗再最大化（resize 回调里 getNormalBounds 仍取普通态，不会污染尺寸）
   if (workspaceReady && ws.config.window.maximized) win.maximize()
 
-  // 点标题栏切回时 webContents 可能不是 firstResponder，键盘整体失灵；窗口每次聚焦把焦点补回渲染层
-  win.on('focus', () => {
-    if (win && !win.isDestroyed() && !win.webContents.isFocused()) win.webContents.focus()
-  })
+  keepWebContentsFocused(win)
 
   // 窗口尺寸/位置/最大化 → 工作区 config.json（防抖落盘；关闭时立即补一次）
   const persistBounds = () => {
@@ -158,7 +160,7 @@ function setupCardDialogManager(): void {
         // 不设 parent：父子关系会强制子窗口常驻父窗之上（点父窗也压不下去），与常规 z 序相悖；
         // 主窗口关闭时已在其 closed 事件里显式关掉本窗，不依赖父子联动
         show: false, // ready-to-show 后再显示，避免白窗闪烁
-        backgroundColor: ws.config.theme === 'dark' ? '#101014' : '#f5f6f8',
+        backgroundColor: WINDOW_BG[ws.config.theme],
         webPreferences: {
           preload: path.join(__dirname, '../preload/index.js'),
           contextIsolation: true,
@@ -169,11 +171,7 @@ function setupCardDialogManager(): void {
       // 弹窗窗口内的外部导航一律拒掉（同主窗口策略；正常流程不会发生）
       dw.webContents.on('will-navigate', (e) => e.preventDefault())
       dw.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
-      // 点标题栏（尤其从别的窗口切回来时）webContents 可能不是 firstResponder，
-      // 键盘（Esc、输入）会整体失灵；窗口每次聚焦都把焦点补回渲染层
-      dw.on('focus', () => {
-        if (!dw.isDestroyed() && !dw.webContents.isFocused()) dw.webContents.focus()
-      })
+      keepWebContentsFocused(dw)
       return dw as unknown as CardDialogWindowLike
     },
     getParentBounds: () => {
@@ -232,7 +230,7 @@ app.whenReady().then(() => {
         return null
       }
     },
-    writePointer: (reg) => atomicWriteJson(pointerFile(), JSON.stringify(reg, null, 2)),
+    writePointer: (reg) => atomicWrite(pointerFile(), JSON.stringify(reg, null, 2)),
     isDirectory: (p) => {
       try {
         return fs.statSync(p).isDirectory()
