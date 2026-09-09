@@ -94,6 +94,10 @@ export class WorkspaceService {
   private idx = new Map<string, DeckIndex>()
   private indexDayKey = ''
   private orderCounter = 0
+  /** 牌组分桶：deckId → 该牌组全部卡（含软删卡，消费方自行过滤）。
+   * 按牌组取卡/建堆/压实/到期计数走桶，把 O(全库) 扫描降到 O(牌组卡数)；
+   * loadCardsWithCheckpoint 全量重建，addCard(s) 追加、moveCards 跨牌组迁移 */
+  private byDeck = new Map<string, Card[]>()
   /** 各牌组基文件检查点 seq（该 seq 及之前的事件已反映在快照行里） */
   private deckCheckpoints = new Map<string, number>()
   /** 各牌组 delta 行数（压实阈值触发） */
@@ -215,6 +219,7 @@ export class WorkspaceService {
   }
 
   private loadDecks(): void {
+    this.hiddenCache = null
     if (fs.existsSync(this.decksFile())) {
       try {
         this.decks = JSON.parse(fs.readFileSync(this.decksFile(), 'utf-8'))
@@ -264,6 +269,7 @@ export class WorkspaceService {
   private loadCardsWithCheckpoint(): void {
     this.cards = new Map()
     this.deckCheckpoints = new Map()
+    this.byDeck = new Map()
     for (const deck of this.decks) {
       const rows = new Map<string, CardCheckpointRow>()
       let cp = 0
@@ -320,6 +326,7 @@ export class WorkspaceService {
         card.seqApplied = row.__mikiSeq ?? cp
         delete (card as unknown as CardCheckpointRow).__mikiSeq
         this.cards.set(card.id, card)
+        this.deckBucket(deck.id).push(card)
       }
     }
   }
@@ -500,9 +507,25 @@ export class WorkspaceService {
 
   // ---------- 调度索引（due 最小堆 + 增量计数器） ----------
 
-  /** 软删牌组 id 集：这些牌组下的卡不算学习计数、不进学习队列（四处共用） */
+  /** 软删牌组 id 集：这些牌组下的卡不算学习计数、不进学习队列（四处共用）。
+   * 缓存复用避免热路径每次重分配；deleteDeck/loadDecks 时失效 */
+  private hiddenCache: Set<string> | null = null
+
   private hiddenDeckIds(): Set<string> {
-    return new Set(this.decks.filter((d) => d.deletedAt).map((d) => d.id))
+    if (this.hiddenCache === null) {
+      this.hiddenCache = new Set(this.decks.filter((d) => d.deletedAt).map((d) => d.id))
+    }
+    return this.hiddenCache
+  }
+
+  /** 取该牌组的卡桶，不存在则建空桶 */
+  private deckBucket(deckId: string): Card[] {
+    let b = this.byDeck.get(deckId)
+    if (!b) {
+      b = []
+      this.byDeck.set(deckId, b)
+    }
+    return b
   }
 
   private deckIdx(deckId: string): DeckIndex {
@@ -585,14 +608,14 @@ export class WorkspaceService {
     ix.learning.push({ key: due, tie: c.tie, id: c.id })
   }
 
-  /** 首次取卡前全量构建该牌组的堆（百万卡 init 只建计数器，首次进学习页才付建堆成本） */
+  /** 首次取卡前构建该牌组的堆（init 只建计数器，首次进学习页才付建堆成本）；取卡走牌组分桶，不扫全库 */
   private ensureBuilt(deckId: string): DeckIndex {
     const ix = this.deckIdx(deckId)
     if (ix.built) return ix
     ix.built = true
     const hidden = this.hiddenDeckIds()
-    for (const c of this.cards.values()) {
-      if (c.deckId !== deckId || c.deletedAt || c.suspended || hidden.has(c.deckId)) continue
+    for (const c of this.byDeck.get(deckId) ?? []) {
+      if (c.deletedAt || c.suspended || hidden.has(c.deckId)) continue
       if (c.tie == null) c.tie = ++this.orderCounter
       this.pushOnly(c, ix)
     }
@@ -692,9 +715,12 @@ export class WorkspaceService {
     if (pending.length > 0) {
       const ids = new Set(pending.map((d) => d.id))
       const now = Date.now()
-      for (const c of this.cards.values()) {
-        if (!ids.has(c.deckId) || c.deletedAt || c.suspended) continue
-        if (c.fsrs && c.fsrs.due <= now) bulk.set(c.deckId, (bulk.get(c.deckId) ?? 0) + 1)
+      const hidden = this.hiddenDeckIds()
+      for (const d of pending) {
+        for (const c of this.byDeck.get(d.id) ?? []) {
+          if (c.deletedAt || c.suspended || hidden.has(c.deckId)) continue
+          if (c.fsrs && c.fsrs.due <= now) bulk.set(d.id, (bulk.get(d.id) ?? 0) + 1)
+        }
       }
     }
     return active.map((d) => {
@@ -710,13 +736,14 @@ export class WorkspaceService {
 
   /** 「到期」列：此刻 due <= now 的学习/复习卡数（不含新卡/未到期/暂停卡）。到期随时间推进无法增量维护，读时计算——
    * 堆已构建时从根 DFS，key > now 剪枝（堆性质：子节点 key >= 父节点）；条目可能含失效/重复（惰性失效遗留），按卡 id 去重后以卡的真实 due 判定。
-   * 未构建时走一次全量扫描。 */
+   * 未构建时走该牌组的卡桶单趟扫描。 */
   private dueNowOf(deckId: string, ix: DeckIndex): number {
     const now = Date.now()
     if (!ix.built) {
+      const hidden = this.hiddenDeckIds()
       let n = 0
-      for (const c of this.cards.values()) {
-        if (c.deckId !== deckId || c.deletedAt || c.suspended) continue
+      for (const c of this.byDeck.get(deckId) ?? []) {
+        if (c.deletedAt || c.suspended || hidden.has(c.deckId)) continue
         if (c.fsrs && c.fsrs.due <= now) n++
       }
       return n
@@ -787,6 +814,7 @@ export class WorkspaceService {
     const deck = this.decks.find((d) => d.id === id && !d.deletedAt)
     if (deck) {
       deck.deletedAt = Date.now()
+      this.hiddenCache = null
       this.saveDecks()
     }
   }
@@ -855,8 +883,7 @@ export class WorkspaceService {
   private compactDeck(deckId: string): void {
     const lines: string[] = [JSON.stringify({ __mikiCheckpoint: this.seq })]
     const rows: string[] = []
-    for (const c of this.cards.values()) {
-      if (c.deckId !== deckId) continue
+    for (const c of this.byDeck.get(deckId) ?? []) {
       rows.push(this.snapshotRow(c))
     }
     rows.sort()
@@ -896,6 +923,7 @@ export class WorkspaceService {
     }
     const card: Card = { ...content, deckId, fsrs: null, reps: 0, lapses: 0 }
     this.cards.set(card.id, card)
+    this.deckBucket(deckId).push(card)
     this.appendCardRows(deckId, [card])
     this.reindexCard(card, null)
     return card
@@ -918,7 +946,10 @@ export class WorkspaceService {
       reps: 0,
       lapses: 0
     }))
-    for (const c of cards) this.cards.set(c.id, c)
+    for (const c of cards) {
+      this.cards.set(c.id, c)
+      this.deckBucket(deckId).push(c)
+    }
     this.appendCardRows(deckId, cards)
     for (const c of cards) this.reindexCard(c, null)
     return cards
@@ -937,6 +968,7 @@ export class WorkspaceService {
         missing++
         continue
       }
+      if (it.front === undefined && it.back === undefined) continue // 空 patch：无变化，不计入任何计数
       if (it.front !== undefined) card.front = it.front
       if (it.back !== undefined) card.back = it.back
       card.updatedAt = now
@@ -983,10 +1015,12 @@ export class WorkspaceService {
     return out
   }
 
-  /** 单卡改内容：patch 未提供的字段保留原值（部分更新），提供的字段整体覆盖（含清空为空串）；软删卡拒改（与 updateCards/deleteCards 口径一致） */
+  /** 单卡改内容：patch 未提供的字段保留原值（部分更新），提供的字段整体覆盖（含清空为空串）；
+   * 软删卡拒改（与 updateCards/deleteCards 口径一致）；空 patch（两字段都未提供）为 no-op，不写盘 */
   updateCard(cardId: string, patch: { front?: string; back?: string }): Card | null {
     const card = this.cards.get(cardId)
     if (!card || card.deletedAt) return null
+    if (patch.front === undefined && patch.back === undefined) return card
     if (patch.front !== undefined) card.front = patch.front
     if (patch.back !== undefined) card.back = patch.back
     card.updatedAt = Date.now()
@@ -1040,6 +1074,13 @@ export class WorkspaceService {
         list.push(t.card.id)
         bySource.set(t.before.deckId, list)
       }
+      // 分桶迁移：源桶一次性滤出被移动卡，目标桶逐张追加（O(源桶+移动数)）
+      const movedIds = new Set(bySource.size === 1 ? bySource.values().next().value! : touched.map((t) => t.card.id))
+      for (const srcId of bySource.keys()) {
+        this.byDeck.set(srcId, (this.byDeck.get(srcId) ?? []).filter((c) => !movedIds.has(c.id)))
+      }
+      const targetBucket = this.deckBucket(targetDeckId)
+      for (const t of touched) targetBucket.push(t.card)
       for (const [deckId, ids] of bySource) this.appendCardTombstones(deckId, ids)
       for (const t of touched) this.reindexCard(t.card, t.before, t.before.deckId)
     }
@@ -1110,12 +1151,20 @@ export class WorkspaceService {
   // ---------- 学习 ----------
 
   private deckCards(deckId: string | null): Card[] {
-    const out: Card[] = []
     const hidden = this.hiddenDeckIds()
-    for (const c of this.cards.values()) {
-      if (c.deletedAt || hidden.has(c.deckId)) continue
-      if (deckId != null && c.deckId !== deckId) continue
-      out.push(c)
+    if (deckId != null) {
+      const out: Card[] = []
+      for (const c of this.byDeck.get(deckId) ?? []) {
+        if (!c.deletedAt && !hidden.has(deckId)) out.push(c)
+      }
+      return out
+    }
+    const out: Card[] = []
+    for (const [id, bucket] of this.byDeck) {
+      if (hidden.has(id)) continue
+      for (const c of bucket) {
+        if (!c.deletedAt) out.push(c)
+      }
     }
     return out
   }
@@ -1258,7 +1307,7 @@ export class WorkspaceService {
 
   getStats(params: StatsParams) {
     return computeStats({
-      cards: [...this.cards.values()],
+      cards: this.cards.values(), // 迭代器直传：computeStats 内部边遍历边过滤，免去整库展开拷贝
       dailyAgg: this.dailyAgg,
       deckId: params.deckId,
       range: params.range,
