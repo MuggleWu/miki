@@ -1,0 +1,14 @@
+# 依赖与构建产物
+node_modules/
+out/
+release/
+dist/
+
+# npm 生成的锁文件，交给 npm 维护
+package-lock.json
+
+# 测试向量数据：单行 JSON 是有意格式，重排只有搅动
+tools/
+
+# 手写文档：散文换行属作者风格，格式化只有搅动没有收益
+*.md
