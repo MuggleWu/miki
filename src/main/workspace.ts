@@ -1,5 +1,8 @@
 // WorkspaceService：主进程唯一写入口（需求 NF1，技术栈 §2/§4）
-// 内存态 = 启动时从工作区文件重放；所有写路径：先落盘（原子写/追加），后更新内存。
+// 内存态 = 启动时从工作区文件重放；写路径：先更新内存，再落盘（原子写/追加）。
+// 卡片 delta 行写入的是「当下全量内容」（contentRow 序列化当前内存态），内存先行的
+// 窗口期不影响落盘正确性；崩溃恰好落在「内存已改、追加未执行」之间时，重启重放回
+// 旧值——即该次写操作整体未发生，不会出现半新半旧的混合态。
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { randomUUID } from 'node:crypto'
