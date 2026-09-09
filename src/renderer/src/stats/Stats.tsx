@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react'
 import * as echarts from 'echarts'
 import { sortedDecks, useApp } from '../store'
+import { createSeqGuard } from '../staleGuard'
 import type { StatsPayload } from '../../../shared/types'
 
 function Chart(props: { option: echarts.EChartsOption }) {
@@ -27,9 +28,14 @@ export function Stats() {
   const [deckId, setDeckId] = useState<string | null>(null)
   const [range, setRange] = useState<'year' | 'all'>('year')
   const [stats, setStats] = useState<StatsPayload | null>(null)
+  // 竞态防护：快速切换牌组/范围时旧响应晚到不得覆盖图表
+  const seqRef = useRef(createSeqGuard())
 
   useEffect(() => {
-    void window.miki.getStats({ deckId, range }).then(setStats)
+    const seq = seqRef.current.next()
+    void window.miki.getStats({ deckId, range }).then((s) => {
+      if (seqRef.current.isLatest(seq)) setStats(s)
+    })
   }, [deckId, range, dataEpoch])
 
   const dark = theme === 'dark'

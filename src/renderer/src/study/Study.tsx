@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Md } from '../md'
 import { isTypingTarget, useApp } from '../store'
+import { createSeqGuard } from '../staleGuard'
 import type { Rating, StudyPayload } from '../../../shared/types'
 
 const RATING_LABEL: Record<Rating, string> = { 1: '重来', 2: '困难', 3: '良好', 4: '轻松' }
@@ -30,14 +31,19 @@ export function Study() {
   const questionShownAt = useRef<number>(Date.now())
   // 最近一次装载进界面的卡（编辑弹窗确认后的重取用它判断「同卡」→ 保留当前相位）
   const loadedCardIdRef = useRef<string | null>(null)
+  // 异步竞态防护：快速换牌组时旧响应晚到不得覆盖（重取 + 评级预览各一个守卫）
+  const studySeq = useRef(createSeqGuard())
+  const previewSeq = useRef(createSeqGuard())
 
   const deck = decks.find((d) => d.id === studyDeckId)
   const font = config?.study
 
   const refresh = useCallback(
     async (id: string, keepPhase = false) => {
+      const seq = studySeq.current.next() // 竞态防护：快速换牌组时旧响应晚到不得覆盖
       const prevId = loadedCardIdRef.current
       const p = await window.miki.getStudy(id)
+      if (!studySeq.current.isLatest(seq)) return
       if (!(keepPhase && p.card && p.card.id === prevId)) setPhase('question')
       setPayload(p)
       loadedCardIdRef.current = p.card?.id ?? null
@@ -53,11 +59,15 @@ export function Study() {
     if (studyDeckId) void refresh(studyDeckId, true)
   }, [studyDeckId, refresh, contentEpoch, dataEpoch])
 
-  // 评级按钮的下次到期预览（不落盘）
+  // 评级按钮的下次到期预览（不落盘）；竞态防护：换卡后旧卡的预览晚到不得污染新卡
   useEffect(() => {
     setPreviewDue([])
-    if (payload?.card) {
-      void window.miki.previewIntervals(payload.card.id).then(setPreviewDue)
+    const cardId = payload?.card?.id
+    if (cardId) {
+      const seq = previewSeq.current.next()
+      void window.miki.previewIntervals(cardId).then((due) => {
+        if (previewSeq.current.isLatest(seq)) setPreviewDue(due)
+      })
     }
   }, [payload?.card?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 

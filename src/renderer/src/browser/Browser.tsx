@@ -3,6 +3,7 @@
 // 虚拟滚动（B6）：行是单行 nowrap，行高恒定，首帧后实测一次；只渲染可视窗口行，上下用 spacer tr 撑开
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Md } from '../md'
+import { createSeqGuard } from '../staleGuard'
 import { rotateSort } from '../../../core/query'
 import { isTypingTarget, sortedDecks, useApp } from '../store'
 import { ColResizer, VResizer, isDragResizing } from '../components/drag'
@@ -141,9 +142,13 @@ export function Browser() {
     return () => clearTimeout(t)
   }, [keywords])
 
+  // 异步竞态防护：条件变化/定时刷新并发时，旧响应晚到不得覆盖新条件的表格
+  const querySeq = useRef(createSeqGuard())
   const query = useCallback(async () => {
+    const seq = querySeq.current.next()
     const kws = debouncedKw.split(/\s+/).filter(Boolean)
     const r = await window.miki.queryCards({ deckId: browserDeckId, keywords: kws, sort, limit: 100_000 })
+    if (!querySeq.current.isLatest(seq)) return
     setRows(r.rows)
     setTotal(r.total)
   }, [browserDeckId, debouncedKw, sort])
