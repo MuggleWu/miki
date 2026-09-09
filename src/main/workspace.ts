@@ -90,6 +90,8 @@ export class WorkspaceService {
   private statsCheckpoint = 0
   /** 今日已答净计数（answer ++ / undo 抵消 -- / 跨天清零） */
   private todayAnswers = 0
+  /** 历史累计净答题数：dailyAgg total 总和的运行镜像（启动算一次，answer ++ / undo --），免去每次 loadWorkspace 全遍历聚合 */
+  private totalAnsweredCache = 0
   /** 牌组调度索引（deckId → 堆 + 计数器），跨天/启动全量重建，其余增量维护 */
   private idx = new Map<string, DeckIndex>()
   private indexDayKey = ''
@@ -245,6 +247,7 @@ export class WorkspaceService {
     this.dailyAgg = new Map()
     this.statsCheckpoint = 0
     this.todayAnswers = 0
+    this.totalAnsweredCache = 0
     const file = this.statsFile()
     if (!fs.existsSync(file)) return
     try {
@@ -256,14 +259,20 @@ export class WorkspaceService {
     for (const [deckId, days] of raw.dailyAgg ?? []) {
       this.dailyAgg.set(deckId, new Map(days))
     }
-    // 今日净计数直接从聚合恢复（跨天由 ensureDay 清零）
+    // 今日净计数与累计总数直接从聚合恢复（今日跨天由 ensureDay 清零）
     const tk = localDateKey(Date.now())
     let n = 0
-    for (const m of this.dailyAgg.values()) n += m.get(tk)?.total ?? 0
+    let total = 0
+    for (const m of this.dailyAgg.values()) {
+      for (const c of m.values()) total += c.total
+      n += m.get(tk)?.total ?? 0
+    }
     this.todayAnswers = n
+    this.totalAnsweredCache = total
   } catch {
       this.dailyAgg = new Map()
       this.statsCheckpoint = 0
+      this.totalAnsweredCache = 0
     }
   }
 
@@ -376,9 +385,11 @@ export class WorkspaceService {
           if (ev.action === 'answer') {
             bumpDailyAgg(this.dailyAgg, ev.deckId, ev.t, ev.rating, 1)
             if (localDateKey(ev.t) === todayKey) this.todayAnswers++
+            this.totalAnsweredCache++
           } else if (ev.action === 'undo' && wEntry?.action === 'answer') {
             bumpDailyAgg(this.dailyAgg, wEntry.deckId, wEntry.t, wEntry.rating, -1)
             if (localDateKey(wEntry.t) === todayKey) this.todayAnswers--
+            this.totalAnsweredCache--
           }
         }
         win.set(ev.seq, { action: ev.action, rating: ev.rating, t: ev.t, deckId: ev.deckId })
@@ -792,13 +803,9 @@ export class WorkspaceService {
     return this.todayAnswers
   }
 
-  /** 历史累计净答题数（undo 已抵消；热力图聚合按日按牌组求和） */
+  /** 历史累计净答题数（undo 已抵消；启动时算一次，之后答题/撤销增量维护，O(1)） */
   totalAnswered(): number {
-    let total = 0
-    for (const byDay of this.dailyAgg.values()) {
-      for (const c of byDay.values()) total += c.total
-    }
-    return total
+    return this.totalAnsweredCache
   }
 
   // ---------- 牌组 ----------
@@ -1215,6 +1222,7 @@ export class WorkspaceService {
     this.appendEvents(evs)
     bumpDailyAgg(this.dailyAgg, card.deckId, ev.t, rating, 1)
     this.todayAnswers++
+    this.totalAnsweredCache++
     this.reindexCard(card, before)
     this.sessionOps.push({ seq: ev.seq, cardId })
     return { answeredCardId: cardId, ...this.getStudy(card.deckId) }
@@ -1259,6 +1267,7 @@ export class WorkspaceService {
       if (target.rating === 1) card.lapses = Math.max(0, card.lapses - 1)
       bumpDailyAgg(this.dailyAgg, target.deckId, target.t, target.rating, -1)
       if (target.t >= this.todayStartMs()) this.todayAnswers--
+      this.totalAnsweredCache--
     }
     // leech 还原：该 answer 触发的自动暂停事件紧跟其后（同一批次 seq+1），随撤销一并解除；
     // 之后再无 suspend 事件（最后一条就是它）才认领——手动暂停/解除过的不归这次撤销管。
