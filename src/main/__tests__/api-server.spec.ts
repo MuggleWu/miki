@@ -200,6 +200,12 @@ describe('http api 牌组与卡片 CRUD', () => {
     expect((paged.json as { rows: unknown[] }).rows).toHaveLength(1)
     const due = await authed('GET', `/api/cards?dueBefore=${Date.now()}`)
     expect((due.json as { total: number }).total).toBe(0) // 新卡无调度进度，不在到期窗口内
+    // 负 offset/limit clamp 到 0（slice 负数语义是「从尾部数」，静默错位）：负 offset 等价 0，
+    // 负 limit 返回空页
+    const negOffset = await authed('GET', '/api/cards?limit=1&offset=-5')
+    expect((negOffset.json as { rows: unknown[] }).rows).toHaveLength(1)
+    const negLimit = await authed('GET', '/api/cards?limit=-1')
+    expect((negLimit.json as { rows: unknown[] }).rows).toHaveLength(0)
   })
 
   it('单张取卡与单张部分改内容', async () => {

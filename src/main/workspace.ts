@@ -1039,9 +1039,11 @@ export class WorkspaceService {
     let list = filterCards(this.deckCards(params.deckId), params, (c) => this.lowerTextOf(c))
     const deckNameOf = (c: Card) => nameById.get(c.deckId) ?? ''
     list = sortByKeys(list, params.sort, deckNameOf)
-    const offset = params.offset ?? 0
+    // 负 offset/limit clamp 到 0：slice 对负数语义是「从尾部数」，静默错位比报错更难排查
+    const offset = Math.max(0, params.offset ?? 0)
+    const limit = Math.max(0, params.limit ?? 5000)
     return {
-      rows: list.slice(offset, offset + (params.limit ?? 5000)).map((c) => toRow(c, deckNameOf(c))),
+      rows: list.slice(offset, offset + limit).map((c) => toRow(c, deckNameOf(c))),
       total: list.length
     }
   }
