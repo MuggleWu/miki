@@ -338,6 +338,43 @@ describe('计数与统计入口', () => {
     expect(w.todayCount()).toBe(before + 1)
   })
 
+  it('deckInfos 未建堆单趟扫描与建堆逐组计算同口径：多牌组、暂停、软删、跨组混合', () => {
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(new Date('2026-10-06T10:00:00'))
+      const w = newWs(tmpKept())
+      const d1 = w.addDeck('扫描甲').id
+      const d2 = w.addDeck('扫描乙').id
+      const [a1, b1, c1] = w.addCards(d1, [
+        { front: '甲一', back: '' },
+        { front: '甲二', back: '' },
+        { front: '甲三', back: '' }
+      ])
+      const [a2] = w.addCards(d2, [
+        { front: '乙一', back: '' },
+        { front: '乙二', back: '' }
+      ])
+
+      // a1 越过学习步长到期；a2 未到期；b1 暂停；c1 软删
+      w.answer(a1.id, 3)
+      w.answer(a2.id, 4) // Easy 毕业，due 在数日后
+      w.setCardSuspended(b1.id, true)
+      w.deleteCards([c1.id])
+
+      vi.setSystemTime(new Date('2026-10-06T10:11:00')) // a1 到期
+      const before = w.deckInfos().map((x) => [x.id, x.counts.due] as const)
+
+      w.getStudy(d1)
+      w.getStudy(d2) // 两堆都建：deckInfos 转入 dueNowOf 逐组路径
+      const after = w.deckInfos().map((x) => [x.id, x.counts.due] as const)
+      expect(after).toEqual(before)
+      expect(before).toContainEqual([d1, 1]) // 只 a1 到期
+      expect(before).toContainEqual([d2, 0]) // a2 未到期，暂停/软删不数
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('首页三列（总数/未学习/到期）：总数含暂停卡；到期只数此刻已到期的学习/复习卡（用户痛点：学习中≠能刷）', () => {
     vi.useFakeTimers()
     try {

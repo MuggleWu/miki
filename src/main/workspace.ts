@@ -680,17 +680,29 @@ export class WorkspaceService {
 
   deckInfos(): DeckInfo[] {
     this.ensureDay()
-    return this.decks
-      .filter((d) => !d.deletedAt)
-      .map((d) => {
-        const ix = this.deckIdx(d.id)
-        const counts: DeckTableCounts = {
-          total: ix.counts.total,
-          new: ix.counts.new,
-          due: this.dueNowOf(d.id, ix)
-        }
-        return { ...d, counts }
-      })
+    const active = this.decks.filter((d) => !d.deletedAt)
+    // 「到期」列读时计算（见 dueNowOf 注释）。堆未建的牌组若逐个调 dueNowOf，
+    // 会变成 O(牌组数 × 全库卡数)——首页每次刷新都重付。这里对未建堆的牌组
+    // 合并为一次全库单趟扫描（O(全库)），已建堆的仍走 DFS 剪枝。
+    const pending = active.filter((d) => !this.deckIdx(d.id).built)
+    const bulk = new Map<string, number>()
+    if (pending.length > 0) {
+      const ids = new Set(pending.map((d) => d.id))
+      const now = Date.now()
+      for (const c of this.cards.values()) {
+        if (!ids.has(c.deckId) || c.deletedAt || c.suspended) continue
+        if (c.fsrs && c.fsrs.due <= now) bulk.set(c.deckId, (bulk.get(c.deckId) ?? 0) + 1)
+      }
+    }
+    return active.map((d) => {
+      const ix = this.deckIdx(d.id)
+      const counts: DeckTableCounts = {
+        total: ix.counts.total,
+        new: ix.counts.new,
+        due: bulk.has(d.id) ? (bulk.get(d.id) ?? 0) : this.dueNowOf(d.id, ix)
+      }
+      return { ...d, counts }
+    })
   }
 
   /** 「到期」列：此刻 due <= now 的学习/复习卡数（不含新卡/未到期/暂停卡）。到期随时间推进无法增量维护，读时计算——
