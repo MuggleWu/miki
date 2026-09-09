@@ -63,8 +63,8 @@ export class WorkspaceManager {
     return this.status(needsOnboarding)
   }
 
-  /** 首次引导确认：创建（或复用）文件夹并设为当前 */
-  confirmOnboarding(p: string): WorkspaceResult {
+  /** 注册公共段：空路径拒绝 + mkdir -p（失败带原因）+ upsert 并写回；setCurrent=false 时不动 current */
+  private register(p: string, setCurrent: boolean): WorkspaceResult {
     if (!p) return { ok: false, error: '路径为空' }
     try {
       this.deps.makeDirectory(p)
@@ -72,22 +72,19 @@ export class WorkspaceManager {
       return { ok: false, error: `无法创建文件夹：${String(e)}` }
     }
     this.reg = upsertWorkspace(this.reg, p, this.deps.now())
-    this.reg.current = p
+    if (setCurrent) this.reg.current = p
     this.save()
     return { ok: true }
   }
 
+  /** 首次引导确认：创建（或复用）文件夹并设为当前 */
+  confirmOnboarding(p: string): WorkspaceResult {
+    return this.register(p, true)
+  }
+
   /** 登记工作区：文件夹不存在则创建（mkdir -p）；不改变 current（切换走 switchTo） */
   add(p: string): WorkspaceResult {
-    if (!p) return { ok: false, error: '路径为空' }
-    try {
-      this.deps.makeDirectory(p)
-    } catch (e) {
-      return { ok: false, error: `无法创建文件夹：${String(e)}` }
-    }
-    this.reg = upsertWorkspace(this.reg, p, this.deps.now())
-    this.save()
-    return { ok: true }
+    return this.register(p, false)
   }
 
   /** 切换当前工作区（写指针；重启落地由调用方负责） */
