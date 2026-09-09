@@ -775,6 +775,11 @@ export class WorkspaceService {
     return deck ?? null
   }
 
+  /** 牌组存在性判定（不含软删）。API 校验用：避免为查一个 id 而构建整份 deckInfos。 */
+  deckExists(id: string): boolean {
+    return this.decks.some((d) => d.id === id && !d.deletedAt)
+  }
+
   deleteDeck(id: string): void {
     const deck = this.decks.find((d) => d.id === id && !d.deletedAt)
     if (deck) {

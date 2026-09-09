@@ -87,7 +87,7 @@ function buildRoutes(ws: WorkspaceService): [string, string, Handler][] {
   routes.push(['POST', '/api/cards/add', ({ body }) => {
     const b = body as { deckId?: unknown; front?: unknown; back?: unknown; items?: unknown }
     const deckId = typeof b.deckId === 'string' ? b.deckId : ''
-    if (!ws.deckInfos().some((d) => d.id === deckId)) throw new ApiError(404, '目标牌组不存在')
+    if (!ws.deckExists(deckId)) throw new ApiError(404, '目标牌组不存在')
     if (Array.isArray(b.items)) {
       const items = b.items.map((it) => {
         const c = normalizeContent(it)
