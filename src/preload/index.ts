@@ -11,17 +11,16 @@ const api: MikiApi = {
     ipcRenderer.invoke(IPC.answer, cardId, rating, durationMs),
   undo: () => ipcRenderer.invoke(IPC.undo),
   addCard: (deckId: string, front: string, back: string) => ipcRenderer.invoke(IPC.addCard, deckId, front, back),
-  updateCard: (cardId: string, patch: { front?: string; back?: string }) => ipcRenderer.invoke(IPC.updateCard, cardId, patch),
+  updateCard: (cardId: string, patch: { front?: string; back?: string }) =>
+    ipcRenderer.invoke(IPC.updateCard, cardId, patch),
   getCard: (cardId: string) => ipcRenderer.invoke(IPC.getCard, cardId),
   deleteCard: (cardId: string) => ipcRenderer.invoke(IPC.deleteCard, cardId),
   queryCards: (params: unknown) => ipcRenderer.invoke(IPC.queryCards, params),
   getStats: (params: unknown) => ipcRenderer.invoke(IPC.getStats, params),
-  saveBrowserConfig: (columns: string[], sort: unknown[]) =>
-    ipcRenderer.invoke(IPC.saveBrowserConfig, columns, sort),
+  saveBrowserConfig: (columns: string[], sort: unknown[]) => ipcRenderer.invoke(IPC.saveBrowserConfig, columns, sort),
   saveTheme: (theme: 'light' | 'dark') => ipcRenderer.invoke(IPC.saveTheme, theme),
   saveConfig: (patch: unknown) => ipcRenderer.invoke(IPC.saveConfig, patch),
-  setCardSuspended: (cardId: string, suspended: boolean) =>
-    ipcRenderer.invoke(IPC.setCardSuspended, cardId, suspended),
+  setCardSuspended: (cardId: string, suspended: boolean) => ipcRenderer.invoke(IPC.setCardSuspended, cardId, suspended),
   moveCards: (cardIds: string[], deckId: string) => ipcRenderer.invoke(IPC.moveCards, cardIds, deckId),
   resetProgress: (cardIds: string[]) => ipcRenderer.invoke(IPC.resetProgress, cardIds),
   addCards: (deckId: string, items: { front: string; back: string }[]) =>

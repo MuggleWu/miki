@@ -366,7 +366,7 @@ export function Browser() {
       case 'deckName':
         return row.deckName
       case 'state':
-        return row.suspended ? '⏸ 已暂停' : STATE_LABEL[row.state] ?? row.state
+        return row.suspended ? '⏸ 已暂停' : (STATE_LABEL[row.state] ?? row.state)
       case 'due':
         return row.suspended ? '—' : fmtDue(row.due)
       case 'dueAbs':
@@ -416,14 +416,15 @@ export function Browser() {
       }}
     >
       <div className="browser-side" style={{ width: sideWidth }}>
-        <div
-          className={`tree-item ${browserDeckId == null ? 'active' : ''}`}
-          onClick={() => openBrowser(null)}
-        >
+        <div className={`tree-item ${browserDeckId == null ? 'active' : ''}`} onClick={() => openBrowser(null)}>
           <span>全部牌组</span>
         </div>
         {sortedDecks(decks).map((d) => (
-          <div key={d.id} className={`tree-item ${browserDeckId === d.id ? 'active' : ''}`} onClick={() => openBrowser(d.id)}>
+          <div
+            key={d.id}
+            className={`tree-item ${browserDeckId === d.id ? 'active' : ''}`}
+            onClick={() => openBrowser(d.id)}
+          >
             <span>{d.name}</span>
           </div>
         ))}
@@ -463,7 +464,11 @@ export function Browser() {
           >
             <table
               className="grid"
-              style={{ tableLayout: 'fixed', width: columns.reduce((n, c) => n + (colWidths[c] ?? DEFAULT_COL_WIDTH[c]), 0), minWidth: '100%' }}
+              style={{
+                tableLayout: 'fixed',
+                width: columns.reduce((n, c) => n + (colWidths[c] ?? DEFAULT_COL_WIDTH[c]), 0),
+                minWidth: '100%'
+              }}
             >
               <colgroup>
                 {columns.map((col) => (
@@ -537,18 +542,38 @@ export function Browser() {
                   <div className="block">
                     <textarea
                       value={editFront}
-                      onChange={(e) => { setEditFront(e.target.value); scheduleSave(e.target.value, editBack) }}
+                      onChange={(e) => {
+                        setEditFront(e.target.value)
+                        scheduleSave(e.target.value, editBack)
+                      }}
                       onKeyDown={(e) => {
                         if (e.key === '`' && !e.metaKey && !e.ctrlKey && !e.altKey) {
                           const el = e.target instanceof HTMLTextAreaElement ? e.target : null
                           if (el) {
                             e.preventDefault()
-                            applyWrap(el, (v) => { setEditFront(v); scheduleSave(v, editBack) }, tickSelection)
+                            applyWrap(
+                              el,
+                              (v) => {
+                                setEditFront(v)
+                                scheduleSave(v, editBack)
+                              },
+                              tickSelection
+                            )
                           }
                         }
                         if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey && !e.altKey && !e.nativeEvent.isComposing) {
                           const el = e.target instanceof HTMLTextAreaElement ? e.target : null
-                          if (el && applyWrap(el, (v) => { setEditFront(v); scheduleSave(v, editBack) }, enterContinueList)) {
+                          if (
+                            el &&
+                            applyWrap(
+                              el,
+                              (v) => {
+                                setEditFront(v)
+                                scheduleSave(v, editBack)
+                              },
+                              enterContinueList
+                            )
+                          ) {
                             e.preventDefault()
                           }
                         }
@@ -564,18 +589,38 @@ export function Browser() {
                   <div className="block">
                     <textarea
                       value={editBack}
-                      onChange={(e) => { setEditBack(e.target.value); scheduleSave(editFront, e.target.value) }}
+                      onChange={(e) => {
+                        setEditBack(e.target.value)
+                        scheduleSave(editFront, e.target.value)
+                      }}
                       onKeyDown={(e) => {
                         if (e.key === '`' && !e.metaKey && !e.ctrlKey && !e.altKey) {
                           const el = e.target instanceof HTMLTextAreaElement ? e.target : null
                           if (el) {
                             e.preventDefault()
-                            applyWrap(el, (v) => { setEditBack(v); scheduleSave(editFront, v) }, tickSelection)
+                            applyWrap(
+                              el,
+                              (v) => {
+                                setEditBack(v)
+                                scheduleSave(editFront, v)
+                              },
+                              tickSelection
+                            )
                           }
                         }
                         if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey && !e.altKey && !e.nativeEvent.isComposing) {
                           const el = e.target instanceof HTMLTextAreaElement ? e.target : null
-                          if (el && applyWrap(el, (v) => { setEditBack(v); scheduleSave(editFront, v) }, enterContinueList)) {
+                          if (
+                            el &&
+                            applyWrap(
+                              el,
+                              (v) => {
+                                setEditBack(v)
+                                scheduleSave(editFront, v)
+                              },
+                              enterContinueList
+                            )
+                          ) {
                             e.preventDefault()
                           }
                         }
@@ -588,9 +633,8 @@ export function Browser() {
                 </div>
                 <div className="editor-meta">
                   <span style={{ color: 'var(--text-dim)', fontSize: 12 }}>
-                    {selected.deckName} ·{' '}
-                    {selected.suspended ? '⏸ 已暂停（不计入调度）' : STATE_LABEL[selected.state]} · 修改时间{' '}
-                    {fmtTime(selected.updatedAt)}
+                    {selected.deckName} · {selected.suspended ? '⏸ 已暂停（不计入调度）' : STATE_LABEL[selected.state]}{' '}
+                    · 修改时间 {fmtTime(selected.updatedAt)}
                   </span>
                   {selected.suspended && (
                     <button
@@ -630,7 +674,9 @@ export function Browser() {
               <button onClick={() => setRowMenu({ ...rowMenu, mode: 'move' })}>
                 修改所属牌组{rowMenu.ids.length > 1 ? `（${rowMenu.ids.length} 张）` : ''}
               </button>
-              <button onClick={() => void menuAction('reset')}>重置进度{rowMenu.ids.length > 1 ? `（${rowMenu.ids.length} 张）` : ''}</button>
+              <button onClick={() => void menuAction('reset')}>
+                重置进度{rowMenu.ids.length > 1 ? `（${rowMenu.ids.length} 张）` : ''}
+              </button>
               <button className="danger" onClick={() => void menuAction('delete')}>
                 删除{rowMenu.ids.length > 1 ? `（${rowMenu.ids.length} 张）` : ''}
               </button>

@@ -8,11 +8,7 @@ export function isDragResizing(): boolean {
   return activeDrags > 0
 }
 
-export function dragAxis(
-  e: React.MouseEvent,
-  axis: 'x' | 'y',
-  onMove: (delta: number) => void
-): void {
+export function dragAxis(e: React.MouseEvent, axis: 'x' | 'y', onMove: (delta: number) => void): void {
   const start = axis === 'x' ? e.clientX : e.clientY
   const move = (ev: MouseEvent) => onMove((axis === 'x' ? ev.clientX : ev.clientY) - start)
   const up = () => {

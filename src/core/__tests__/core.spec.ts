@@ -14,8 +14,16 @@ const T0 = new Date('2026-09-01T08:00:00').getTime()
 const noFuzz = { ...DEFAULT_FSRS_PARAMS, enableFuzzing: false }
 const sched = new FsrScheduler(noFuzz)
 
-function content(id: string, deckId = 'd1', createdAt = T0): CardContent {
-  return { id, front: `${id} front`, back: `${id} back`, createdAt, updatedAt: createdAt, deletedAt: null, suspended: false }
+function content(id: string, _deckId = 'd1', createdAt = T0): CardContent {
+  return {
+    id,
+    front: `${id} front`,
+    back: `${id} back`,
+    createdAt,
+    updatedAt: createdAt,
+    deletedAt: null,
+    suspended: false
+  }
 }
 
 function cardOf(id: string, deckId = 'd1', createdAt = T0): Card {
@@ -99,7 +107,14 @@ describe('replay', () => {
     expect(c.reps).toBe(2)
     expect(c.fsrs).not.toBeNull()
     // 重置：变回新卡
-    const resetEv: ReviewEvent = { seq: 3, t: T0 + 120_000, action: 'reset', cardId: c.id, deckId: c.deckId, before: c.fsrs }
+    const resetEv: ReviewEvent = {
+      seq: 3,
+      t: T0 + 120_000,
+      action: 'reset',
+      cardId: c.id,
+      deckId: c.deckId,
+      before: c.fsrs
+    }
     evs.push(resetEv)
     c = replayCard(content('c4'), 'd1', evs)
     expect(c.fsrs).toBeNull()
@@ -115,11 +130,26 @@ describe('replay', () => {
   it('delete 软删后 undo 恢复', () => {
     let c = cardOf('c3')
     const evs = [answerEv(1, c, 4, T0)]
-    const delEv: ReviewEvent = { seq: 2, t: T0 + 1000, action: 'delete', cardId: c.id, deckId: c.deckId, before: evs[0].after! }
+    const delEv: ReviewEvent = {
+      seq: 2,
+      t: T0 + 1000,
+      action: 'delete',
+      cardId: c.id,
+      deckId: c.deckId,
+      before: evs[0].after!
+    }
     evs.push(delEv)
     c = replayCard(content('c3'), 'd1', evs)
     expect(c.deletedAt).toBe(T0 + 1000)
-    evs.push({ seq: 3, t: T0 + 2000, action: 'undo', cardId: c.id, deckId: c.deckId, targetSeq: 2, before: evs[0].after! })
+    evs.push({
+      seq: 3,
+      t: T0 + 2000,
+      action: 'undo',
+      cardId: c.id,
+      deckId: c.deckId,
+      targetSeq: 2,
+      before: evs[0].after!
+    })
     c = replayCard(content('c3'), 'd1', evs)
     expect(c.deletedAt).toBeNull()
     expect(c.fsrs).toEqual(evs[0].after)
@@ -155,8 +185,12 @@ describe('queue（D3 不限额）', () => {
     const eot = eotOf(now)
     const laterToday = cardOf('r2')
     laterToday.fsrs = {
-      state: FSRS_STATE.Review, step: null, stability: 5, difficulty: 5,
-      due: eot - 3_600_000, lastReview: now - DAY // 今日 22 点到期，此刻未到点
+      state: FSRS_STATE.Review,
+      step: null,
+      stability: 5,
+      difficulty: 5,
+      due: eot - 3_600_000,
+      lastReview: now - DAY // 今日 22 点到期，此刻未到点
     }
     const fresh = cardOf('n1')
     expect(pickNext([fresh, laterToday], now, eot)!.id).toBe('r2')
@@ -167,8 +201,12 @@ describe('queue（D3 不限额）', () => {
     const eot = eotOf(now)
     const tomorrow = cardOf('r3')
     tomorrow.fsrs = {
-      state: FSRS_STATE.Review, step: null, stability: 5, difficulty: 5,
-      due: eot + 60_000, lastReview: now - DAY // 明日到期
+      state: FSRS_STATE.Review,
+      step: null,
+      stability: 5,
+      difficulty: 5,
+      due: eot + 60_000,
+      lastReview: now - DAY // 明日到期
     }
     const fresh = cardOf('n1')
     expect(pickNext([fresh, tomorrow], now, eot)!.id).toBe('n1')
@@ -198,14 +236,29 @@ describe('queue（D3 不限额）', () => {
 
   it('remaining 与 deckCounts 口径', () => {
     const now = T0
-    const endOfToday = new Date(now); endOfToday.setHours(23, 59, 59, 999)
+    const endOfToday = new Date(now)
+    endOfToday.setHours(23, 59, 59, 999)
     const newCard = cardOf('n')
     const learn = cardOf('l')
     learn.fsrs = sched.review(null, 1, T0) // 1min 后再刷
     const review = cardOf('r')
-    review.fsrs = { state: FSRS_STATE.Review, step: null, stability: 5, difficulty: 5, due: endOfToday.getTime(), lastReview: T0 - DAY }
+    review.fsrs = {
+      state: FSRS_STATE.Review,
+      step: null,
+      stability: 5,
+      difficulty: 5,
+      due: endOfToday.getTime(),
+      lastReview: T0 - DAY
+    }
     const future = cardOf('f')
-    future.fsrs = { state: FSRS_STATE.Review, step: null, stability: 30, difficulty: 5, due: now + 20 * DAY, lastReview: T0 - 10 * DAY }
+    future.fsrs = {
+      state: FSRS_STATE.Review,
+      step: null,
+      stability: 30,
+      difficulty: 5,
+      due: now + 20 * DAY,
+      lastReview: T0 - 10 * DAY
+    }
     const cards = [newCard, learn, review, future]
     expect(remainingCount(cards, endOfToday.getTime())).toBe(3)
     const counts = deckCounts(cards, endOfToday.getTime())
@@ -213,10 +266,18 @@ describe('queue（D3 不限额）', () => {
   })
   it('suspended 卡不进队列与计数', () => {
     const now = T0 + 120_000 // 学习卡 1min 后到期，此刻必然可刷
-    const endOfToday = new Date(T0); endOfToday.setHours(23, 59, 59, 999)
+    const endOfToday = new Date(T0)
+    endOfToday.setHours(23, 59, 59, 999)
     const pausedNew = { ...cardOf('p1'), suspended: true }
     const pausedDue = { ...cardOf('p2'), suspended: true }
-    pausedDue.fsrs = { state: FSRS_STATE.Review, step: null, stability: 5, difficulty: 5, due: endOfToday.getTime(), lastReview: T0 - DAY }
+    pausedDue.fsrs = {
+      state: FSRS_STATE.Review,
+      step: null,
+      stability: 5,
+      difficulty: 5,
+      due: endOfToday.getTime(),
+      lastReview: T0 - DAY
+    }
     const normal = cardOf('p3')
     normal.fsrs = sched.review(null, 1, T0) // 1min 后到期
     const cards = [pausedNew, pausedDue, normal]
@@ -228,7 +289,14 @@ describe('queue（D3 不限额）', () => {
 
 describe('query', () => {
   const mk = (id: string, front: string, back: string, updatedAt: number): Card => ({
-    ...content(id), deckId: 'd1', front, back, updatedAt, fsrs: null, reps: 0, lapses: 0
+    ...content(id),
+    deckId: 'd1',
+    front,
+    back,
+    updatedAt,
+    fsrs: null,
+    reps: 0,
+    lapses: 0
   })
   const cards = [
     mk('c1', '税法 增值税', 'back1', T0 + 3),
@@ -268,7 +336,10 @@ describe('query', () => {
     const deckOf = () => 'd'
     const a = { ...mk('a', 'x', 'b', T0), reps: 1 }
     const b = { ...mk('b', 'x', 'a', T0), reps: 2 }
-    const keys: SortKey[] = [{ col: 'front', asc: true }, { col: 'reps', asc: false }]
+    const keys: SortKey[] = [
+      { col: 'front', asc: true },
+      { col: 'reps', asc: false }
+    ]
     const sorted = [a, b].sort((x, y) => compareByKeys(x, y, keys, deckOf))
     // front 相同 → reps 降序 → b(reps=2) 在前
     expect(sorted.map((c) => c.id)).toEqual(['b', 'a'])
@@ -295,7 +366,8 @@ describe('query', () => {
 describe('stats', () => {
   it('五板块基本口径', () => {
     const now = T0 + 10 * DAY
-    const endOfToday = new Date(now); endOfToday.setHours(23, 59, 59, 999)
+    const endOfToday = new Date(now)
+    endOfToday.setHours(23, 59, 59, 999)
     const c1 = cardOf('s1')
     const c2 = cardOf('s2', 'd2')
     const evs: ReviewEvent[] = []
@@ -306,7 +378,15 @@ describe('stats', () => {
       tmp = { ...tmp, fsrs: ev.after ?? null }
     }
     // 抵消最后一个
-    evs.push({ seq: 4, t: T0 + 3 * DAY, action: 'undo', cardId: c1.id, deckId: c1.deckId, targetSeq: 3, before: evs[2].before! })
+    evs.push({
+      seq: 4,
+      t: T0 + 3 * DAY,
+      action: 'undo',
+      cardId: c1.id,
+      deckId: c1.deckId,
+      targetSeq: 3,
+      before: evs[2].before!
+    })
     const cards = [tmp, c2]
     const agg = aggOf(evs)
     const s = computeStats({ cards, dailyAgg: agg, deckId: null, range: 'year', now })
@@ -323,7 +403,14 @@ describe('stats', () => {
     const mk = (id: string, dueOffsetDay: number, suspended = false): Card => {
       const c = cardOf(id)
       c.suspended = suspended
-      c.fsrs = { state: FSRS_STATE.Review, step: null, stability: 5, difficulty: 5, due: T0 + 10 * DAY + dueOffsetDay * DAY, lastReview: T0 }
+      c.fsrs = {
+        state: FSRS_STATE.Review,
+        step: null,
+        stability: 5,
+        difficulty: 5,
+        due: T0 + 10 * DAY + dueOffsetDay * DAY,
+        lastReview: T0
+      }
       return c
     }
     const cards = [mk('f1', 100), mk('f2', 400), mk('f3', 50, true), mk('f4', 0)] // f2 超一年 f3 暂停 f4 今天内
@@ -339,7 +426,14 @@ describe('stats', () => {
     const now = T0 + 10 * DAY
     const mk = (id: string, dueDay: number): Card => {
       const c = cardOf(id)
-      c.fsrs = { state: FSRS_STATE.Review, step: null, stability: 5, difficulty: 5, due: T0 + dueDay * DAY, lastReview: T0 }
+      c.fsrs = {
+        state: FSRS_STATE.Review,
+        step: null,
+        stability: 5,
+        difficulty: 5,
+        due: T0 + dueDay * DAY,
+        lastReview: T0
+      }
       return c
     }
     const cards = [mk('g1', 2), mk('g2', 40), mk('g3', 100)] // 跨度 98 天，桶宽 98/38 ≈ 2.579 天
@@ -364,7 +458,14 @@ describe('stats', () => {
   it('间隔分段', () => {
     const now = T0 + 5 * DAY
     const c = cardOf('i1')
-    c.fsrs = { state: FSRS_STATE.Review, step: null, stability: 10, difficulty: 5, due: T0 + 5 * DAY + 6 * DAY, lastReview: T0 + 5 * DAY }
+    c.fsrs = {
+      state: FSRS_STATE.Review,
+      step: null,
+      stability: 10,
+      difficulty: 5,
+      due: T0 + 5 * DAY + 6 * DAY,
+      lastReview: T0 + 5 * DAY
+    }
     const s = computeStats({ cards: [c], dailyAgg: new Map(), deckId: null, range: 'all', now })
     expect(s.intervals.find((b) => b.bucket === '4-7')!.count).toBe(1)
   })

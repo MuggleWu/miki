@@ -8,7 +8,6 @@ import { WorkspaceService } from '../workspace'
 import { startApiServer } from '../api-server'
 
 const PORT = 18477
-const BASE = `http://127.0.0.1:${PORT}`
 let ws: WorkspaceService
 let token = ''
 
@@ -119,7 +118,13 @@ describe('http api 安全链', () => {
   it('非法 JSON 400', async () => {
     const status = await new Promise<number>((resolve, reject) => {
       const req = http.request(
-        { host: '127.0.0.1', port: PORT, path: '/api/decks', method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' } },
+        {
+          host: '127.0.0.1',
+          port: PORT,
+          path: '/api/decks',
+          method: 'POST',
+          headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }
+        },
         (res) => {
           res.resume()
           res.on('end', () => resolve(res.statusCode ?? 0))
@@ -172,7 +177,15 @@ describe('http api 牌组与卡片 CRUD', () => {
     expect(r.status).toBe(404)
     expect((await authed('POST', '/api/cards/add', { deckId, front: '', back: '  ' })).status).toBe(400)
     expect(
-      (await authed('POST', '/api/cards/add', { deckId, items: [{ front: 'ok', back: 'y' }, { front: '', back: '' }] })).status
+      (
+        await authed('POST', '/api/cards/add', {
+          deckId,
+          items: [
+            { front: 'ok', back: 'y' },
+            { front: '', back: '' }
+          ]
+        })
+      ).status
     ).toBe(400)
   })
 

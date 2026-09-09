@@ -76,7 +76,11 @@ export function dialogWindowBounds(
 }
 
 /** DialogState → IPC 载荷：只保留弹窗需要的字段；edit 模式不依赖 deckId（卡自带），add 模式不依赖 cardId */
-export function dialogToPayload(d: DialogState): { mode: 'add' | 'edit'; deckId: string | null; cardId: string | null } {
+export function dialogToPayload(d: DialogState): {
+  mode: 'add' | 'edit'
+  deckId: string | null
+  cardId: string | null
+} {
   return {
     mode: d.mode,
     deckId: d.mode === 'add' ? (d.deckId ?? null) : null,

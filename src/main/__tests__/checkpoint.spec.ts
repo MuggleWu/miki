@@ -134,7 +134,10 @@ describe('检查点 + delta 写路径', () => {
     w.answer(c.id, 3)
     const file = path.join(d, 'cards', `${deck}.ndjson`)
     // 去掉可能存在的 meta 行，模拟老版本文件
-    const lines = fs.readFileSync(file, 'utf-8').split('\n').filter((l) => l.includes('"front"'))
+    const lines = fs
+      .readFileSync(file, 'utf-8')
+      .split('\n')
+      .filter((l) => l.includes('"front"'))
     fs.writeFileSync(file, lines.join('\n') + '\n')
     fs.rmSync(path.join(d, 'stats.json'), { force: true })
 

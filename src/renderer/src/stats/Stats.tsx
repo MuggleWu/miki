@@ -56,45 +56,57 @@ export function Stats() {
     grid: { left: 40, right: 16, top: 20, bottom: 28 },
     xAxis: { type: 'category', data: stats.forecast.map((f) => f.label), ...AXIS },
     yAxis: { type: 'value', ...AXIS },
-    series: [{ type: 'bar', data: stats.forecast.map((f) => f.count), itemStyle: { color: accent }, barCategoryGap: '30%' }],
+    series: [
+      { type: 'bar', data: stats.forecast.map((f) => f.count), itemStyle: { color: accent }, barCategoryGap: '30%' }
+    ],
     tooltip: {
       trigger: 'axis',
       ...TOOLTIP,
       formatter: (ps: unknown) => {
-        const p = (ps as { dataIndex: number }[]) [0]
+        const p = (ps as { dataIndex: number }[])[0]
         const f = stats.forecast[p.dataIndex]
         return `${f.range}<br/>${f.count} 张`
       }
     }
   }
 
-  const heatmapOption: echarts.EChartsOption | null = stats && range === 'year' ? {
-    ...chartBg,
-    visualMap: {
-      min: 0,
-      max: 60,
-      show: false,
-      // GitHub 式四档色阶，高色阶取 accent 蓝；空档接近背景色
-      inRange: { color: dark ? ['#333333', '#28497c', '#3f74c4', '#589df6'] : ['#e9ebf0', '#a8b8f0', '#6f8cff', '#3f55c0'] }
-    },
-    calendar: {
-      range: [stats.heatmap[0]?.date, stats.heatmap[stats.heatmap.length - 1]?.date],
-      cellSize: ['auto', 14],
-      // GitHub 风格：格间缝隙用页面底色描边形成，关闭月份边界线
-      itemStyle: {
-        color: dark ? '#333333' : '#e9ebf0',
-        borderColor: dark ? '#2b2b2b' : '#f5f6f8',
-        borderWidth: 2,
-        borderRadius: 2
-      },
-      splitLine: { show: false },
-      yearLabel: { show: false },
-      monthLabel: { color: dim },
-      dayLabel: { color: dim, nameMap: 'ZH' }
-    },
-    series: [{ type: 'heatmap', coordinateSystem: 'calendar', data: stats.heatmap.map((h) => [h.date, h.count]) }],
-    tooltip: { ...TOOLTIP, formatter: (p: unknown) => String((p as { value: [string, number] }).value[1]) + ' 张' }
-  } : null
+  const heatmapOption: echarts.EChartsOption | null =
+    stats && range === 'year'
+      ? {
+          ...chartBg,
+          visualMap: {
+            min: 0,
+            max: 60,
+            show: false,
+            // GitHub 式四档色阶，高色阶取 accent 蓝；空档接近背景色
+            inRange: {
+              color: dark ? ['#333333', '#28497c', '#3f74c4', '#589df6'] : ['#e9ebf0', '#a8b8f0', '#6f8cff', '#3f55c0']
+            }
+          },
+          calendar: {
+            range: [stats.heatmap[0]?.date, stats.heatmap[stats.heatmap.length - 1]?.date],
+            cellSize: ['auto', 14],
+            // GitHub 风格：格间缝隙用页面底色描边形成，关闭月份边界线
+            itemStyle: {
+              color: dark ? '#333333' : '#e9ebf0',
+              borderColor: dark ? '#2b2b2b' : '#f5f6f8',
+              borderWidth: 2,
+              borderRadius: 2
+            },
+            splitLine: { show: false },
+            yearLabel: { show: false },
+            monthLabel: { color: dim },
+            dayLabel: { color: dim, nameMap: 'ZH' }
+          },
+          series: [
+            { type: 'heatmap', coordinateSystem: 'calendar', data: stats.heatmap.map((h) => [h.date, h.count]) }
+          ],
+          tooltip: {
+            ...TOOLTIP,
+            formatter: (p: unknown) => String((p as { value: [string, number] }).value[1]) + ' 张'
+          }
+        }
+      : null
 
   const reviewsOption: echarts.EChartsOption | null = stats && {
     ...chartBg,
@@ -102,8 +114,20 @@ export function Stats() {
     xAxis: { type: 'category', data: stats.reviews.map((r) => r.label.slice(5)), ...AXIS },
     yAxis: { type: 'value', ...AXIS },
     series: [
-      { type: 'bar', name: '答题', data: stats.reviews.map((r) => r.total), itemStyle: { color: okColor }, barCategoryGap: '30%' },
-      { type: 'bar', name: '重来', data: stats.reviews.map((r) => r.again), itemStyle: { color: dangerColor }, barCategoryGap: '30%' }
+      {
+        type: 'bar',
+        name: '答题',
+        data: stats.reviews.map((r) => r.total),
+        itemStyle: { color: okColor },
+        barCategoryGap: '30%'
+      },
+      {
+        type: 'bar',
+        name: '重来',
+        data: stats.reviews.map((r) => r.again),
+        itemStyle: { color: dangerColor },
+        barCategoryGap: '30%'
+      }
     ],
     tooltip: { trigger: 'axis', ...TOOLTIP }
   }
@@ -130,7 +154,9 @@ export function Stats() {
     grid: { left: 40, right: 16, top: 20, bottom: 28 },
     xAxis: { type: 'category', data: stats.intervals.map((i) => i.bucket), ...AXIS },
     yAxis: { type: 'value', ...AXIS },
-    series: [{ type: 'bar', data: stats.intervals.map((i) => i.count), itemStyle: { color: warnColor }, barCategoryGap: '30%' }],
+    series: [
+      { type: 'bar', data: stats.intervals.map((i) => i.count), itemStyle: { color: warnColor }, barCategoryGap: '30%' }
+    ],
     tooltip: { trigger: 'axis', ...TOOLTIP }
   }
 

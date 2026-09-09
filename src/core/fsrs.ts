@@ -9,9 +9,27 @@ export const DAY_MS = 86_400_000
 
 const FSRS_DEFAULT_DECAY = 0.1542
 export const DEFAULT_PARAMETERS: number[] = [
-  0.212, 1.2931, 2.3065, 8.2956, 6.4133, 0.8334, 3.0194, 0.001, 1.8722, 0.1666,
-  0.796, 1.4835, 0.0614, 0.2629, 1.6483, 0.6014, 1.8729, 0.5425, 0.0912,
-  0.0658, FSRS_DEFAULT_DECAY
+  0.212,
+  1.2931,
+  2.3065,
+  8.2956,
+  6.4133,
+  0.8334,
+  3.0194,
+  0.001,
+  1.8722,
+  0.1666,
+  0.796,
+  1.4835,
+  0.0614,
+  0.2629,
+  1.6483,
+  0.6014,
+  1.8729,
+  0.5425,
+  0.0912,
+  0.0658,
+  FSRS_DEFAULT_DECAY
 ]
 
 const STABILITY_MIN = 0.001
@@ -98,25 +116,19 @@ export class FsrScheduler {
   }
 
   private nextIntervalDays(stability: number): number {
-    const raw =
-      (stability / this.FACTOR) *
-      (Math.pow(this.params.desiredRetention, 1 / this.DECAY) - 1)
+    const raw = (stability / this.FACTOR) * (Math.pow(this.params.desiredRetention, 1 / this.DECAY) - 1)
     return Math.min(Math.max(pyRound(raw), 1), this.params.maximumInterval)
   }
 
   private shortTermStability(stability: number, rating: Rating): number {
-    let inc =
-      Math.exp(this.w[17] * (rating - 3 + this.w[18])) *
-      Math.pow(stability, -this.w[19])
+    let inc = Math.exp(this.w[17] * (rating - 3 + this.w[18])) * Math.pow(stability, -this.w[19])
     if (rating >= 2) inc = Math.max(inc, 1.0)
     return this.clampStability(stability * inc)
   }
 
   private nextDifficulty(difficulty: number, rating: Rating): number {
-    const linearDamping = (delta: number, d: number): number =>
-      ((10.0 - d) * delta) / 9.0
-    const meanReversion = (a1: number, a2: number): number =>
-      this.w[7] * a1 + (1 - this.w[7]) * a2
+    const linearDamping = (delta: number, d: number): number => ((10.0 - d) * delta) / 9.0
+    const meanReversion = (a1: number, a2: number): number => this.w[7] * a1 + (1 - this.w[7]) * a2
 
     const arg1 = this.initialDifficulty(4, false)
     const delta = -(this.w[6] * (rating - 3))
@@ -124,12 +136,7 @@ export class FsrScheduler {
     return this.clampDifficulty(meanReversion(arg1, arg2))
   }
 
-  private nextRecallStability(
-    difficulty: number,
-    stability: number,
-    retrievability: number,
-    rating: Rating
-  ): number {
+  private nextRecallStability(difficulty: number, stability: number, retrievability: number, rating: Rating): number {
     const hardPenalty = rating === 2 ? this.w[15] : 1
     const easyBonus = rating === 4 ? this.w[16] : 1
     return (
@@ -144,11 +151,7 @@ export class FsrScheduler {
     )
   }
 
-  private nextForgetStability(
-    difficulty: number,
-    stability: number,
-    retrievability: number
-  ): number {
+  private nextForgetStability(difficulty: number, stability: number, retrievability: number): number {
     const longTerm =
       this.w[11] *
       Math.pow(difficulty, -this.w[12]) *
@@ -158,12 +161,7 @@ export class FsrScheduler {
     return Math.min(longTerm, shortTerm)
   }
 
-  private nextStability(
-    difficulty: number,
-    stability: number,
-    retrievability: number,
-    rating: Rating
-  ): number {
+  private nextStability(difficulty: number, stability: number, retrievability: number, rating: Rating): number {
     const s =
       rating === 1
         ? this.nextForgetStability(difficulty, stability, retrievability)
@@ -178,7 +176,7 @@ export class FsrScheduler {
       delta += r.factor * Math.max(Math.min(days, r.end) - r.start, 0.0)
     }
     let minIvl = Math.max(2, pyRound(days - delta))
-    let maxIvl = Math.min(pyRound(days + delta), this.params.maximumInterval)
+    const maxIvl = Math.min(pyRound(days + delta), this.params.maximumInterval)
     minIvl = Math.min(minIvl, maxIvl)
     const fuzzed = Math.random() * (maxIvl - minIvl + 1) + minIvl
     return Math.min(pyRound(fuzzed), this.params.maximumInterval)
@@ -188,17 +186,12 @@ export class FsrScheduler {
    * 对齐 py-fsrs Scheduler.review_card。
    * 输入卡可以是新卡（state='new' 语义：fsrs=null），内部先落为 Learning+step=0。
    */
-  review(
-    card: CardSnapshot | null,
-    rating: Rating,
-    now: number
-  ): CardSnapshot {
+  review(card: CardSnapshot | null, rating: Rating, now: number): CardSnapshot {
     const c: CardSnapshot = card
       ? { ...card }
       : { state: FSRS_STATE.Learning, step: 0, stability: null, difficulty: null, due: now, lastReview: null }
 
-    const daysSinceLast =
-      c.lastReview != null ? daysBetween(now, c.lastReview) : null
+    const daysSinceLast = c.lastReview != null ? daysBetween(now, c.lastReview) : null
     const shortTerm = daysSinceLast != null && daysSinceLast < 1
 
     let nextIntervalMs: number
@@ -211,12 +204,7 @@ export class FsrScheduler {
         c.stability = this.shortTermStability(c.stability, rating)
         c.difficulty = this.nextDifficulty(c.difficulty, rating)
       } else {
-        c.stability = this.nextStability(
-          c.difficulty,
-          c.stability,
-          this.retrievability(c, now),
-          rating
-        )
+        c.stability = this.nextStability(c.difficulty, c.stability, this.retrievability(c, now), rating)
         c.difficulty = this.nextDifficulty(c.difficulty, rating)
       }
 
@@ -255,12 +243,7 @@ export class FsrScheduler {
       if (shortTerm) {
         c.stability = this.shortTermStability(c.stability!, rating)
       } else {
-        c.stability = this.nextStability(
-          c.difficulty!,
-          c.stability!,
-          this.retrievability(c, now),
-          rating
-        )
+        c.stability = this.nextStability(c.difficulty!, c.stability!, this.retrievability(c, now), rating)
       }
       c.difficulty = this.nextDifficulty(c.difficulty!, rating)
 
@@ -281,12 +264,7 @@ export class FsrScheduler {
         c.stability = this.shortTermStability(c.stability!, rating)
         c.difficulty = this.nextDifficulty(c.difficulty!, rating)
       } else {
-        c.stability = this.nextStability(
-          c.difficulty!,
-          c.stability!,
-          this.retrievability(c, now),
-          rating
-        )
+        c.stability = this.nextStability(c.difficulty!, c.stability!, this.retrievability(c, now), rating)
         c.difficulty = this.nextDifficulty(c.difficulty!, rating)
       }
 

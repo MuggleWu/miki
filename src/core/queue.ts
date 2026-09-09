@@ -3,22 +3,12 @@ import type { Card, DeckCounts } from '../shared/types'
 import { FSRS_STATE } from '../shared/types'
 
 export function isLearningDue(card: Card, now: number): boolean {
-  return (
-    !card.deletedAt &&
-    !!card.fsrs &&
-    card.fsrs.state !== FSRS_STATE.Review &&
-    card.fsrs.due <= now
-  )
+  return !card.deletedAt && !!card.fsrs && card.fsrs.state !== FSRS_STATE.Review && card.fsrs.due <= now
 }
 
 /** until 为可接受的到期上限（当日出卡传当日末） */
 export function isReviewDue(card: Card, until: number): boolean {
-  return (
-    !card.deletedAt &&
-    !!card.fsrs &&
-    card.fsrs.state === FSRS_STATE.Review &&
-    card.fsrs.due <= until
-  )
+  return !card.deletedAt && !!card.fsrs && card.fsrs.state === FSRS_STATE.Review && card.fsrs.due <= until
 }
 
 /**

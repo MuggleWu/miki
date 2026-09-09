@@ -310,7 +310,9 @@ app.whenReady().then(() => {
   )
   ipcMain.handle(IPC.undo, () => ws.undo())
   ipcMain.handle(IPC.addCard, (_e, deckId: string, front: string, back: string) => ws.addCard(deckId, front, back))
-  ipcMain.handle(IPC.updateCard, (_e, cardId: string, patch: { front?: string; back?: string }) => ws.updateCard(cardId, patch))
+  ipcMain.handle(IPC.updateCard, (_e, cardId: string, patch: { front?: string; back?: string }) =>
+    ws.updateCard(cardId, patch)
+  )
   ipcMain.handle(IPC.getCard, (_e, cardId: string) => ws.getCard(cardId))
   ipcMain.handle(IPC.deleteCard, (_e, cardId: string) => ws.deleteCard(cardId))
   ipcMain.handle(IPC.queryCards, (_e, params: QueryParams) => ws.queryCards(params))

@@ -69,7 +69,7 @@ export function Study() {
         if (previewSeq.current.isLatest(seq)) setPreviewDue(due)
       })
     }
-  }, [payload?.card?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [payload?.card?.id])
 
   const answer = useCallback(
     async (rating: Rating) => {
@@ -170,7 +170,10 @@ export function Study() {
 
       {card && (
         <>
-          <div className="cardbox" style={{ fontFamily: font?.fontFamily || undefined, fontSize: font?.fontSize || undefined }}>
+          <div
+            className="cardbox"
+            style={{ fontFamily: font?.fontFamily || undefined, fontSize: font?.fontSize || undefined }}
+          >
             <Md source={card.front} />
             {phase === 'answer' && (
               <>
@@ -202,7 +205,16 @@ export function Study() {
             </div>
           )}
 
-          <div style={{ display: 'flex', justifyContent: 'center', gap: 18, marginTop: 14, color: 'var(--text-dim)', fontSize: 12 }}>
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'center',
+              gap: 18,
+              marginTop: 14,
+              color: 'var(--text-dim)',
+              fontSize: 12
+            }}
+          >
             {phase === 'question' ? (
               <span>
                 <kbd className="kbd">空格</kbd> 显示答案
@@ -227,10 +239,7 @@ export function Study() {
             <span>
               <kbd className="kbd">⌘Z</kbd> 撤销
             </span>
-            <span
-              style={{ cursor: 'pointer' }}
-              onClick={() => openBrowser(studyDeckId, card?.id ?? null)}
-            >
+            <span style={{ cursor: 'pointer' }} onClick={() => openBrowser(studyDeckId, card?.id ?? null)}>
               <kbd className="kbd">B</kbd> 卡片库
             </span>
           </div>

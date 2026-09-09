@@ -103,7 +103,7 @@ export const useApp = create<AppStore>((set) => ({
         totalCount,
         config,
         selectedDeckId:
-          s.selectedDeckId && decks.some((d) => d.id === s.selectedDeckId) ? s.selectedDeckId : decks[0]?.id ?? null,
+          s.selectedDeckId && decks.some((d) => d.id === s.selectedDeckId) ? s.selectedDeckId : (decks[0]?.id ?? null),
         ...restore
       }
     })
@@ -151,10 +151,5 @@ export function sortedDecks(decks: DeckInfo[]): DeckInfo[] {
 /** NF3：输入控件聚焦时单字母快捷键失效 */
 export function isTypingTarget(t: EventTarget | null): boolean {
   if (!(t instanceof HTMLElement)) return false
-  return (
-    t.tagName === 'INPUT' ||
-    t.tagName === 'TEXTAREA' ||
-    t.tagName === 'SELECT' ||
-    t.isContentEditable
-  )
+  return t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable
 }

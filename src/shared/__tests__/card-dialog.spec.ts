@@ -149,8 +149,16 @@ describe('dialogToPayload', () => {
 
 describe('payloadToDialog（信任边界）', () => {
   it('合法 add / edit 载荷还原', () => {
-    expect(payloadToDialog({ mode: 'add', deckId: 'd1', cardId: null })).toEqual({ mode: 'add', deckId: 'd1', cardId: null })
-    expect(payloadToDialog({ mode: 'edit', deckId: null, cardId: 'c1' })).toEqual({ mode: 'edit', deckId: null, cardId: 'c1' })
+    expect(payloadToDialog({ mode: 'add', deckId: 'd1', cardId: null })).toEqual({
+      mode: 'add',
+      deckId: 'd1',
+      cardId: null
+    })
+    expect(payloadToDialog({ mode: 'edit', deckId: null, cardId: 'c1' })).toEqual({
+      mode: 'edit',
+      deckId: null,
+      cardId: 'c1'
+    })
   })
 
   it('非对象 / mode 非法 → null', () => {
@@ -177,7 +185,15 @@ describe('payloadToDialog（信任边界）', () => {
   })
 
   it('deckId 非字符串/空串归一为 null', () => {
-    expect(payloadToDialog({ mode: 'add', deckId: 42, cardId: null })).toEqual({ mode: 'add', deckId: null, cardId: null })
-    expect(payloadToDialog({ mode: 'add', deckId: '', cardId: null })).toEqual({ mode: 'add', deckId: null, cardId: null })
+    expect(payloadToDialog({ mode: 'add', deckId: 42, cardId: null })).toEqual({
+      mode: 'add',
+      deckId: null,
+      cardId: null
+    })
+    expect(payloadToDialog({ mode: 'add', deckId: '', cardId: null })).toEqual({
+      mode: 'add',
+      deckId: null,
+      cardId: null
+    })
   })
 })

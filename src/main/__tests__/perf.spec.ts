@@ -56,7 +56,12 @@ describe.skipIf(!enabled)(`性能基准（N=${N}）`, () => {
   })
 
   it(`逐张答题 ${Math.min(1000, N)} 次`, () => {
-    const r = ws.queryCards({ deckId: null, keywords: [], sort: [{ col: 'updatedAt', asc: false }], limit: Math.min(1000, N) })
+    const r = ws.queryCards({
+      deckId: null,
+      keywords: [],
+      sort: [{ col: 'updatedAt', asc: false }],
+      limit: Math.min(1000, N)
+    })
     const ratings: Rating[] = [3, 4, 1, 2]
     time(`答题（调度+追加事件+学习队列）`, r.rows.length, () => {
       r.rows.forEach((row, i) => void ws.answer(row.id, ratings[i % 4], 3500))
@@ -77,7 +82,6 @@ describe.skipIf(!enabled)(`性能基准（N=${N}）`, () => {
   })
 
   afterAll(() => {
-    // eslint-disable-next-line no-console
     console.table(timings)
   })
 })

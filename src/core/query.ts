@@ -59,11 +59,7 @@ export function matchKeywords(front: string, back: string, kws: string[]): boole
  * 单趟过滤（B3）：关键词 AND + 状态 + 到期窗口一趟判定，替代多趟 filter 中间数组。
  * lowerOf 由调用方提供小写文本（可接缓存）；无任何条件时返回原数组引用。
  */
-export function filterCards(
-  cards: Card[],
-  params: QueryParams,
-  lowerOf: (c: Card) => [string, string]
-): Card[] {
+export function filterCards(cards: Card[], params: QueryParams, lowerOf: (c: Card) => [string, string]): Card[] {
   const kws = params.keywords.map((k) => k.toLowerCase()).filter((k) => k.length > 0)
   const state = params.state
   const dueAfter = params.dueAfter
@@ -141,12 +137,7 @@ function cmp(a: Comparable, b: Comparable): number {
 }
 
 /** 多列优先级比较：keys[0] 最优先 */
-export function compareByKeys(
-  a: Card,
-  b: Card,
-  keys: SortKey[],
-  deckNameOf: (card: Card) => string
-): number {
+export function compareByKeys(a: Card, b: Card, keys: SortKey[], deckNameOf: (card: Card) => string): number {
   for (const k of keys) {
     const r = cmp(columnValue(a, deckNameOf(a), k.col), columnValue(b, deckNameOf(b), k.col))
     if (r !== 0) return k.asc ? r : -r
@@ -157,11 +148,7 @@ export function compareByKeys(
 /** 装饰排序（decorate-sort-undecorate）：排序前一趟预取全部排序键，
  * 比较器只比预取值——不再每次比较重复调 columnValue/displayState/localeCompare。
  * keys 为空时跳过排序直接返回原数组引用。 */
-export function sortByKeys(
-  list: Card[],
-  keys: SortKey[],
-  deckNameOf: (card: Card) => string
-): Card[] {
+export function sortByKeys(list: Card[], keys: SortKey[], deckNameOf: (card: Card) => string): Card[] {
   if (keys.length === 0) return list
   const decorated = list.map((c) => ({ card: c, keys: keys.map((k) => columnValue(c, deckNameOf(c), k.col)) }))
   decorated.sort((x, y) => {

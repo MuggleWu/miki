@@ -43,7 +43,9 @@ export function PromptModal(props: {
           <button onClick={props.onClose}>取消</button>
           <button
             className={props.danger ? 'danger' : 'primary'}
-            style={props.danger ? { background: 'var(--danger)', color: '#fff', borderColor: 'var(--danger)' } : undefined}
+            style={
+              props.danger ? { background: 'var(--danger)', color: '#fff', borderColor: 'var(--danger)' } : undefined
+            }
             onClick={submit}
           >
             {props.confirmText ?? '确定'}

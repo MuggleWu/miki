@@ -78,7 +78,9 @@ function resolveConnection() {
     process.exit(1)
   }
   if (cfg.api.enabled === false) {
-    console.error(`miki MCP：工作区 ${workspaceDir} 的 config.json 里 api.enabled=false，请在 miki 设置中开启 HTTP API 后重试。`)
+    console.error(
+      `miki MCP：工作区 ${workspaceDir} 的 config.json 里 api.enabled=false，请在 miki 设置中开启 HTTP API 后重试。`
+    )
     process.exit(1)
   }
   // 端口：显式 env > 运行时端口文件（含顺延实际值，pid 校验防过期）> 配置端口
@@ -187,14 +189,9 @@ server.tool(
   }
 )
 
-server.tool(
-  'get_cards',
-  '按 ID 批量取卡片完整内容（含调度状态）',
-  { cardIds },
-  async ({ cardIds }) => ({
-    content: [{ type: 'text', text: JSON.stringify(await call('POST', '/cards/get', { cardIds }), null, 2) }]
-  })
-)
+server.tool('get_cards', '按 ID 批量取卡片完整内容（含调度状态）', { cardIds }, async ({ cardIds }) => ({
+  content: [{ type: 'text', text: JSON.stringify(await call('POST', '/cards/get', { cardIds }), null, 2) }]
+}))
 
 server.tool(
   'add_cards',
@@ -228,18 +225,18 @@ server.tool(
   })
 )
 
-server.tool('move_cards', '批量移动卡片到目标牌组（保留调度进度）', { cardIds, deckId }, async ({ cardIds, deckId }) => ({
-  content: [{ type: 'text', text: JSON.stringify(await call('POST', '/cards/move', { cardIds, deckId }), null, 2) }]
-}))
-
 server.tool(
-  'reset_progress',
-  '批量重置卡片进度（变回新卡，不可撤销）',
-  { cardIds },
-  async ({ cardIds }) => ({
-    content: [{ type: 'text', text: JSON.stringify(await call('POST', '/cards/reset', { cardIds }), null, 2) }]
+  'move_cards',
+  '批量移动卡片到目标牌组（保留调度进度）',
+  { cardIds, deckId },
+  async ({ cardIds, deckId }) => ({
+    content: [{ type: 'text', text: JSON.stringify(await call('POST', '/cards/move', { cardIds, deckId }), null, 2) }]
   })
 )
+
+server.tool('reset_progress', '批量重置卡片进度（变回新卡，不可撤销）', { cardIds }, async ({ cardIds }) => ({
+  content: [{ type: 'text', text: JSON.stringify(await call('POST', '/cards/reset', { cardIds }), null, 2) }]
+}))
 
 server.tool(
   'set_suspended',
@@ -309,14 +306,9 @@ server.tool(
 
 // ---------- 只读资源 ----------
 
-server.registerResource(
-  'decks',
-  'miki://decks',
-  { description: '全部牌组及各状态卡片计数（只读）' },
-  async () => ({
-    contents: [{ uri: 'miki://decks', text: JSON.stringify(await call('GET', '/decks'), null, 2) }]
-  })
-)
+server.registerResource('decks', 'miki://decks', { description: '全部牌组及各状态卡片计数（只读）' }, async () => ({
+  contents: [{ uri: 'miki://decks', text: JSON.stringify(await call('GET', '/decks'), null, 2) }]
+}))
 
 server.registerResource(
   'stats',
@@ -353,9 +345,7 @@ server.registerPrompt(
             `3. 背面是短答，默认一句话，一行放得下；不写解释性长段。\n` +
             `4. 不做"总结卡/对比卡/大而全"卡片；不合并两个问题进一张卡。\n` +
             `5. 以 JSON 数组输出：[{"front": "...", "back": "..."}, ...]，不要输出其他解释。\n` +
-            (deckId
-              ? `6. 输出后立即调用 add_cards 工具导入牌组 ${deckId}。`
-              : `6. 本轮只输出清单，不调用导入工具。`)
+            (deckId ? `6. 输出后立即调用 add_cards 工具导入牌组 ${deckId}。` : `6. 本轮只输出清单，不调用导入工具。`)
         }
       }
     ]

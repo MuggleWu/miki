@@ -11,7 +11,12 @@ interface StubWin {
   opts: { bounds: { x: number; y: number; width: number; height: number }; title: string }
 }
 
-function makeDeps(over: Partial<CardDialogDeps> = {}): { deps: CardDialogDeps; created: StubWin[]; saved: unknown[]; mainSent: { channel: string; args: unknown[] }[] } {
+function makeDeps(over: Partial<CardDialogDeps> = {}): {
+  deps: CardDialogDeps
+  created: StubWin[]
+  saved: unknown[]
+  mainSent: { channel: string; args: unknown[] }[]
+} {
   const created: StubWin[] = []
   const saved: unknown[] = []
   const mainSent: { channel: string; args: unknown[] }[] = []
@@ -34,7 +39,15 @@ function makeDeps(over: Partial<CardDialogDeps> = {}): { deps: CardDialogDeps; c
         getBounds: () => ({ x: 111, y: 222, width: 920, height: 672 }),
         on: (event, cb) => {
           // closed 事件触发即窗口销毁（对齐 electron 语义，供 isDestroyed 守卫验证）
-          listeners.set(event, event === 'closed' ? () => { destroyed = true; cb() } : cb)
+          listeners.set(
+            event,
+            event === 'closed'
+              ? () => {
+                  destroyed = true
+                  cb()
+                }
+              : cb
+          )
         },
         send: (channel, ...args) => {
           sent.push({ channel, args })
@@ -188,7 +201,7 @@ describe('CardDialogManager 持久化', () => {
     const { deps, created, saved } = makeDeps()
     const m = new CardDialogManager(deps)
     m.open(ADD)
-    const { win, listeners } = created[0]
+    const { listeners } = created[0]
     ;(listeners.get('move') as () => void)()
     ;(listeners.get('resize') as () => void)()
     vi.advanceTimersByTime(10) // persistDelayMs=0 的宏任务

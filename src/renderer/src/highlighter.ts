@@ -26,15 +26,45 @@ import langXml from '@shikijs/langs/xml'
 import langYaml from '@shikijs/langs/yaml'
 
 export const HIGHLIGHT_LANGS = [
-  'bash', 'c', 'cpp', 'csharp', 'css', 'go', 'html', 'java', 'javascript',
-  'json', 'kotlin', 'markdown', 'python', 'rust', 'sql', 'typescript', 'xml', 'yaml'
+  'bash',
+  'c',
+  'cpp',
+  'csharp',
+  'css',
+  'go',
+  'html',
+  'java',
+  'javascript',
+  'json',
+  'kotlin',
+  'markdown',
+  'python',
+  'rust',
+  'sql',
+  'typescript',
+  'xml',
+  'yaml'
 ] as const
 
 const LANG_MODULES = {
-  bash: langBash, c: langC, cpp: langCpp, csharp: langCsharp, css: langCss, go: langGo,
-  html: langHtml, java: langJava, javascript: langJavascript, json: langJson, kotlin: langKotlin,
-  markdown: langMarkdown, python: langPython, rust: langRust, sql: langSql, typeScript: langTypeScript,
-  xml: langXml, yaml: langYaml
+  bash: langBash,
+  c: langC,
+  cpp: langCpp,
+  csharp: langCsharp,
+  css: langCss,
+  go: langGo,
+  html: langHtml,
+  java: langJava,
+  javascript: langJavascript,
+  json: langJson,
+  kotlin: langKotlin,
+  markdown: langMarkdown,
+  python: langPython,
+  rust: langRust,
+  sql: langSql,
+  typeScript: langTypeScript,
+  xml: langXml,
+  yaml: langYaml
 } as const
 
 // scope 匹配走 TextMate 前缀规则：'keyword' 覆盖 keyword.*，与旧 --code-* 语义一一对应
@@ -43,12 +73,31 @@ const MIKI_THEME: ThemeRegistration = {
   type: 'dark',
   colors: { 'editor.foreground': 'var(--text)', 'editor.background': 'var(--pre-bg)' },
   tokenColors: [
-    { scope: ['comment', 'punctuation.definition.comment'], settings: { foreground: 'var(--code-comment)', fontStyle: 'italic' } },
+    {
+      scope: ['comment', 'punctuation.definition.comment'],
+      settings: { foreground: 'var(--code-comment)', fontStyle: 'italic' }
+    },
     { scope: ['string', 'punctuation.definition.string'], settings: { foreground: 'var(--code-string)' } },
-    { scope: ['constant.numeric', 'constant.language', 'constant.character.escape'], settings: { foreground: 'var(--code-number)' } },
+    {
+      scope: ['constant.numeric', 'constant.language', 'constant.character.escape'],
+      settings: { foreground: 'var(--code-number)' }
+    },
     { scope: ['keyword', 'storage'], settings: { foreground: 'var(--code-keyword)' } },
-    { scope: ['entity.name.function', 'support.function', 'meta.method-call', 'variable.function'], settings: { foreground: 'var(--code-func)' } },
-    { scope: ['entity.name.type', 'entity.name.class', 'support.type', 'support.class', 'entity.name.tag', 'entity.name.namespace'], settings: { foreground: 'var(--code-type)' } }
+    {
+      scope: ['entity.name.function', 'support.function', 'meta.method-call', 'variable.function'],
+      settings: { foreground: 'var(--code-func)' }
+    },
+    {
+      scope: [
+        'entity.name.type',
+        'entity.name.class',
+        'support.type',
+        'support.class',
+        'entity.name.tag',
+        'entity.name.namespace'
+      ],
+      settings: { foreground: 'var(--code-type)' }
+    }
   ]
 }
 
@@ -75,8 +124,7 @@ export function highlightSync(code: string, lang: string): string | null {
   const h = highlighter
   if (!h) return null
   const name = (lang ?? '').trim().toLowerCase()
-  const resolved =
-    name && !PLAIN_LANGS.has(name) && h.getLoadedLanguages().includes(name) ? name : 'text'
+  const resolved = name && !PLAIN_LANGS.has(name) && h.getLoadedLanguages().includes(name) ? name : 'text'
   try {
     return h.codeToHtml(code, { lang: resolved, theme: 'miki-code' })
   } catch {

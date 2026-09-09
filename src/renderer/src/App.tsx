@@ -151,9 +151,7 @@ function MainApp() {
           设置
         </button>
         {decks.length === 0 && (
-          <span style={{ color: 'var(--text-dim)', fontSize: 12 }}>
-            工作区为空：先创建一个牌组
-          </span>
+          <span style={{ color: 'var(--text-dim)', fontSize: 12 }}>工作区为空：先创建一个牌组</span>
         )}
         <button
           className="theme-btn"

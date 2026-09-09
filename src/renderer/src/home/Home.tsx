@@ -79,7 +79,9 @@ export function Home() {
               <td
                 onClick={(e) => {
                   e.stopPropagation()
-                  setMenu((m) => (m?.deckId === d.id ? null : { x: e.clientX, y: e.clientY, deckId: d.id, name: d.name }))
+                  setMenu((m) =>
+                    m?.deckId === d.id ? null : { x: e.clientX, y: e.clientY, deckId: d.id, name: d.name }
+                  )
                 }}
               >
                 <span style={{ color: 'var(--text-dim)', cursor: 'pointer', letterSpacing: 2 }}>⋯</span>
@@ -92,16 +94,25 @@ export function Home() {
       <div className="home-footer">
         <div className="home-footer-left">
           <div className="home-stats">
-            今天已学习 <b>{todayCount}</b> 张
-            <span className="home-stats-dot">·</span>
+            今天已学习 <b>{todayCount}</b> 张<span className="home-stats-dot">·</span>
             总共已学习 <b>{totalCount}</b> 次
           </div>
           <div className="home-hints">
-            <span><kbd className="kbd">S</kbd> 学习</span>
-            <span><kbd className="kbd">A</kbd> 添加</span>
-            <span><kbd className="kbd">B</kbd> 卡片库</span>
-            <span><kbd className="kbd">T</kbd> 统计</span>
-            <span><kbd className="kbd">D</kbd> 回首页</span>
+            <span>
+              <kbd className="kbd">S</kbd> 学习
+            </span>
+            <span>
+              <kbd className="kbd">A</kbd> 添加
+            </span>
+            <span>
+              <kbd className="kbd">B</kbd> 卡片库
+            </span>
+            <span>
+              <kbd className="kbd">T</kbd> 统计
+            </span>
+            <span>
+              <kbd className="kbd">D</kbd> 回首页
+            </span>
           </div>
         </div>
         <button className="primary" onClick={() => setModal('create')}>

@@ -79,10 +79,7 @@ function assertMatches(c: VecCase): void {
     approx(out.difficulty, c.after.difficulty),
     `${c.name} difficulty: got ${out.difficulty} want ${c.after.difficulty}`
   ).toBe(true)
-  expect(
-    approx(out.due, c.after.due, 1e-6),
-    `${c.name} due: got ${out.due} want ${c.after.due}`
-  ).toBe(true)
+  expect(approx(out.due, c.after.due, 1e-6), `${c.name} due: got ${out.due} want ${c.after.due}`).toBe(true)
   expect(out.lastReview, `${c.name} lastReview`).toBe(c.after.lastReview)
 }
 

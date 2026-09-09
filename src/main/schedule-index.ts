@@ -238,11 +238,21 @@ export class ScheduleIndex {
   pickNextIdx(deckId: string, now: number): Card | null {
     const ix = this.ensureBuilt(deckId)
     this.rebuildHeapsIfStale(deckId, ix)
-    const learning = this.heapNext(ix.learning, deckId, now, (c, e) => !!c.fsrs && displayState(c) === 'learning' && c.fsrs!.due === e.key)
+    const learning = this.heapNext(
+      ix.learning,
+      deckId,
+      now,
+      (c, e) => !!c.fsrs && displayState(c) === 'learning' && c.fsrs!.due === e.key
+    )
     if (learning) return learning
     // 刷完旧卡才能刷新卡：当日会到期的复习卡（含今日稍后到点）都先于新卡出
     const eot = endOfLocalDay(now)
-    const review = this.heapNext(ix.review, deckId, eot, (c, e) => displayState(c) === 'review' && c.fsrs!.due === e.key)
+    const review = this.heapNext(
+      ix.review,
+      deckId,
+      eot,
+      (c, e) => displayState(c) === 'review' && c.fsrs!.due === e.key
+    )
     if (review) return review
     return this.heapNext(ix.fresh, deckId, null, (c, e) => !c.fsrs && c.createdAt === e.key)
   }

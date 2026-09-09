@@ -36,8 +36,7 @@ afterAll(() => {
   for (const d of dirs) fs.rmSync(d, { recursive: true, force: true })
 })
 
-const queryAll = (w: WorkspaceService, kw: string) =>
-  w.queryCards({ deckId: null, keywords: [kw], sort: [] })
+const queryAll = (w: WorkspaceService, kw: string) => w.queryCards({ deckId: null, keywords: [kw], sort: [] })
 
 describe('undo（会话内多步撤销）', () => {
   it('answer 撤销：fsrs 回 before、reps 回退，与重放语义一致', () => {
@@ -244,7 +243,9 @@ describe('重放一致性（重启恢复）', () => {
     const w2 = newWs(d)
     expect(w2.todayCount()).toBe(2)
     expect(w2.getStats({ deckId: null, range: 'year' }).reviews.reduce((a, r) => a + r.total, 0)).toBe(2)
-    const again = w2.getStats({ deckId: null, range: 'year' }).heatmap.find((x) => x.date === new Date().toLocaleDateString('sv-SE'))!
+    const again = w2
+      .getStats({ deckId: null, range: 'year' })
+      .heatmap.find((x) => x.date === new Date().toLocaleDateString('sv-SE'))!
     expect(again.count).toBe(2) // undone 的 Again 不计（聚合已抵消）
     expect(w2.events.length).toBe(0)
   })
@@ -601,7 +602,16 @@ describe('工作区热加载（外部变更，git pull / 他机写入）', () =>
       due: now + 86_400_000,
       lastReview: now
     }
-    const ev: ReviewEvent = { seq: 0, t: now, action: 'answer', cardId: card.id, deckId: deck.id, rating: 4, before: null, after }
+    const ev: ReviewEvent = {
+      seq: 0,
+      t: now,
+      action: 'answer',
+      cardId: card.id,
+      deckId: deck.id,
+      rating: 4,
+      before: null,
+      after
+    }
     const p = (n: number) => String(n).padStart(2, '0')
     const file = path.join(d, 'review-log', `${new Date().getFullYear()}-${p(new Date().getMonth() + 1)}.ndjson`)
     fs.appendFileSync(file, JSON.stringify(ev) + '\n', 'utf-8')
@@ -697,7 +707,10 @@ describe('部分更新（updateCard/updateCards 未提供字段保留原值）',
     expect(w.updateCard(a.id, { front: '不该生效' })).toBeNull()
     expect(w.getCard(a.id)).toMatchObject({ front: '删前正面', back: '删前背面' })
 
-    const r = w.updateCards([{ cardId: a.id, front: '不该生效' }, { cardId: b.id, front: '生效' }])
+    const r = w.updateCards([
+      { cardId: a.id, front: '不该生效' },
+      { cardId: b.id, front: '生效' }
+    ])
     expect(r).toEqual({ updated: 1, missing: 1 })
   })
 

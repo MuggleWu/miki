@@ -68,7 +68,11 @@ export function normalizeRegistry(raw: unknown): WorkspaceRegistry {
       if (typeof it !== 'object' || it === null) continue
       const e = it as Record<string, unknown>
       if (typeof e.path !== 'string' || !e.path) continue
-      upsertInPlace(reg, e.path, typeof e.lastOpenedAt === 'number' && Number.isFinite(e.lastOpenedAt) ? e.lastOpenedAt : 0)
+      upsertInPlace(
+        reg,
+        e.path,
+        typeof e.lastOpenedAt === 'number' && Number.isFinite(e.lastOpenedAt) ? e.lastOpenedAt : 0
+      )
     }
   }
   // 指针指向的工作区丢失记录时自愈补一条（旧版本升级 / 手工编辑残缺）

@@ -5,7 +5,6 @@
 //   3. 除 /api/health 外必须携带 Bearer token（workspace 首次启动生成，config.json 查看）
 //   4. 不暴露 answer/undo/配置写等学习与设置动作，只开放牌组与卡片 CRUD + 统计
 import * as http from 'node:http'
-import * as path from 'node:path'
 import * as fs from 'node:fs'
 import { timingSafeEqual, createHash } from 'node:crypto'
 import type { WorkspaceService } from './workspace'
@@ -18,8 +17,18 @@ const MAX_BODY_BYTES = 5 * 1024 * 1024
 
 /** sort 列白名单：与卡片库 BrowserColumn 一致，挡住拼写错误导致的静默排序失效 */
 const SORT_COLUMNS: readonly BrowserColumn[] = [
-  'front', 'deckName', 'state', 'due', 'dueAbs', 'interval',
-  'stability', 'difficulty', 'reps', 'lapses', 'createdAt', 'updatedAt'
+  'front',
+  'deckName',
+  'state',
+  'due',
+  'dueAbs',
+  'interval',
+  'stability',
+  'difficulty',
+  'reps',
+  'lapses',
+  'createdAt',
+  'updatedAt'
 ]
 
 class ApiError extends Error {
@@ -48,105 +57,162 @@ function buildRoutes(ws: WorkspaceService): [string, string, Handler][] {
 
   // ---------- 牌组 ----------
   routes.push(['GET', '/api/decks', () => ({ decks: ws.deckInfos() })])
-  routes.push(['POST', '/api/decks', ({ body }) => {
-    const b = body as { name?: unknown; names?: unknown }
-    if (Array.isArray(b.names)) {
-      const names = b.names.map(String).map((s) => s.trim()).filter(Boolean)
-      if (names.length === 0) throw new ApiError(400, 'names 不能为空')
-      return { decks: names.map((n) => ws.addDeck(n)) }
+  routes.push([
+    'POST',
+    '/api/decks',
+    ({ body }) => {
+      const b = body as { name?: unknown; names?: unknown }
+      if (Array.isArray(b.names)) {
+        const names = b.names
+          .map(String)
+          .map((s) => s.trim())
+          .filter(Boolean)
+        if (names.length === 0) throw new ApiError(400, 'names 不能为空')
+        return { decks: names.map((n) => ws.addDeck(n)) }
+      }
+      const name = typeof b.name === 'string' ? b.name.trim() : ''
+      if (!name) throw new ApiError(400, 'name 不能为空')
+      return ws.addDeck(name)
     }
-    const name = typeof b.name === 'string' ? b.name.trim() : ''
-    if (!name) throw new ApiError(400, 'name 不能为空')
-    return ws.addDeck(name)
-  }])
-  routes.push(['PATCH', '/api/decks/:id', ({ params, body }) => {
-    const name = typeof (body as { name?: unknown }).name === 'string' ? (body as { name: string }).name.trim() : ''
-    if (!name) throw new ApiError(400, 'name 不能为空')
-    const deck = ws.renameDeck(params.id, name)
-    if (!deck) throw new ApiError(404, '牌组不存在')
-    return deck
-  }])
-  routes.push(['DELETE', '/api/decks/:id', ({ params }) => {
-    ws.deleteDeck(params.id)
-    return { ok: true }
-  }])
+  ])
+  routes.push([
+    'PATCH',
+    '/api/decks/:id',
+    ({ params, body }) => {
+      const name = typeof (body as { name?: unknown }).name === 'string' ? (body as { name: string }).name.trim() : ''
+      if (!name) throw new ApiError(400, 'name 不能为空')
+      const deck = ws.renameDeck(params.id, name)
+      if (!deck) throw new ApiError(404, '牌组不存在')
+      return deck
+    }
+  ])
+  routes.push([
+    'DELETE',
+    '/api/decks/:id',
+    ({ params }) => {
+      ws.deleteDeck(params.id)
+      return { ok: true }
+    }
+  ])
 
   // ---------- 卡片查询 ----------
   routes.push(['GET', '/api/cards', ({ query }) => ws.queryCards(parseQuery(query))])
-  routes.push(['POST', '/api/cards/get', ({ body }) => {
-    const ids = (body as { cardIds?: unknown }).cardIds
-    if (!Array.isArray(ids)) throw new ApiError(400, 'cardIds 必须是字符串数组')
-    return { cards: ws.getCards(ids.map(String)) }
-  }])
-  routes.push(['GET', '/api/cards/:id', ({ params }) => {
-    const card = ws.getCard(params.id)
-    if (!card) throw new ApiError(404, '卡片不存在')
-    return card
-  }])
+  routes.push([
+    'POST',
+    '/api/cards/get',
+    ({ body }) => {
+      const ids = (body as { cardIds?: unknown }).cardIds
+      if (!Array.isArray(ids)) throw new ApiError(400, 'cardIds 必须是字符串数组')
+      return { cards: ws.getCards(ids.map(String)) }
+    }
+  ])
+  routes.push([
+    'GET',
+    '/api/cards/:id',
+    ({ params }) => {
+      const card = ws.getCard(params.id)
+      if (!card) throw new ApiError(404, '卡片不存在')
+      return card
+    }
+  ])
 
   // ---------- 卡片增/改/删（含批量） ----------
-  routes.push(['POST', '/api/cards/add', ({ body }) => {
-    const b = body as { deckId?: unknown; front?: unknown; back?: unknown; items?: unknown }
-    const deckId = typeof b.deckId === 'string' ? b.deckId : ''
-    if (!ws.deckExists(deckId)) throw new ApiError(404, '目标牌组不存在')
-    if (Array.isArray(b.items)) {
-      const items = b.items.map((it) => {
-        const c = normalizeContent(it)
-        requireCardContent(c.front, c.back)
-        return c
-      })
-      return { cards: ws.addCards(deckId, items) }
+  routes.push([
+    'POST',
+    '/api/cards/add',
+    ({ body }) => {
+      const b = body as { deckId?: unknown; front?: unknown; back?: unknown; items?: unknown }
+      const deckId = typeof b.deckId === 'string' ? b.deckId : ''
+      if (!ws.deckExists(deckId)) throw new ApiError(404, '目标牌组不存在')
+      if (Array.isArray(b.items)) {
+        const items = b.items.map((it) => {
+          const c = normalizeContent(it)
+          requireCardContent(c.front, c.back)
+          return c
+        })
+        return { cards: ws.addCards(deckId, items) }
+      }
+      const single = normalizeContent(b)
+      requireCardContent(single.front, single.back)
+      return ws.addCard(deckId, single.front, single.back)
     }
-    const single = normalizeContent(b)
-    requireCardContent(single.front, single.back)
-    return ws.addCard(deckId, single.front, single.back)
-  }])
-  routes.push(['PATCH', '/api/cards/:id', ({ params, body }) => {
-    const card = ws.updateCard(params.id, parseContentPatch(body))
-    if (!card) throw new ApiError(404, '卡片不存在')
-    return card
-  }])
-  routes.push(['POST', '/api/cards/update', ({ body }) => {
-    const items = (body as { items?: unknown }).items
-    if (!Array.isArray(items)) throw new ApiError(400, 'items 必须是数组')
-    return ws.updateCards(items.map((it) => {
-      const o = (it ?? {}) as { cardId?: unknown; front?: unknown; back?: unknown }
-      if (typeof o.cardId !== 'string' || !o.cardId) throw new ApiError(400, 'items[].cardId 必须是非空字符串')
-      const patch = parseContentPatch(o, 'items[]')
-      return { cardId: o.cardId, ...patch }
-    }))
-  }])
-  routes.push(['POST', '/api/cards/move', ({ body }) => {
-    const b = body as { cardIds?: unknown; deckId?: unknown }
-    if (!Array.isArray(b.cardIds)) throw new ApiError(400, 'cardIds 必须是字符串数组')
-    if (typeof b.deckId !== 'string' || !b.deckId) throw new ApiError(400, 'deckId 不能为空')
-    const moved = ws.moveCards(b.cardIds.map(String), b.deckId)
-    return { moved }
-  }])
-  routes.push(['POST', '/api/cards/reset', ({ body }) => {
-    const ids = (body as { cardIds?: unknown }).cardIds
-    if (!Array.isArray(ids)) throw new ApiError(400, 'cardIds 必须是字符串数组')
-    return { reset: ws.resetProgress(ids.map(String)) }
-  }])
-  routes.push(['POST', '/api/cards/suspend', ({ body }) => {
-    const b = body as { cardId?: unknown; suspended?: unknown }
-    if (typeof b.cardId !== 'string') throw new ApiError(400, 'cardId 不能为空')
-    const card = ws.setCardSuspended(b.cardId, Boolean(b.suspended))
-    if (!card) throw new ApiError(404, '卡片不存在')
-    return card
-  }])
-  routes.push(['POST', '/api/cards/delete', ({ body }) => {
-    const ids = (body as { cardIds?: unknown }).cardIds
-    if (!Array.isArray(ids)) throw new ApiError(400, 'cardIds 必须是字符串数组')
-    return ws.deleteCards(ids.map(String))
-  }])
+  ])
+  routes.push([
+    'PATCH',
+    '/api/cards/:id',
+    ({ params, body }) => {
+      const card = ws.updateCard(params.id, parseContentPatch(body))
+      if (!card) throw new ApiError(404, '卡片不存在')
+      return card
+    }
+  ])
+  routes.push([
+    'POST',
+    '/api/cards/update',
+    ({ body }) => {
+      const items = (body as { items?: unknown }).items
+      if (!Array.isArray(items)) throw new ApiError(400, 'items 必须是数组')
+      return ws.updateCards(
+        items.map((it) => {
+          const o = (it ?? {}) as { cardId?: unknown; front?: unknown; back?: unknown }
+          if (typeof o.cardId !== 'string' || !o.cardId) throw new ApiError(400, 'items[].cardId 必须是非空字符串')
+          const patch = parseContentPatch(o, 'items[]')
+          return { cardId: o.cardId, ...patch }
+        })
+      )
+    }
+  ])
+  routes.push([
+    'POST',
+    '/api/cards/move',
+    ({ body }) => {
+      const b = body as { cardIds?: unknown; deckId?: unknown }
+      if (!Array.isArray(b.cardIds)) throw new ApiError(400, 'cardIds 必须是字符串数组')
+      if (typeof b.deckId !== 'string' || !b.deckId) throw new ApiError(400, 'deckId 不能为空')
+      const moved = ws.moveCards(b.cardIds.map(String), b.deckId)
+      return { moved }
+    }
+  ])
+  routes.push([
+    'POST',
+    '/api/cards/reset',
+    ({ body }) => {
+      const ids = (body as { cardIds?: unknown }).cardIds
+      if (!Array.isArray(ids)) throw new ApiError(400, 'cardIds 必须是字符串数组')
+      return { reset: ws.resetProgress(ids.map(String)) }
+    }
+  ])
+  routes.push([
+    'POST',
+    '/api/cards/suspend',
+    ({ body }) => {
+      const b = body as { cardId?: unknown; suspended?: unknown }
+      if (typeof b.cardId !== 'string') throw new ApiError(400, 'cardId 不能为空')
+      const card = ws.setCardSuspended(b.cardId, Boolean(b.suspended))
+      if (!card) throw new ApiError(404, '卡片不存在')
+      return card
+    }
+  ])
+  routes.push([
+    'POST',
+    '/api/cards/delete',
+    ({ body }) => {
+      const ids = (body as { cardIds?: unknown }).cardIds
+      if (!Array.isArray(ids)) throw new ApiError(400, 'cardIds 必须是字符串数组')
+      return ws.deleteCards(ids.map(String))
+    }
+  ])
 
   // ---------- 统计 ----------
-  routes.push(['GET', '/api/stats', ({ query }) => {
-    const range = query.get('range') === 'all' ? 'all' : 'year'
-    const deckId = query.get('deckId') || null
-    return ws.getStats({ deckId, range })
-  }])
+  routes.push([
+    'GET',
+    '/api/stats',
+    ({ query }) => {
+      const range = query.get('range') === 'all' ? 'all' : 'year'
+      const deckId = query.get('deckId') || null
+      return ws.getStats({ deckId, range })
+    }
+  ])
 
   return routes
 }
@@ -293,7 +359,8 @@ export function startApiServer(ws: WorkspaceService, opts: { runtimeInfoPath?: s
         const header = req.headers['x-miki-token'] as string | undefined
         if (!tokenOk(token, bearer) && !tokenOk(token, header)) {
           return send(401, {
-            error: '未授权：缺少或错误的 token。token 存放在当前工作区 config.json 的 api.token；若刚切换过工作区，旧 token 属于另一个工作区，请改读当前工作区的 config.json'
+            error:
+              '未授权：缺少或错误的 token。token 存放在当前工作区 config.json 的 api.token；若刚切换过工作区，旧 token 属于另一个工作区，请改读当前工作区的 config.json'
           })
         }
       }

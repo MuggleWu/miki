@@ -15,7 +15,13 @@ export function localDateKey(ms: number): string {
 export type DailyAgg = Map<string, Map<string, { total: number; again: number }>>
 
 /** 聚合计数（delta=1 答题 / -1 undo 抵消），唯一入口，流式重放与运行时共用 */
-export function bumpDailyAgg(agg: DailyAgg, deckId: string, t: number, rating: Rating | undefined, delta: 1 | -1): void {
+export function bumpDailyAgg(
+  agg: DailyAgg,
+  deckId: string,
+  t: number,
+  rating: Rating | undefined,
+  delta: 1 | -1
+): void {
   let byDeck = agg.get(deckId)
   if (!byDeck) {
     byDeck = new Map()
@@ -121,7 +127,11 @@ export function computeStats(input: StatsInput): StatsPayload {
   }
   for (let i = 0; i < FORECAST_BARS; i++) {
     const rs = fStart + barWidth * i
-    forecast.push({ label: forecastLabel(rs, barWidth), count: counts[i], range: forecastRange(rs, rs + barWidth, barWidth) })
+    forecast.push({
+      label: forecastLabel(rs, barWidth),
+      count: counts[i],
+      range: forecastRange(rs, rs + barWidth, barWidth)
+    })
   }
 
   // 状态分布

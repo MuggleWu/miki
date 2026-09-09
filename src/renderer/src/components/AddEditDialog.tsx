@@ -18,11 +18,7 @@ export interface WrapResult {
 }
 
 /** 选中区加粗开关键（⌘B）：算出替换范围/替换文本/新选区。纯函数便于测试 */
-export function boldSelection(
-  value: string,
-  start: number,
-  end: number
-): WrapResult {
+export function boldSelection(value: string, start: number, end: number): WrapResult {
   const sel = value.slice(start, end)
   // 无选区：光标处插入 ****，光标落中间
   if (sel === '') {
@@ -207,7 +203,17 @@ export interface CardFormProps {
 
 /** 表单主体：弹窗壳与子窗口共用。牌组选择/内容编辑/校验/提交全在这里，宿主只接 onSubmitted/onCancelled */
 export function CardForm(props: CardFormProps) {
-  const { mode, deckId, cardId, onSubmitted, onCancelled, submitLabel, title, showHint = true, keepAfterAdd = false } = props
+  const {
+    mode,
+    deckId,
+    cardId,
+    onSubmitted,
+    onCancelled,
+    submitLabel,
+    title,
+    showHint = true,
+    keepAfterAdd = false
+  } = props
   const decks = useApp((s) => s.decks)
   const reload = useApp((s) => s.reload)
   const bumpContent = useApp((s) => s.bumpContent)
@@ -333,11 +339,7 @@ export function CardForm(props: CardFormProps) {
               <div className="tag">
                 <span>反面（Markdown）</span>
               </div>
-              <textarea
-                value={back}
-                onChange={(e) => setBack(e.target.value)}
-                placeholder="答案"
-              />
+              <textarea value={back} onChange={(e) => setBack(e.target.value)} placeholder="答案" />
             </div>
             <div>
               <div className="tag">
@@ -353,9 +355,9 @@ export function CardForm(props: CardFormProps) {
       <div className="actions">
         {showHint && (
           <span style={{ color: 'var(--text-dim)', fontSize: 12, marginRight: 'auto', alignSelf: 'center' }}>
-            <kbd className="kbd">⌘</kbd>+<kbd className="kbd">B</kbd> 加粗 · <kbd className="kbd">`</kbd> 行内代码（连按三下出代码块） ·{' '}
-            <kbd className="kbd">↩</kbd> 列表续行 · <kbd className="kbd">⌘</kbd>+<kbd className="kbd">↩</kbd> 提交 ·{' '}
-            <kbd className="kbd">esc</kbd> 关闭
+            <kbd className="kbd">⌘</kbd>+<kbd className="kbd">B</kbd> 加粗 · <kbd className="kbd">`</kbd>{' '}
+            行内代码（连按三下出代码块） · <kbd className="kbd">↩</kbd> 列表续行 · <kbd className="kbd">⌘</kbd>+
+            <kbd className="kbd">↩</kbd> 提交 · <kbd className="kbd">esc</kbd> 关闭
           </span>
         )}
         <button onClick={() => onCancelled?.()}>{keepAfterAdd ? '关闭' : '取消'}</button>

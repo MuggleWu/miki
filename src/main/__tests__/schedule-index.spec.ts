@@ -92,7 +92,10 @@ describe('调度索引随机对拍', () => {
       if (r < 0.28 || pool.length < 3) {
         const deck = decks[Math.floor(rng() * decks.length)]
         const n = 1 + Math.floor(rng() * 3)
-        const added = w.addCards(deck, Array.from({ length: n }, (_, i) => ({ front: `卡${step}-${i}`, back: '' })))
+        const added = w.addCards(
+          deck,
+          Array.from({ length: n }, (_, i) => ({ front: `卡${step}-${i}`, back: '' }))
+        )
         pool.push(...added.map((c) => c.id))
       } else if (r < 0.55) {
         const id = pool[Math.floor(rng() * pool.length)]

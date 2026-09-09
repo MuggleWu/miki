@@ -48,20 +48,13 @@ export function applyEvent(card: Card, ev: ReviewEvent, undoTarget?: UndoTargetI
  * reps/lapses 按事件流统计（answer +1 / Again +1），undo 抵消目标事件。
  * 调度状态以 answer.after / undo.before 快照为准（参数变化不影响历史重放）。
  */
-export function replayCard(
-  content: CardContent,
-  deckId: string,
-  events: ReviewEvent[]
-): Card {
+export function replayCard(content: CardContent, deckId: string, events: ReviewEvent[]): Card {
   const card: Card = { ...content, deckId, fsrs: null, reps: 0, lapses: 0 }
   const bySeq = new Map<number, ReviewEvent>()
 
   for (const ev of events) {
     if (ev.action === 'answer') bySeq.set(ev.seq, ev)
-    const target =
-      ev.action === 'undo' && ev.targetSeq != null
-        ? bySeq.get(ev.targetSeq) ?? null
-        : null
+    const target = ev.action === 'undo' && ev.targetSeq != null ? (bySeq.get(ev.targetSeq) ?? null) : null
     applyEvent(card, ev, target)
   }
   return card

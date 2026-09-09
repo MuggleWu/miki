@@ -307,7 +307,10 @@ export class WorkspaceService {
   private streamEvents(): void {
     const dir = path.join(this.root, 'review-log')
     const files = fs.existsSync(dir)
-      ? fs.readdirSync(dir).filter((f) => f.endsWith('.ndjson')).sort()
+      ? fs
+          .readdirSync(dir)
+          .filter((f) => f.endsWith('.ndjson'))
+          .sort()
       : []
     this.events = []
     this.eventBySeq = new Map()
@@ -324,8 +327,7 @@ export class WorkspaceService {
         }
         ev.seq = ++this.seq
         const card = this.cards.get(ev.cardId)
-        const wEntry =
-          ev.action === 'undo' && ev.targetSeq != null ? win.get(ev.targetSeq) ?? null : null
+        const wEntry = ev.action === 'undo' && ev.targetSeq != null ? (win.get(ev.targetSeq) ?? null) : null
         if (card && ev.seq > (card.seqApplied ?? 0)) {
           const tgt = wEntry
             ? { action: wEntry.action, rating: wEntry.rating }
@@ -463,7 +465,6 @@ export class WorkspaceService {
     const pending = active.filter((d) => !this.sched.deckIdx(d.id).built)
     const bulk = new Map<string, number>()
     if (pending.length > 0) {
-      const ids = new Set(pending.map((d) => d.id))
       const now = Date.now()
       const hidden = this.hiddenDeckIds()
       for (const d of pending) {
@@ -599,9 +600,10 @@ export class WorkspaceService {
 
   /** 统计聚合检查点落盘（压实时调用，运行期不写避免高频重写） */
   private writeStatsCheckpoint(): void {
-    const daily: [string, [string, { total: number; again: number }][]][] = [...this.dailyAgg].map(
-      ([d, m]) => [d, [...m]]
-    )
+    const daily: [string, [string, { total: number; again: number }][]][] = [...this.dailyAgg].map(([d, m]) => [
+      d,
+      [...m]
+    ])
     atomicWrite(this.paths.statsFile(), JSON.stringify({ checkpointSeq: this.seq, dailyAgg: daily }))
     this.watcher.noteWrite(this.paths.statsFile())
   }
@@ -772,7 +774,10 @@ export class WorkspaceService {
     if (moved > 0) {
       // 目标牌组 delta 追加带快照完整行、源牌组追加墓碑——均 O(移动数)，无全量重写；
       // delta 内行序=操作时序，先移出后移回不会互相覆盖
-      this.appendCardDeltaSnapshot(targetDeckId, touched.map((t) => t.card))
+      this.appendCardDeltaSnapshot(
+        targetDeckId,
+        touched.map((t) => t.card)
+      )
       const bySource = new Map<string, string[]>()
       for (const t of touched) {
         const list = bySource.get(t.before.deckId) ?? []
@@ -782,7 +787,10 @@ export class WorkspaceService {
       // 分桶迁移：源桶一次性滤出被移动卡，目标桶逐张追加（O(源桶+移动数)）
       const movedIds = new Set(bySource.size === 1 ? bySource.values().next().value! : touched.map((t) => t.card.id))
       for (const srcId of bySource.keys()) {
-        this.byDeck.set(srcId, (this.byDeck.get(srcId) ?? []).filter((c) => !movedIds.has(c.id)))
+        this.byDeck.set(
+          srcId,
+          (this.byDeck.get(srcId) ?? []).filter((c) => !movedIds.has(c.id))
+        )
       }
       const targetBucket = this.deckBucket(targetDeckId)
       for (const t of touched) targetBucket.push(t.card)
@@ -847,7 +855,14 @@ export class WorkspaceService {
     if (!card || card.deletedAt) return
     const now = Date.now()
     const before = { ...card }
-    const ev: ReviewEvent = { seq: ++this.seq, t: now, action: 'delete', cardId, deckId: card.deckId, before: card.fsrs }
+    const ev: ReviewEvent = {
+      seq: ++this.seq,
+      t: now,
+      action: 'delete',
+      cardId,
+      deckId: card.deckId,
+      before: card.fsrs
+    }
     this.appendEvents([ev])
     card.deletedAt = now
     this.sched.reindexCard(card, before)
@@ -892,7 +907,17 @@ export class WorkspaceService {
     const before = { ...card }
     const beforeFsrs = card.fsrs
     const after = this.scheduler.review(beforeFsrs, rating, now)
-    const ev: ReviewEvent = { seq: ++this.seq, t: now, action: 'answer', cardId, deckId: card.deckId, rating, before: beforeFsrs, after, durationMs }
+    const ev: ReviewEvent = {
+      seq: ++this.seq,
+      t: now,
+      action: 'answer',
+      cardId,
+      deckId: card.deckId,
+      rating,
+      before: beforeFsrs,
+      after,
+      durationMs
+    }
     const evs: ReviewEvent[] = [ev]
     card.fsrs = after
     card.reps++
@@ -957,8 +982,7 @@ export class WorkspaceService {
     // 补一条 suspend(false) 事件保证重放一致（重放不含内存恢复逻辑，只认事件流）。
     if (target.action === 'answer' && target.rating === 1 && card.suspended) {
       const nxt = this.eventBySeq.get(target.seq + 1)
-      const auto =
-        nxt && nxt.cardId === card.id && nxt.action === 'suspend' && nxt.suspended === true ? nxt : undefined
+      const auto = nxt && nxt.cardId === card.id && nxt.action === 'suspend' && nxt.suspended === true ? nxt : undefined
       let lastSuspend: ReviewEvent | undefined
       for (let i = this.events.length - 1; i >= 0; i--) {
         const e = this.events[i]

@@ -7,16 +7,7 @@ const { execSync } = require('node:child_process')
 const path = require('node:path')
 
 if (process.platform === 'darwin') {
-  const plist = path.join(
-    __dirname,
-    '..',
-    'node_modules',
-    'electron',
-    'dist',
-    'Electron.app',
-    'Contents',
-    'Info.plist'
-  )
+  const plist = path.join(__dirname, '..', 'node_modules', 'electron', 'dist', 'Electron.app', 'Contents', 'Info.plist')
   execSync(`plutil -replace CFBundleName -string "Miki" "${plist}"`)
   execSync(`plutil -replace CFBundleDisplayName -string "Miki" "${plist}"`)
   console.log('[fix-dev-app-name] Electron.app 显示名已改为 Miki')

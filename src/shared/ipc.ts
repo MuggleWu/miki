@@ -1,7 +1,6 @@
 // IPC 通道与调用签名（main / preload / renderer 共用）
 import type {
   Card,
-  Deck,
   DeckInfo,
   MikiConfig,
   QueryParams,

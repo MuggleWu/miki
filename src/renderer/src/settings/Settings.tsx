@@ -46,9 +46,7 @@ function WorkspaceCard() {
                 {current && <em>当前</em>}
               </span>
               <span className="ws-list-actions">
-                {!current && (
-                  <button onClick={() => void run(() => window.miki.workspaceSwitch(w.path))}>切换</button>
-                )}
+                {!current && <button onClick={() => void run(() => window.miki.workspaceSwitch(w.path))}>切换</button>}
                 {current && <button onClick={() => void window.miki.workspaceReveal(w.path)}>打开文件夹</button>}
                 {!current && (
                   <button className="danger" onClick={() => void run(() => window.miki.workspaceRemove(w.path))}>
@@ -159,8 +157,8 @@ export function Settings() {
       <section className="settings-card">
         <h3>刷卡字体</h3>
         <p className="settings-hint">
-          默认「系统默认」跟随系统字体（macOS：苹方 / SF Pro），与 Obsidian 默认字体一致；
-          默认字号 16px 同 Obsidian。作用于学习页的正面与反面内容区。
+          默认「系统默认」跟随系统字体（macOS：苹方 / SF Pro），与 Obsidian 默认字体一致； 默认字号 16px 同
+          Obsidian。作用于学习页的正面与反面内容区。
         </p>
         <div className="settings-row">
           <label>
@@ -190,10 +188,7 @@ export function Settings() {
             />
           </label>
         </div>
-        <div
-          className="settings-sample"
-          style={{ fontFamily: font.fontFamily || undefined, fontSize: fontSize.draft }}
-        >
+        <div className="settings-sample" style={{ fontFamily: font.fontFamily || undefined, fontSize: fontSize.draft }}>
           {SAMPLE.split('\n').map((line) => (
             <div key={line}>{line}</div>
           ))}
@@ -203,8 +198,8 @@ export function Settings() {
       <section className="settings-card">
         <h3>Leech（难卡暂停）</h3>
         <p className="settings-hint">
-          一张卡累计「重来」次数达到阈值后自动暂停，不再出现在学习队列与计数中；
-          可在卡片库右侧面板解除暂停。设为 0 关闭该功能。
+          一张卡累计「重来」次数达到阈值后自动暂停，不再出现在学习队列与计数中； 可在卡片库右侧面板解除暂停。设为 0
+          关闭该功能。
         </p>
         <div className="settings-row">
           <label>
