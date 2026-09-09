@@ -700,4 +700,21 @@ describe('部分更新（updateCard/updateCards 未提供字段保留原值）',
     const r = w.updateCards([{ cardId: a.id, front: '不该生效' }, { cardId: b.id, front: '生效' }])
     expect(r).toEqual({ updated: 1, missing: 1 })
   })
+
+  it('空 patch 为 no-op：不更新 updatedAt、不追加 delta 行', () => {
+    const d = tmpKept()
+    const w = newWs(d)
+    const deck = w.addDeck('空补丁')
+    const a = w.addCard(deck.id, 'A', 'B')
+    const beforeUpdated = w.getCard(a.id)!.updatedAt
+    const deltaFile = path.join(d, 'cards', `${deck.id}.delta.ndjson`)
+
+    expect(w.updateCard(a.id, {})).not.toBeNull()
+    const r = w.updateCards([{ cardId: a.id }, { cardId: a.id }])
+    expect(r).toEqual({ updated: 0, missing: 0 })
+    expect(w.getCard(a.id)!.updatedAt).toBe(beforeUpdated)
+    if (fs.existsSync(deltaFile)) {
+      expect(fs.readFileSync(deltaFile, 'utf-8').trim()).toBe('') // 没有任何 delta 行
+    }
+  })
 })

@@ -42,12 +42,22 @@ describe('normalizeRegistry', () => {
     expect(reg.current).toBe('/a/b')
   })
 
-  it('坏字段一律丢弃：非对象、path 非字符串/空、lastOpenedAt 非数字', () => {
+  it('坏字段一律丢弃：非对象、path 非字符串/空、lastOpenedAt 非数字（NaN 归零不污染排序）', () => {
     const reg = normalizeRegistry({
       current: '/ok',
-      workspaces: [null, 'x', {}, { path: '', lastOpenedAt: 5 }, { path: '/ok', lastOpenedAt: 'no' }]
+      workspaces: [
+        null,
+        'x',
+        {},
+        { path: '', lastOpenedAt: 5 },
+        { path: '/ok', lastOpenedAt: 'no' },
+        { path: '/nan', lastOpenedAt: Number.NaN }
+      ]
     })
-    expect(reg.workspaces).toEqual([{ path: '/ok', name: 'ok', lastOpenedAt: 0 }])
+    expect(reg.workspaces).toEqual([
+      { path: '/nan', name: 'nan', lastOpenedAt: 0 },
+      { path: '/ok', name: 'ok', lastOpenedAt: 0 }
+    ])
   })
 
   it('current 指向的工作区缺记录时自愈补一条', () => {

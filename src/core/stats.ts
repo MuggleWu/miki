@@ -29,7 +29,8 @@ export function bumpDailyAgg(agg: DailyAgg, deckId: string, t: number, rating: R
 }
 
 export interface StatsInput {
-  cards: Card[] // 未过滤的全量卡（函数内部按 deckId 过滤）
+  /** 未过滤的全量卡（函数内部按 deckId 过滤）；接受 Iterable，调用方可直接传 Map.values() 免去整库拷贝 */
+  cards: Iterable<Card>
   dailyAgg: DailyAgg // 热力图聚合（undo 已抵消）
   deckId: string | null
   range: 'year' | 'all'
@@ -42,7 +43,10 @@ export function computeStats(input: StatsInput): StatsPayload {
   const startKey = range === 'year' ? localDateKey(rangeStart) : ''
 
   const deckOf = (deck: string) => deckId == null || deck === deckId
-  const cards = input.cards.filter((c) => !c.deletedAt && deckOf(c.deckId))
+  const cards: Card[] = []
+  for (const c of input.cards) {
+    if (!c.deletedAt && deckOf(c.deckId)) cards.push(c)
+  }
 
   // 热力图 & 复习曲线（聚合已是净计数，按牌组过滤后合并）
   const dayCounts = new Map<string, { total: number; again: number }>()

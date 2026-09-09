@@ -28,7 +28,7 @@ import {
 import { FsrScheduler, DEFAULT_FSRS_PARAMS } from '../core/fsrs'
 import { MinHeap, type HeapEntry } from '../core/min-heap'
 import { applyEvent } from '../core/replay'
-import { compareByKeys, displayState, filterByKeywords, toRow } from '../core/query'
+import { displayState, filterByKeywords, sortByKeys, toRow } from '../core/query'
 import type { MikiConfigPatch } from '../shared/ipc'
 import { bumpDailyAgg, computeStats, endOfLocalDay, localDateKey, type DailyAgg } from '../core/stats'
 
@@ -1291,7 +1291,7 @@ export class WorkspaceService {
     if (params.dueAfter != null) list = list.filter((c) => c.fsrs != null && c.fsrs.due >= params.dueAfter!)
     if (params.dueBefore != null) list = list.filter((c) => c.fsrs != null && c.fsrs.due <= params.dueBefore!)
     const deckNameOf = (c: Card) => nameById.get(c.deckId) ?? ''
-    list = [...list].sort((a, b) => compareByKeys(a, b, params.sort, deckNameOf))
+    list = sortByKeys(list, params.sort, deckNameOf)
     const offset = params.offset ?? 0
     return {
       rows: list.slice(offset, offset + (params.limit ?? 5000)).map((c) => toRow(c, deckNameOf(c))),

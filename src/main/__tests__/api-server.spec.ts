@@ -107,6 +107,15 @@ describe('http api 安全链', () => {
     expect((await authed('PUT', '/api/decks')).status).toBe(405)
   })
 
+  it('HEAD 探活：已知接口 200、未知接口 404（与 GET 同一套路由）', async () => {
+    expect((await request('HEAD', '/api/decks', { token })).status).toBe(200)
+    expect((await request('HEAD', '/api/nope', { token })).status).toBe(404)
+  })
+
+  it('畸形百分号编码 400（不再冒成 500）', async () => {
+    expect((await authed('GET', '/api/cards/%zz')).status).toBe(400)
+  })
+
   it('非法 JSON 400', async () => {
     const status = await new Promise<number>((resolve, reject) => {
       const req = http.request(

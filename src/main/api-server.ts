@@ -297,7 +297,12 @@ export function startApiServer(ws: WorkspaceService, opts: { runtimeInfoPath?: s
           })
         }
       }
-      if (method === 'HEAD') return send(200, { ok: true })
+      // HEAD 探活与正常路由走同一套鉴权/校验，只省响应体（GET 语义）
+      if (method === 'HEAD') {
+        const headMatch = matchRoute(routes, 'GET', url.pathname)
+        if (!headMatch) return send(404, { error: '未知接口' })
+        return send(200, { ok: true })
+      }
 
       const match = matchRoute(routes, method, url.pathname)
       if (!match) return send(404, { error: '未知接口' })
@@ -359,8 +364,14 @@ function matchRoute(
     const params: Record<string, string> = {}
     let ok = true
     for (let i = 0; i < pp.length; i++) {
-      if (pp[i].startsWith(':')) params[pp[i].slice(1)] = decodeURIComponent(up[i])
-      else if (pp[i] !== up[i]) {
+      if (pp[i].startsWith(':')) {
+        // 畸形百分号序列（如 /api/cards/%zz）→ 400，而不是 URIError 冒成 500
+        try {
+          params[pp[i].slice(1)] = decodeURIComponent(up[i])
+        } catch {
+          throw new ApiError(400, '路径参数编码非法')
+        }
+      } else if (pp[i] !== up[i]) {
         ok = false
         break
       }
