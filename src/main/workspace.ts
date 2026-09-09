@@ -78,6 +78,8 @@ export class WorkspaceService {
   cards = new Map<string, Card>()
   /** 仅本会话事件（undo 查找用）；历史事件流式重放后不驻留（需求 §19 L1） */
   events: ReviewEvent[] = []
+  /** 会话事件按 seq 的索引（与 events 同生同灭）：undo 找目标事件 O(1)，免去 O(会话事件数) 线性扫 */
+  private eventBySeq = new Map<number, ReviewEvent>()
   private seq = 0
   private scheduler!: FsrScheduler
   /** 预览专用（无 fuzz），评级按钮的到期提示用它保证展示稳定 */
@@ -357,6 +359,7 @@ export class WorkspaceService {
       ? fs.readdirSync(dir).filter((f) => f.endsWith('.ndjson')).sort()
       : []
     this.events = []
+    this.eventBySeq = new Map()
     this.seq = 0
     const todayKey = localDateKey(Date.now())
     const win = new Map<number, { action: ReviewEvent['action']; rating?: Rating; t: number; deckId: string }>()
@@ -1157,6 +1160,7 @@ export class WorkspaceService {
       this.noteWrite(f)
     }
     this.events.push(...evs)
+    for (const ev of evs) this.eventBySeq.set(ev.seq, ev)
   }
 
   deleteCard(cardId: string): void {
@@ -1241,7 +1245,7 @@ export class WorkspaceService {
     if (!op) {
       return { restoredCardId: null, card: null, remaining: 0, todayCount: this.todayCount() }
     }
-    const target = this.events.find((e) => e.seq === op.seq)
+    const target = this.eventBySeq.get(op.seq)
     if (!target) throw new Error(`session event missing: ${op.seq}`)
     const card = this.cards.get(op.cardId)
     if (!card) throw new Error(`card missing: ${op.cardId}`)
@@ -1273,9 +1277,9 @@ export class WorkspaceService {
     // 之后再无 suspend 事件（最后一条就是它）才认领——手动暂停/解除过的不归这次撤销管。
     // 补一条 suspend(false) 事件保证重放一致（重放不含内存恢复逻辑，只认事件流）。
     if (target.action === 'answer' && target.rating === 1 && card.suspended) {
-      const auto = this.events.find(
-        (e) => e.seq === target.seq + 1 && e.cardId === card.id && e.action === 'suspend' && e.suspended === true
-      )
+      const nxt = this.eventBySeq.get(target.seq + 1)
+      const auto =
+        nxt && nxt.cardId === card.id && nxt.action === 'suspend' && nxt.suspended === true ? nxt : undefined
       let lastSuspend: ReviewEvent | undefined
       for (let i = this.events.length - 1; i >= 0; i--) {
         const e = this.events[i]
