@@ -980,10 +980,10 @@ export class WorkspaceService {
     return out
   }
 
-  /** 单卡改内容：patch 未提供的字段保留原值（部分更新），提供的字段整体覆盖（含清空为空串） */
+  /** 单卡改内容：patch 未提供的字段保留原值（部分更新），提供的字段整体覆盖（含清空为空串）；软删卡拒改（与 updateCards/deleteCards 口径一致） */
   updateCard(cardId: string, patch: { front?: string; back?: string }): Card | null {
     const card = this.cards.get(cardId)
-    if (!card) return null
+    if (!card || card.deletedAt) return null
     if (patch.front !== undefined) card.front = patch.front
     if (patch.back !== undefined) card.back = patch.back
     card.updatedAt = Date.now()

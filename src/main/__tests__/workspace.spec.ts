@@ -631,4 +631,19 @@ describe('部分更新（updateCard/updateCards 未提供字段保留原值）',
     expect(w.getCard(a.id)).toMatchObject({ front: 'A1改', back: 'A2' })
     expect(w.getCard(b.id)).toMatchObject({ front: 'B1', back: '' })
   })
+
+  it('软删卡拒改：单卡返回 null，批量计入 missing', () => {
+    const d = tmpKept()
+    const w = newWs(d)
+    const deck = w.addDeck('软删拒改')
+    const a = w.addCard(deck.id, '删前正面', '删前背面')
+    const b = w.addCard(deck.id, '保留卡', '')
+    w.deleteCards([a.id])
+
+    expect(w.updateCard(a.id, { front: '不该生效' })).toBeNull()
+    expect(w.getCard(a.id)).toMatchObject({ front: '删前正面', back: '删前背面' })
+
+    const r = w.updateCards([{ cardId: a.id, front: '不该生效' }, { cardId: b.id, front: '生效' }])
+    expect(r).toEqual({ updated: 1, missing: 1 })
+  })
 })
