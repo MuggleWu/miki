@@ -242,7 +242,8 @@ describe('http api 牌组与卡片 CRUD', () => {
     expect(badDue.status).toBe(400)
 
     // 纯日期串按本地零点解析（与 MCP toEpochMs 同口径，非 UTC 零点）。加一张刚答完的卡
-    // （due=now+60s 学习步长），窗口 [今天零点, 明天] 必命中它；两入口同窗对拍卡死口径差
+    // （新卡 Good 进 learning 第 2 步，due=now+10min——午夜前 10 分钟会跨天，窗口上限取后天规避）；
+    // 两入口同窗对拍卡死口径差
     const dueDeck = ws.addDeck('due 口径组').id
     const c = ws.addCard(dueDeck, 'due 本地零点', '')
     ws.answer(c.id, 3)
@@ -251,10 +252,10 @@ describe('http api 牌组与卡片 CRUD', () => {
       return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
     }
     const now = Date.now()
-    const tomorrowKey = dayKey(now + 86_400_000)
+    const upperKey = dayKey(now + 2 * 86_400_000)
     const hit = await authed(
       'GET',
-      `/api/cards?deckId=${dueDeck}&dueAfter=${encodeURIComponent(dayKey(now))}&dueBefore=${encodeURIComponent(tomorrowKey)}`
+      `/api/cards?deckId=${dueDeck}&dueAfter=${encodeURIComponent(dayKey(now))}&dueBefore=${encodeURIComponent(upperKey)}`
     )
     expect((hit.json as { rows: { id: string }[] }).rows.map((r) => r.id)).toContain(c.id)
     // 同一日期串两条入口等价：HTTP 直接传串 vs MCP toEpochMs 先转本地零点时间戳，查到的行一致。
@@ -266,7 +267,7 @@ describe('http api 牌组与卡片 CRUD', () => {
     })()
     const viaMcp = await authed(
       'GET',
-      `/api/cards?deckId=${dueDeck}&dueAfter=${mcpTs}&dueBefore=${encodeURIComponent(tomorrowKey)}`
+      `/api/cards?deckId=${dueDeck}&dueAfter=${mcpTs}&dueBefore=${encodeURIComponent(upperKey)}`
     )
     expect((viaMcp.json as { rows: { id: string }[] }).rows.map((r) => r.id)).toEqual(
       (hit.json as { rows: { id: string }[] }).rows.map((r) => r.id)
