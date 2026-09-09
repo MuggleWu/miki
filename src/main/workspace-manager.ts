@@ -46,14 +46,9 @@ export class WorkspaceManager {
   }
 
   /** 启动解析：环境变量覆盖 > 有效指针 > 需要引导。返回 null 时调用方不初始化 WorkspaceService，
-   * 渲染层经 workspaceStatus 看到引导页；环境变量覆盖允许目录不存在（init 会创建） */
+   * 渲染层经 workspaceStatus 看到引导页。环境变量覆盖只影响当次运行（临时/开发用途），不写入指针文件 */
   resolveInitial(envOverride: string | null): string | null {
-    if (envOverride) {
-      this.reg = upsertWorkspace(this.reg, envOverride, this.deps.now())
-      this.reg.current = envOverride
-      this.save()
-      return envOverride
-    }
+    if (envOverride) return envOverride
     if (this.reg.current && this.deps.isDirectory(this.reg.current)) {
       const p = this.reg.current
       this.reg = upsertWorkspace(this.reg, p, this.deps.now())

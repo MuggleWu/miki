@@ -67,8 +67,14 @@ function clampToWorkArea(st: WindowState): { x?: number; y?: number; width: numb
 }
 
 function createWindow(): void {
-  const restored = clampToWorkArea(ws.config.window)
-  applyNativeTheme(ws.config.theme)
+  // 引导阶段 ws 尚未 init（无 config）：按默认尺寸居中建窗，让引导页有宿主；
+  // 主题在引导期走系统外观，确认工作区后由 ws.config 接管
+  const st: WindowState = workspaceReady
+    ? ws.config.window
+    : { x: null, y: null, width: 1280, height: 840, maximized: false }
+  const restored = clampToWorkArea(st)
+  const theme: 'light' | 'dark' = workspaceReady ? ws.config.theme : nativeTheme.shouldUseDarkColors ? 'dark' : 'light'
+  applyNativeTheme(theme)
   win = new BrowserWindow({
     x: restored.x,
     y: restored.y,
@@ -78,7 +84,7 @@ function createWindow(): void {
     minHeight: 600,
     title: 'Miki',
     // 与主题一致的启动底色，避免加载闪烁
-    backgroundColor: ws.config.theme === 'dark' ? '#101014' : '#f5f6f8',
+    backgroundColor: theme === 'dark' ? '#101014' : '#f5f6f8',
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -87,7 +93,7 @@ function createWindow(): void {
     }
   })
   // 上次是最大化：先按普通尺寸建窗再最大化（resize 回调里 getNormalBounds 仍取普通态，不会污染尺寸）
-  if (ws.config.window.maximized) win.maximize()
+  if (workspaceReady && ws.config.window.maximized) win.maximize()
 
   // 点标题栏切回时 webContents 可能不是 firstResponder，键盘整体失灵；窗口每次聚焦把焦点补回渲染层
   win.on('focus', () => {

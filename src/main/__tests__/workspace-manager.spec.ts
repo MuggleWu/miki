@@ -42,14 +42,12 @@ function makeDeps(root = tmp()): WorkspaceManagerDeps {
 }
 
 describe('WorkspaceManager.resolveInitial', () => {
-  it('环境变量覆盖优先：目录不存在也接受并写回注册表', () => {
+  it('环境变量覆盖只影响当次运行：返回该路径且不写回指针文件', () => {
     const root = tmp()
     const m = new WorkspaceManager(makeDeps(root))
     const p = path.join(root, 'env-ws')
     expect(m.resolveInitial(p)).toBe(p)
-    const saved = JSON.parse(fs.readFileSync(path.join(root, 'workspace.json'), 'utf-8'))
-    expect(saved.current).toBe(p)
-    expect(saved.workspaces.map((w: { path: string }) => w.path)).toContain(p)
+    expect(fs.existsSync(path.join(root, 'workspace.json'))).toBe(false)
   })
 
   it('指针有效时返回 current 并刷新注册表', () => {
