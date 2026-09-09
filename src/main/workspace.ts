@@ -707,7 +707,7 @@ export class WorkspaceService {
     if (evs.length === 0) return { deleted: 0, missing }
     this.appendEvents(evs)
     for (const ev of evs) this.sessionOps.push({ seq: ev.seq, cardId: ev.cardId })
-    for (const t of touched) this.sched.reindexCard(t.card, t.before)
+    this.sched.reindexBatch(touched)
     return { deleted: evs.length, missing }
   }
 
@@ -795,7 +795,7 @@ export class WorkspaceService {
       const targetBucket = this.deckBucket(targetDeckId)
       for (const t of touched) targetBucket.push(t.card)
       for (const [deckId, ids] of bySource) this.appendCardTombstones(deckId, ids)
-      for (const t of touched) this.sched.reindexCard(t.card, t.before, t.before.deckId)
+      this.sched.reindexBatch(touched)
     }
     return moved
   }
@@ -829,7 +829,7 @@ export class WorkspaceService {
     // reset 不可撤销：把该卡的会话撤销栈一并作废
     const resetIds = new Set(evs.map((e) => e.cardId))
     this.sessionOps = this.sessionOps.filter((op) => !resetIds.has(op.cardId))
-    for (const t of touched) this.sched.reindexCard(t.card, t.before)
+    this.sched.reindexBatch(touched)
     return evs.length
   }
 

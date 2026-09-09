@@ -213,6 +213,25 @@ export class ScheduleIndex {
     for (const c of cards) this.classPush(c, ix, eot)
   }
 
+  /** 批量状态变更统一入口（批量软删/移动/重置用）：与逐张 reindexCard 完全同口径，
+   * 跨天检测/当日界/隐藏牌组判定 hoist 出来，逐张只做减旧贡献+按新状态入堆计数；
+   * deckIdBefore 供移动跨牌组扣减，缺省即 before.deckId */
+  reindexBatch(items: { card: Card; before: Card; deckIdBefore?: string }[], now = Date.now()): void {
+    this.ensureDay(now)
+    const eot = endOfLocalDay(now)
+    const hidden = this.host.hiddenDeckIds()
+    for (const it of items) {
+      this.unclassCounts(it.before, eot, it.deckIdBefore ?? it.before.deckId)
+      if (!it.card.deletedAt && !hidden.has(it.card.deckId)) {
+        if (it.card.suspended) {
+          this.deckIdx(it.card.deckId).counts.total++ // 暂停卡只进总数，学习/复习计数不含它
+        } else {
+          this.classPush(it.card, this.deckIdx(it.card.deckId), eot)
+        }
+      }
+    }
+  }
+
   /** 取堆顶有效卡：跳过失效条目（已删/暂停/换牌组/due 已变），dueLimit 内未到期则返回 null。
    * 有效卡只 peek 不 pop——pickNext 是幂等读，条目在卡片状态变化后按 key 不匹配惰性失效。 */
   private heapNext(
