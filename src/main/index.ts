@@ -69,6 +69,11 @@ function createWindow(): void {
   // 上次是最大化：先按普通尺寸建窗再最大化（resize 回调里 getNormalBounds 仍取普通态，不会污染尺寸）
   if (ws.config.window.maximized) win.maximize()
 
+  // 点标题栏切回时 webContents 可能不是 firstResponder，键盘整体失灵；窗口每次聚焦把焦点补回渲染层
+  win.on('focus', () => {
+    if (win && !win.isDestroyed() && !win.webContents.isFocused()) win.webContents.focus()
+  })
+
   // 窗口尺寸/位置/最大化 → 工作区 config.json（防抖落盘；关闭时立即补一次）
   const persistBounds = () => {
     if (!win || win.isDestroyed()) return

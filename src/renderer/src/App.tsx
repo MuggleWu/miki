@@ -78,14 +78,19 @@ export default function App() {
         if (s.dialog) s.closeDialog() // 关的是独立子窗口（store 桥接 IPC，主窗口 DOM 已无弹窗层）
         return
       }
-      // 弹窗打开时屏蔽单字母快捷键，避免穿透操作背后的界面
-      if (s.dialog) return
+      // A 在弹窗屏蔽之前放行：卡片弹窗子窗口已开时按 A 同样唤起它——主进程对已存在的弹窗窗口
+      // 重发载荷并 show+focus（已开新增弹窗→原样置前；开的是编辑弹窗→切到新增表单），
+      // 与学习页 E 唤起编辑弹窗（Study 自己的监听，不受弹窗屏蔽）对等
       if (key === 'a') {
         e.preventDefault()
         const deckId = s.studyDeckId ?? s.selectedDeckId ?? s.decks[0]?.id ?? null
         // 请求主进程开卡片弹窗子窗口（store.openDialog 桥接 IPC 并记状态）
         openDialog({ mode: 'add', deckId, cardId: null })
-      } else if (key === 'b') {
+        return
+      }
+      // 弹窗打开时屏蔽其余单字母快捷键，避免穿透操作背后的界面
+      if (s.dialog) return
+      if (key === 'b') {
         e.preventDefault()
         if (s.tab === 'study' && s.studyDeckId) {
           openBrowser(s.studyDeckId, s.studyCurrentCardId)
