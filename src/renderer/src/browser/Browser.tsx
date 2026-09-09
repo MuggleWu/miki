@@ -46,6 +46,10 @@ const ALL_COLUMNS = Object.keys(COLUMN_LABEL) as BrowserColumn[]
 const ROW_H_ESTIMATE = 33
 /** 视口上下各多渲染的行数，滚动时不露白 */
 const OVERSCAN = 8
+/** 分页拉取（B6 取数侧）：首屏与每次追加的行数；滚动近底增量取，替代一次拉 10 万行 */
+const PAGE_SIZE = 400
+/** 距已取尾部多少 px 内预取下一页 */
+const AHEAD_PX = 600
 
 const STATE_LABEL: Record<string, string> = { new: '未学习', learning: '学习中', review: '待复习' }
 
@@ -129,7 +133,7 @@ export function Browser() {
         }
       } else if (k === 'a' && !isTypingTarget(e.target)) {
         e.preventDefault()
-        setSelection(rows.map((r) => r.id))
+        setSelection(rows.map((r) => r.id)) // 分页拉取：全选已加载行（工具栏提示「显示前 N」）
       }
     }
     window.addEventListener('keydown', h)
@@ -144,13 +148,53 @@ export function Browser() {
 
   // 异步竞态防护：条件变化/定时刷新并发时，旧响应晚到不得覆盖新条件的表格
   const querySeq = useRef(createSeqGuard())
+  // 分页追加三守卫：dataVer（发生过新查询/刷新即弃）、viewSig（参数变了即弃）、
+  // loadedRef（追加基点被别的取数动过即弃）——保证追加页与当前 rows 同参数、同代际、无缝隙
+  const dataVer = useRef(0)
+  const viewSig = useRef('')
+  const loadingMore = useRef(false)
+  const loadedRef = useRef(0)
+  const totalRef = useRef(0)
+  totalRef.current = total
+
   const query = useCallback(async () => {
     const seq = querySeq.current.next()
     const kws = debouncedKw.split(/\s+/).filter(Boolean)
-    const r = await window.miki.queryCards({ deckId: browserDeckId, keywords: kws, sort, limit: 100_000 })
+    const sig = `${browserDeckId ?? ''}|${kws.join('\u0001')}|${JSON.stringify(sort)}`
+    const sameView = sig === viewSig.current
+    viewSig.current = sig
+    dataVer.current++
+    // 同视图刷新（60s/操作后/热加载）：取已加载前缀保住滚动位置；条件变化：只取首页
+    const want = sameView ? Math.max(PAGE_SIZE, loadedRef.current) : PAGE_SIZE
+    const r = await window.miki.queryCards({ deckId: browserDeckId, keywords: kws, sort, offset: 0, limit: want })
     if (!querySeq.current.isLatest(seq)) return
+    loadedRef.current = r.rows.length
     setRows(r.rows)
     setTotal(r.total)
+  }, [browserDeckId, debouncedKw, sort])
+
+  const loadMore = useCallback(async () => {
+    if (loadingMore.current || loadedRef.current >= totalRef.current) return
+    loadingMore.current = true
+    try {
+      const ver = dataVer.current
+      const sig = viewSig.current
+      const offsetBase = loadedRef.current
+      const kws = debouncedKw.split(/\s+/).filter(Boolean)
+      const r = await window.miki.queryCards({
+        deckId: browserDeckId,
+        keywords: kws,
+        sort,
+        offset: offsetBase,
+        limit: PAGE_SIZE
+      })
+      if (dataVer.current !== ver || viewSig.current !== sig || loadedRef.current !== offsetBase) return
+      loadedRef.current += r.rows.length
+      setRows((prev) => [...prev, ...r.rows])
+      setTotal(r.total)
+    } finally {
+      loadingMore.current = false
+    }
   }, [browserDeckId, debouncedKw, sort])
 
   useEffect(() => {
@@ -249,8 +293,8 @@ export function Browser() {
 
   const onRowContextMenu = (e: React.MouseEvent, id: string) => {
     e.preventDefault()
-    if (!selection.includes(id)) selectOne(id)
-    setRowMenu({ x: e.clientX, y: e.clientY, ids: selection.includes(id) ? selection : [id], mode: 'root' })
+    if (!selectionSet.has(id)) selectOne(id)
+    setRowMenu({ x: e.clientX, y: e.clientY, ids: selectionSet.has(id) ? selection : [id], mode: 'root' })
   }
 
   /** 右键菜单动作：批量删除 / 重置进度 / 移动牌组，完成后清选中并刷新 */
@@ -267,7 +311,9 @@ export function Browser() {
     await reload()
   }
 
-  const selected = useMemo(() => rows.find((r) => r.id === selectedId) ?? null, [rows, selectedId])
+  const rowById = useMemo(() => new Map(rows.map((r) => [r.id, r])), [rows])
+  const selected = (selectedId != null && rowById.get(selectedId)) || null
+  const selectionSet = useMemo(() => new Set(selection), [selection])
 
   // 选中卡内容进编辑区
   useEffect(() => {
@@ -347,7 +393,8 @@ export function Browser() {
   const winCount = Math.ceil(viewportH / rowH) + OVERSCAN * 2
   const winRows = rows.slice(top, top + winCount)
   const topPad = top * rowH
-  const bottomPad = Math.max(0, rows.length - (top + winCount)) * rowH
+  // 底部 spacer 按 total 撑起（含未取页）：行高恒定，未取区域滚动到位时由 onScroll 追加
+  const bottomPad = Math.max(0, total - (top + winCount)) * rowH
   const spacerTd = (h: number) => ({
     colSpan: columns.length,
     style: { height: h, padding: 0, border: 'none' as const }
@@ -401,7 +448,17 @@ export function Browser() {
           <div
             className="grid-wrap"
             ref={gridWrapRef}
-            onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
+            onScroll={(e) => {
+              const el = e.currentTarget
+              setScrollTop(el.scrollTop)
+              // 近底部预取下一页（B6 取数侧分页）：距已取尾部 AHEAD_PX 内增量追加
+              if (
+                loadedRef.current < totalRef.current &&
+                el.scrollTop + el.clientHeight >= loadedRef.current * rowH - AHEAD_PX
+              ) {
+                void loadMore()
+              }
+            }}
             style={gridWidth != null ? { width: gridWidth, flex: '0 0 auto' } : undefined}
           >
             <table
@@ -451,7 +508,7 @@ export function Browser() {
                 {winRows.map((row) => (
                   <tr
                     key={row.id}
-                    className={row.id === selectedId || selection.includes(row.id) ? 'selected' : undefined}
+                    className={row.id === selectedId || selectionSet.has(row.id) ? 'selected' : undefined}
                     onClick={(e) => onRowClick(e, row.id)}
                     onContextMenu={(e) => onRowContextMenu(e, row.id)}
                   >
