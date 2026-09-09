@@ -6,7 +6,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { Md } from '../md'
 import { sortedDecks, useApp } from '../store'
-import type { DialogState } from '../../../shared/types'
 
 /** wrap 类编辑（bold/backtick）纯函数的统一返回：替换范围、替换文本、应用后新选区 */
 export interface WrapResult {
@@ -404,26 +403,6 @@ export function CardForm(props: CardFormProps) {
   return (
     <div className="modal dialog-wide" onKeyDown={onKeyDown}>
       {form}
-    </div>
-  )
-}
-
-/** 主窗口 DOM 弹窗壳：从 store.dialog 读取状态渲染 CardForm（原有行为不变） */
-export function AddEditDialog() {
-  const dialog = useApp((s) => s.dialog)
-  const closeDialog = useApp((s) => s.closeDialog)
-
-  if (!dialog) return null
-  const d: DialogState = dialog
-  return (
-    <div className="overlay">
-      <CardForm
-        mode={d.mode}
-        deckId={d.deckId}
-        cardId={d.cardId}
-        keepAfterAdd={d.mode === 'add'}
-        onCancelled={closeDialog}
-      />
     </div>
   )
 }
