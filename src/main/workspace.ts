@@ -52,6 +52,8 @@ interface DeckIndex {
   }
   /** 堆是否已构建：init/跨天重建只建计数器（首页/统计够用），堆推迟到首次取卡时全量构建 */
   built: boolean
+  /** 估算堆内死条目数（卡状态变更后旧条目未删，惰性失效遗留）：超半堆触发全量重灌，均摊 O(1) */
+  stale: number
 }
 
 /** 压实后的卡片行 = 内容 + 调度检查点快照；旧格式行无 fsrs/reps/lapses 字段（视为零值 + 全量重放）。
@@ -564,7 +566,8 @@ export class WorkspaceService {
         review: new MinHeap(),
         fresh: new MinHeap(),
         counts: { total: 0, new: 0, learningAll: 0, learningDueToday: 0, reviewDueToday: 0 },
-        built: false
+        built: false,
+        stale: 0
       }
       this.idx.set(deckId, x)
     }
@@ -650,11 +653,31 @@ export class WorkspaceService {
     return ix
   }
 
+  /** 堆死条目（状态变更后旧条目惰性失效遗留）过半时全量重灌三堆：只重建堆不动计数器，
+   * 每次状态变更最多 +1 死条目，重灌 O(牌组卡数)，过半阈值摊销后均摊 O(log n)；
+   * 小堆（≤32 条目）不折腾，死条目顺带由 heapNext 弹出清理 */
+  private rebuildHeapsIfStale(deckId: string, ix: DeckIndex): void {
+    const total = ix.learning.size + ix.review.size + ix.fresh.size
+    if (ix.stale <= 32 || ix.stale * 2 <= total) return
+    if (this.hiddenDeckIds().has(deckId)) return // 隐藏牌组不取卡：堆内容保持现状，dueNowOf 口径不变
+    ix.learning = new MinHeap()
+    ix.review = new MinHeap()
+    ix.fresh = new MinHeap()
+    ix.stale = 0
+    const hidden = this.hiddenDeckIds()
+    for (const c of this.byDeck.get(deckId) ?? []) {
+      if (c.deletedAt || c.suspended || hidden.has(c.deckId)) continue
+      this.pushOnly(c, ix)
+    }
+  }
+
   /** 按变更前状态减计数（堆条目不删，弹出时惰性失效）。总数只排除已删除卡（暂停卡仍是牌组成员）；学习/复习计数连暂停一起排除 */
   private unclassCounts(before: Card, eot: number, deckId: string): void {
     const ix = this.deckIdx(deckId)
     if (!before.deletedAt) ix.counts.total--
     if (before.deletedAt || before.suspended) return
+    // 该卡变更前有一条活堆条目（未删未暂停、牌组未隐藏——隐藏牌组的卡从未入堆），状态一变即成死条目
+    if (ix.built && !this.hiddenDeckIds().has(deckId)) ix.stale++
     const st = displayState(before)
     if (st === 'new') {
       ix.counts.new--
@@ -708,6 +731,7 @@ export class WorkspaceService {
 
   private pickNextIdx(deckId: string, now: number): Card | null {
     const ix = this.ensureBuilt(deckId)
+    this.rebuildHeapsIfStale(deckId, ix)
     const learning = this.heapNext(ix.learning, deckId, now, (c, e) => !!c.fsrs && displayState(c) === 'learning' && c.fsrs!.due === e.key)
     if (learning) return learning
     // 刷完旧卡才能刷新卡：当日会到期的复习卡（含今日稍后到点）都先于新卡出
@@ -775,6 +799,8 @@ export class WorkspaceService {
         if (c.fsrs && c.fsrs.due <= now) n++
       }
       return n
+    } else {
+      this.rebuildHeapsIfStale(deckId, ix)
     }
     const seen = new Set<string>()
     let n = 0
@@ -906,11 +932,9 @@ export class WorkspaceService {
   /** 压实一个牌组：全量重写基文件（检查点 seq + 调度快照行）→ 清 delta → 落聚合检查点 */
   private compactDeck(deckId: string): void {
     const lines: string[] = [JSON.stringify({ __mikiCheckpoint: this.seq })]
-    const rows: string[] = []
-    for (const c of this.byDeck.get(deckId) ?? []) {
-      rows.push(this.snapshotRow(c))
-    }
-    rows.sort()
+    // 行序 = 卡 id 序：装饰排序（比 id 不比整行 JSON 串，短键比较），读取端按 id 建 Map 不依赖行序
+    const cards = (this.byDeck.get(deckId) ?? []).slice().sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    const rows = cards.map((c) => this.snapshotRow(c))
     atomicWrite(this.deckCardsFile(deckId), lines.join('\n') + '\n' + (rows.length ? rows.join('\n') + '\n' : ''))
     fs.rmSync(this.deckDeltaFile(deckId), { force: true })
     this.deltaCounts.set(deckId, 0)
