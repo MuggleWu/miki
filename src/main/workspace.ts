@@ -366,8 +366,10 @@ export class WorkspaceService {
           }
         }
         win.set(ev.seq, { action: ev.action, rating: ev.rating, t: ev.t, deckId: ev.deckId })
-        if (win.size > 40_000) {
-          let n = 20_000
+        // 窗口外 undo 在重放侧丢失聚合抵消（统计差 1，compact 自愈）。40k→200k：单会话
+        // 4 万事件（约 40 天千卡量）仍可撤销抵消；上限只约束重放瞬时内存（约 30MB 峰值）
+        if (win.size > 200_000) {
+          let n = 100_000
           for (const k of win.keys()) {
             win.delete(k)
             if (--n === 0) break
