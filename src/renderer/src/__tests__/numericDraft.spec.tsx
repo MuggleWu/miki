@@ -132,6 +132,31 @@ describe('useNumericDraft（设置页数值草稿）', () => {
     await h.unmount()
   })
 
+  it('两次 commit 重叠：先发的旧回声被吞、后发的新回声也认领，草稿不被拉回', async () => {
+    const commit = vi.fn()
+    const h = await mount(16, commit, 10)
+    await act(async () => {
+      h.apiRef.current!.set(22)
+    })
+    vi.advanceTimersByTime(20) // commit(22) 发出，回包未回
+    await act(async () => {
+      h.apiRef.current!.set(23)
+    })
+    vi.advanceTimersByTime(20) // commit(23) 发出；此刻 22/23 都在途
+    expect(commit).toHaveBeenNthCalledWith(1, 22)
+    expect(commit).toHaveBeenNthCalledWith(2, 23)
+    // 旧回声 22 先到：必须吞掉（旧单槽实现此处把草稿拉回 22，污染进行中的编辑）
+    await h.rerender(22)
+    expect(h.apiRef.current!.draft).toBe(23)
+    // 新回声 23 再到：同样吞掉
+    await h.rerender(23)
+    expect(h.apiRef.current!.draft).toBe(23)
+    // 之后真正外部变化照常同步
+    await h.rerender(30)
+    expect(h.apiRef.current!.draft).toBe(30)
+    await h.unmount()
+  })
+
   it('带着未落盘草稿卸载：补一次 commit', async () => {
     const commit = vi.fn()
     const h = await mount(16, commit, 400)
