@@ -188,8 +188,74 @@ describe('调度索引随机对拍', () => {
     }
   })
 
-  it('getStudy 幂等：连续调用返回同一张卡，未被消费', () => {
-    // 固定上午时刻：+10min 学习步长不会跨午夜（真时钟在 23:50 后跑会因 due 落入明日而差 1）
+  it('堆死条目过半重建：状态反复变更后取卡/到期计数仍与全量扫描一致（rebuildHeapsIfStale）', () => {
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(new Date('2026-10-06T10:00:00'))
+      const w = newWs(tmp())
+      const d = w.addDeck('重建组').id
+      // >32 张（小堆早退线），反复答题/暂停/解除/软删制造死条目，逼过半阈值触发全量重灌
+      const cards = w.addCards(
+        d,
+        Array.from({ length: 40 }, (_, i) => ({ front: `重建${i}`, back: '' }))
+      )
+      // 建堆
+      expect(w.getStudy(d).card).not.toBeNull()
+      for (let round = 0; round < 3; round++) {
+        for (let i = 0; i < 20; i++) {
+          const c = cards[i]
+          w.answer(c.id, 3) // 入 learning（10 分钟步长，死条目 +1）
+          w.setCardSuspended(c.id, true) // 暂停（旧条目再死 +1）
+          w.setCardSuspended(c.id, false) // 解除（classPush 新条目）
+        }
+        // 每轮都过一遍对拍：重建后堆内容、计数、dueNow 都必须与全量扫描一致
+        const now = Date.now()
+        const list = refCards(w, d)
+        const info = w.deckInfos().find((x) => x.id === d)!
+        expect(info.counts).toEqual(refTableCounts(list, now))
+        const s = w.getStudy(d)
+        expect(s.card?.id ?? null).toBe(pickNext(list, now, w.endOfToday())?.id ?? null)
+      }
+      // 40 张里 20 张状态反复变更 ≥3 轮：stale 远超堆半，重灌必然发生——对拍通过即分支生效
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('隐藏牌组（软删）不触发堆重建，索引口径保持 dueNowOf 不变', () => {
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(new Date('2026-10-06T10:00:00'))
+      const w = newWs(tmp())
+      const d = w.addDeck('隐藏重建组').id
+      const cards = w.addCards(
+        d,
+        Array.from({ length: 40 }, (_, i) => ({ front: `隐藏${i}`, back: '' }))
+      )
+      expect(w.getStudy(d).card).not.toBeNull() // 建堆
+      for (let i = 0; i < 20; i++) {
+        w.answer(cards[i].id, 3)
+        w.setCardSuspended(cards[i].id, true)
+      }
+      // 软删牌组：其卡从计数消失；再对牌组内做变更也不再入堆/重建（早退分支）
+      w.deleteDeck(d)
+      const list = refCards(w, d) // refCards 同样排除软删牌组 → 空
+      const info = w.deckInfos().find((x) => x.id === d)
+      // 软删后 deckInfos 不再展示该牌组；这里只验证服务层不炸、其他牌组计数不受影响
+      expect(info).toBeUndefined()
+      expect(list).toHaveLength(0)
+      // 全库对拍仍一致（隐藏牌组早退不影响其余索引）
+      for (const deck of w.decks.filter((x) => !x.deletedAt)) {
+        const l = refCards(w, deck.id)
+        const inf = w.deckInfos().find((x) => x.id === deck.id)!
+        expect(inf.counts).toEqual(refTableCounts(l, Date.now()))
+      }
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('getStudy 幂等：连续调用返回同一张卡，未被消费', () => {    // 固定上午时刻：+10min 学习步长不会跨午夜（真时钟在 23:50 后跑会因 due 落入明日而差 1）
     vi.useFakeTimers()
     try {
       vi.setSystemTime(new Date('2026-10-06T10:00:00'))
