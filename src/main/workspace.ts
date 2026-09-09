@@ -3,6 +3,8 @@
 // 卡片 delta 行写入的是「当下全量内容」（contentRow 序列化当前内存态），内存先行的
 // 窗口期不影响落盘正确性；崩溃恰好落在「内存已改、追加未执行」之间时，重启重放回
 // 旧值——即该次写操作整体未发生，不会出现半新半旧的混合态。
+// 拆分模块：workspace-io（路径规则/NDJSON 行读/卡片行序列化）、schedule-index（牌组调度
+// 索引）、workspace-watcher（外部变更轮询）——本文件仍是唯一状态所有者，公共 API 不变。
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -11,9 +13,7 @@ import {
   DEFAULT_CONFIG,
   type Card,
   type CardContent,
-  type CardSnapshot,
   type Deck,
-  type DeckCounts,
   type DeckInfo,
   type DeckTableCounts,
   type MikiConfig,
@@ -25,53 +25,16 @@ import {
   type StudyPayload,
   type UndoResult
 } from '../shared/types'
-import { FsrScheduler, DEFAULT_FSRS_PARAMS } from '../core/fsrs'
-import { MinHeap, type HeapEntry } from '../core/min-heap'
+import { FsrScheduler } from '../core/fsrs'
 import { applyEvent } from '../core/replay'
-import { displayState, filterCards, sortByKeys, toRow } from '../core/query'
+import { filterCards, sortByKeys, toRow } from '../core/query'
 import type { MikiConfigPatch } from '../shared/ipc'
 import { bumpDailyAgg, computeStats, endOfLocalDay, localDateKey, type DailyAgg } from '../core/stats'
+import { ScheduleIndex } from './schedule-index'
+import { WorkspacePaths, contentRow, readNdjson, snapshotRow, type CardCheckpointRow } from './workspace-io'
+import { WorkspaceWatcher } from './workspace-watcher'
 
 const MONTH_MS = 31 * 86_400_000
-
-/** 牌组调度索引：due 最小堆 + 增量计数器，学习页/首页读 O(log n)（需求 §19 L1） */
-interface DeckIndex {
-  /** Learning/Relearning 态卡，key = due */
-  learning: MinHeap
-  /** Review 态卡，key = due */
-  review: MinHeap
-  /** 新卡，key = createdAt */
-  fresh: MinHeap
-  counts: {
-    /** 首页「总数」列：未删卡（含暂停卡），与浏览器口径一致 */
-    total: number
-    new: number
-    learningAll: number
-    learningDueToday: number
-    reviewDueToday: number
-  }
-  /** 堆是否已构建：init/跨天重建只建计数器（首页/统计够用），堆推迟到首次取卡时全量构建 */
-  built: boolean
-  /** 估算堆内死条目数（卡状态变更后旧条目未删，惰性失效遗留）：超半堆触发全量重灌，均摊 O(1) */
-  stale: number
-}
-
-/** 压实后的卡片行 = 内容 + 调度检查点快照；旧格式行无 fsrs/reps/lapses 字段（视为零值 + 全量重放）。
- * __mikiSeq：该行调度快照已反映到的事件水位；缺省时回落到基文件 meta 的 __mikiCheckpoint */
-interface CardCheckpointRow extends CardContent {
-  fsrs?: CardSnapshot | null
-  reps?: number
-  lapses?: number
-  __mikiSeq?: number
-}
-
-function readNdjson(file: string): string[] {
-  if (!fs.existsSync(file)) return []
-  return fs
-    .readFileSync(file, 'utf-8')
-    .split('\n')
-    .filter((l) => l.trim().length > 0)
-}
 
 export class WorkspaceService {
   root!: string
@@ -96,10 +59,13 @@ export class WorkspaceService {
   private todayAnswers = 0
   /** 历史累计净答题数：dailyAgg total 总和的运行镜像（启动算一次，answer ++ / undo --），免去每次 loadWorkspace 全遍历聚合 */
   private totalAnsweredCache = 0
-  /** 牌组调度索引（deckId → 堆 + 计数器），跨天/启动全量重建，其余增量维护 */
-  private idx = new Map<string, DeckIndex>()
-  private indexDayKey = ''
-  private orderCounter = 0
+  /** 受管文件路径规则（init 时按工作区根目录创建） */
+  private paths!: WorkspacePaths
+  /** 牌组调度索引（due 最小堆 + 增量计数器）：卡库/卡桶/软删牌组经 host 回调每次取当前值——
+   * 热加载会整体替换 cards/byDeck 的 Map 实例，绝不能在构造时快照引用 */
+  private sched!: ScheduleIndex
+  /** 外部变更轮询（指纹 + 冷却合并）：检出变化后回调本服务执行整条重载链 */
+  private watcher!: WorkspaceWatcher
   /** 牌组分桶：deckId → 该牌组全部卡（含软删卡，消费方自行过滤）。
    * 按牌组取卡/建堆/压实/到期计数走桶，把 O(全库) 扫描降到 O(牌组卡数)；
    * loadCardsWithCheckpoint 全量重建，addCard(s) 追加、moveCards 跨牌组迁移 */
@@ -111,41 +77,24 @@ export class WorkspaceService {
   private deckCheckpoints = new Map<string, number>()
   /** 各牌组 delta 行数（压实阈值触发） */
   private deltaCounts = new Map<string, number>()
-  /** 工作区外部变更检测：受管文件上次快照（path → `${mtimeMs}:${size}`），始自 init/热加载 */
-  private stamps = new Map<string, string>()
-  private watcherTimer: ReturnType<typeof setInterval> | null = null
-  private watcherCbs: (() => void)[] = []
-  private lastReloadAt = 0
-  private reloadDirty = false
-
-  // ---------- 路径 ----------
-
-  private decksFile(): string {
-    return path.join(this.root, 'decks.json')
-  }
-
-  private deckCardsFile(deckId: string): string {
-    return path.join(this.root, 'cards', `${deckId}.ndjson`)
-  }
-
-  private deckDeltaFile(deckId: string): string {
-    return path.join(this.root, 'cards', `${deckId}.delta.ndjson`)
-  }
-
-  private statsFile(): string {
-    return path.join(this.root, 'stats.json')
-  }
-
-  private logFile(t: number): string {
-    const d = new Date(t)
-    const p = (n: number) => String(n).padStart(2, '0')
-    return path.join(this.root, 'review-log', `${d.getFullYear()}-${p(d.getMonth() + 1)}.ndjson`)
-  }
+  /** 软删牌组 id 集（调度索引/学习页/首页共用）：这些牌组下的卡不算学习计数、不进学习队列。
+   * 缓存复用避免热路径每次重分配；deleteDeck/loadDecks 时失效 */
+  private hiddenCache: Set<string> | null = null
 
   // ---------- 加载 ----------
 
   init(root: string, overrides?: Partial<MikiConfig>): void {
     this.root = root
+    this.paths = new WorkspacePaths(root)
+    this.sched = new ScheduleIndex({
+      cards: () => this.cards,
+      bucket: (deckId) => this.byDeck.get(deckId),
+      hiddenDeckIds: () => this.hiddenDeckIds(),
+      onDayRollover: () => {
+        this.todayAnswers = 0
+      }
+    })
+    this.watcher = new WorkspaceWatcher(this.paths, () => this.reloadFromDisk())
     fs.mkdirSync(path.join(this.root, 'cards'), { recursive: true })
     fs.mkdirSync(path.join(this.root, 'review-log'), { recursive: true })
     this.config = this.loadConfig(overrides)
@@ -158,11 +107,11 @@ export class WorkspaceService {
     this.ensureDay()
     this.ensureGitignore()
     // 启动完成即建快照基线：后续轮询只认真外部变更，不把启动加载当变化
-    this.stamps = this.collectStamps()
+    this.watcher.initStamps()
   }
 
   private loadConfig(overrides?: Partial<MikiConfig>): MikiConfig {
-    const file = path.join(this.root, 'config.json')
+    const file = this.paths.configJson()
     let stored: Partial<MikiConfig> = {}
     if (fs.existsSync(file)) {
       try {
@@ -222,16 +171,16 @@ export class WorkspaceService {
       this.scheduler = this.buildScheduler(this.config)
       this.previewScheduler = this.buildScheduler(this.config, true)
     }
-    atomicWrite(path.join(this.root, 'config.json'), JSON.stringify(this.config, null, 2))
-    this.noteWrite(path.join(this.root, 'config.json'))
+    atomicWrite(this.paths.configJson(), JSON.stringify(this.config, null, 2))
+    this.watcher.noteWrite(this.paths.configJson())
     return this.config
   }
 
   private loadDecks(): void {
     this.hiddenCache = null
-    if (fs.existsSync(this.decksFile())) {
+    if (fs.existsSync(this.paths.decksFile())) {
       try {
-        this.decks = JSON.parse(fs.readFileSync(this.decksFile(), 'utf-8'))
+        this.decks = JSON.parse(fs.readFileSync(this.paths.decksFile(), 'utf-8'))
         return
       } catch {
         // 损坏则重建为空
@@ -242,8 +191,8 @@ export class WorkspaceService {
   }
 
   private saveDecks(): void {
-    atomicWrite(this.decksFile(), JSON.stringify(this.decks, null, 2))
-    this.noteWrite(this.decksFile())
+    atomicWrite(this.paths.decksFile(), JSON.stringify(this.decks, null, 2))
+    this.watcher.noteWrite(this.paths.decksFile())
   }
 
   /** 读统计聚合检查点（stats.json）；缺失/损坏 → 从头聚合（多读一遍事件，语义无损） */
@@ -252,28 +201,28 @@ export class WorkspaceService {
     this.statsCheckpoint = 0
     this.todayAnswers = 0
     this.totalAnsweredCache = 0
-    const file = this.statsFile()
+    const file = this.paths.statsFile()
     if (!fs.existsSync(file)) return
     try {
       const raw = JSON.parse(fs.readFileSync(file, 'utf-8')) as {
         checkpointSeq?: number
         dailyAgg?: [string, [string, { total: number; again: number }][]][]
       }
-    this.statsCheckpoint = Number(raw.checkpointSeq) || 0
-    for (const [deckId, days] of raw.dailyAgg ?? []) {
-      this.dailyAgg.set(deckId, new Map(days))
-    }
-    // 今日净计数与累计总数直接从聚合恢复（今日跨天由 ensureDay 清零）
-    const tk = localDateKey(Date.now())
-    let n = 0
-    let total = 0
-    for (const m of this.dailyAgg.values()) {
-      for (const c of m.values()) total += c.total
-      n += m.get(tk)?.total ?? 0
-    }
-    this.todayAnswers = n
-    this.totalAnsweredCache = total
-  } catch {
+      this.statsCheckpoint = Number(raw.checkpointSeq) || 0
+      for (const [deckId, days] of raw.dailyAgg ?? []) {
+        this.dailyAgg.set(deckId, new Map(days))
+      }
+      // 今日净计数与累计总数直接从聚合恢复（今日跨天由 ensureDay 清零）
+      const tk = localDateKey(Date.now())
+      let n = 0
+      let total = 0
+      for (const m of this.dailyAgg.values()) {
+        for (const c of m.values()) total += c.total
+        n += m.get(tk)?.total ?? 0
+      }
+      this.todayAnswers = n
+      this.totalAnsweredCache = total
+    } catch {
       this.dailyAgg = new Map()
       this.statsCheckpoint = 0
       this.totalAnsweredCache = 0
@@ -290,7 +239,7 @@ export class WorkspaceService {
     for (const deck of this.decks) {
       const rows = new Map<string, CardCheckpointRow>()
       let cp = 0
-      for (const line of readNdjson(this.deckCardsFile(deck.id))) {
+      for (const line of readNdjson(this.paths.deckCardsFile(deck.id))) {
         let row: CardCheckpointRow
         try {
           row = JSON.parse(line) as CardCheckpointRow
@@ -306,7 +255,7 @@ export class WorkspaceService {
           rows.set(row.id, row)
         }
       }
-      for (const line of readNdjson(this.deckDeltaFile(deck.id))) {
+      for (const line of readNdjson(this.paths.deckDeltaFile(deck.id))) {
         let row: (CardCheckpointRow & { __mikiTombstone?: boolean }) | null
         try {
           row = JSON.parse(line) as CardCheckpointRow & { __mikiTombstone?: boolean }
@@ -421,85 +370,22 @@ export class WorkspaceService {
 
   // ---------- 工作区热加载（外部变更检测；git pull / 他机写入后内存态自动刷新） ----------
 
-  /** 冷却窗口：git pull 大操作期间文件反复变化时合并触发，防重载风暴 */
-  private static readonly RELOAD_COOLDOWN_MS = 3000
-
-  /** 受管文件 = 数据真理层（decks/config/stats + cards/review-log 全部 *.ndjson）；.git/.miki 等派生物不参与 */
-  private managedFiles(): string[] {
-    const out: string[] = [this.decksFile(), this.statsFile(), path.join(this.root, 'config.json')]
-    const scan = (dir: string): void => {
-      if (!fs.existsSync(dir)) return
-      for (const f of fs.readdirSync(dir)) {
-        if (f.endsWith('.ndjson')) out.push(path.join(dir, f))
-      }
-    }
-    scan(path.join(this.root, 'cards'))
-    scan(path.join(this.root, 'review-log'))
-    return out
-  }
-
-  /** 文件指纹：`${mtimeMs}:${size}`；不存在返回 null（用于删文件检测） */
-  private stampOf(p: string): string | null {
-    try {
-      const st = fs.statSync(p)
-      return `${st.mtimeMs}:${st.size}`
-    } catch {
-      return null
-    }
-  }
-
-  private collectStamps(): Map<string, string> {
-    const m = new Map<string, string>()
-    for (const p of this.managedFiles()) {
-      const s = this.stampOf(p)
-      if (s !== null) m.set(p, s)
-    }
-    return m
-  }
-
-  /** 自写豁免：写路径完成后立即更新该文件快照，避免把自己的写入当外部变更 */
-  private noteWrite(file: string): void {
-    const s = this.stampOf(file)
-    if (s === null) this.stamps.delete(file)
-    else this.stamps.set(file, s)
-  }
-
   /** 注册外部变更回调（主进程把它转发给渲染进程刷新 UI） */
   onExternalChange(cb: () => void): void {
-    this.watcherCbs.push(cb)
+    this.watcher.onExternalChange(cb)
   }
 
   startWatching(intervalMs = 2000): void {
-    if (this.watcherTimer !== null) return
-    this.watcherTimer = setInterval(() => this.pollOnce(), intervalMs)
+    this.watcher.startWatching(intervalMs)
   }
 
   stopWatching(): void {
-    if (this.watcherTimer !== null) {
-      clearInterval(this.watcherTimer)
-      this.watcherTimer = null
-    }
+    this.watcher.stopWatching()
   }
 
   /** 轮询一次：快照对比发现外部变化 → 热加载（冷却期内合并到下次）。测试直接调用。 */
   pollOnce(): void {
-    const cur = this.collectStamps()
-    let changed = cur.size !== this.stamps.size
-    if (!changed) {
-      for (const [p, s] of cur) {
-        if (this.stamps.get(p) !== s) {
-          changed = true
-          break
-        }
-      }
-    }
-    if (!changed) return
-    if (this.reloadDirty || Date.now() - this.lastReloadAt < WorkspaceService.RELOAD_COOLDOWN_MS) {
-      this.reloadDirty = true
-      return
-    }
-    this.reloadDirty = false
-    this.reloadFromDisk()
+    this.watcher.pollOnce()
   }
 
   /** 全量重载内存态——与启动加载链逐段同语义（「文件是唯一真理，内存态是运行时缓存」）。
@@ -512,30 +398,30 @@ export class WorkspaceService {
     this.loadStatsCheckpoint()
     this.loadCardsWithCheckpoint()
     this.streamEvents()
-    // 卡对象/调度状态全换新：索引含 due key 与 tie 分配，必须全量重建（与跨天/启动同路径）
-    this.indexDayKey = localDateKey(Date.now())
-    this.rebuildIndexes(Date.now())
+    // 卡对象/调度状态全换新：索引含 due key 与 tie 分配，必须全量重建（不走跨天清零语义，
+    // todayAnswers 已由 loadStatsCheckpoint 从聚合重导；与跨天/启动同路径）
+    this.sched.forceRebuild(localDateKey(Date.now()), Date.now())
     // 外部变更后旧撤销目标可能已失效（卡被改/删、事件行序变化），作废会话撤销栈（D2：仅本会话）
     this.sessionOps = []
     // 与重启一致：压实阈值从零重新计数；不主动压实——避免热加载改写他人刚同步的文件
     this.deltaCounts = new Map()
-    // 重载完成即重建基线（含本链自身的 config 写入），后续轮询只认真外部变化
-    this.stamps = this.collectStamps()
-    this.lastReloadAt = Date.now()
-    for (const cb of this.watcherCbs) cb()
+    // 重载完成即重建基线（含本链自身的 config 写入），后续轮询只认真外部变化，并通知 UI 刷新
+    this.watcher.rebase()
+    this.watcher.notify()
   }
 
-  // ---------- 调度索引（due 最小堆 + 增量计数器） ----------
-
-  /** 软删牌组 id 集：这些牌组下的卡不算学习计数、不进学习队列（四处共用）。
-   * 缓存复用避免热路径每次重分配；deleteDeck/loadDecks 时失效 */
-  private hiddenCache: Set<string> | null = null
+  // ---------- 牌组调度索引与共享缓存（索引本体在 schedule-index.ts） ----------
 
   private hiddenDeckIds(): Set<string> {
     if (this.hiddenCache === null) {
       this.hiddenCache = new Set(this.decks.filter((d) => d.deletedAt).map((d) => d.id))
     }
     return this.hiddenCache
+  }
+
+  /** 跨天检测：日期变化时全量重建索引并清零今日计数（重建同时自愈任何计数漂移） */
+  ensureDay(now = Date.now()): void {
+    this.sched.ensureDay(now)
   }
 
   /** 取卡面小写文本（搜索用）：命中缓存直接返回，未命中现算并落缓存 */
@@ -558,194 +444,6 @@ export class WorkspaceService {
     return b
   }
 
-  private deckIdx(deckId: string): DeckIndex {
-    let x = this.idx.get(deckId)
-    if (!x) {
-      x = {
-        learning: new MinHeap(),
-        review: new MinHeap(),
-        fresh: new MinHeap(),
-        counts: { total: 0, new: 0, learningAll: 0, learningDueToday: 0, reviewDueToday: 0 },
-        built: false,
-        stale: 0
-      }
-      this.idx.set(deckId, x)
-    }
-    return x
-  }
-
-  /** 跨天检测：日期变化时全量重建索引并清零今日计数（重建同时自愈任何计数漂移） */
-  ensureDay(now = Date.now()): void {
-    const k = localDateKey(now)
-    if (k === this.indexDayKey) return
-    const had = this.indexDayKey !== ''
-    this.indexDayKey = k
-    this.rebuildIndexes(now)
-    if (had) this.todayAnswers = 0
-  }
-
-  private rebuildIndexes(now: number): void {
-    const eot = endOfLocalDay(now)
-    this.idx = new Map()
-    const hidden = this.hiddenDeckIds()
-    let tie = 0
-    for (const c of this.cards.values()) {
-      c.tie = tie++ // tie 全量分配（含排除卡），保持与 Map 插入序一致
-      if (c.deletedAt || hidden.has(c.deckId)) continue
-      const ix = this.deckIdx(c.deckId)
-      if (c.suspended) {
-        ix.counts.total++ // 暂停卡不计学习计数，但仍是牌组成员（进总数）
-        continue
-      }
-      this.classPush(c, ix, eot)
-    }
-    this.orderCounter = tie
-  }
-
-  /** 按当前状态加计数 +（堆已构建时）入堆（调用方保证卡未删未暂停、牌组未删）；tie 取卡上分配好的插入序 */
-  private classPush(c: Card, ix: DeckIndex, eot: number): void {
-    if (c.tie == null) c.tie = ++this.orderCounter
-    ix.counts.total++
-    const st = displayState(c)
-    if (st === 'new') {
-      ix.counts.new++
-      if (ix.built) ix.fresh.push({ key: c.createdAt, tie: c.tie, id: c.id })
-      return
-    }
-    const due = c.fsrs!.due
-    if (st === 'review') {
-      if (due <= eot) ix.counts.reviewDueToday++
-      if (ix.built) ix.review.push({ key: due, tie: c.tie, id: c.id })
-      return
-    }
-    ix.counts.learningAll++
-    if (due <= eot) ix.counts.learningDueToday++
-    if (ix.built) ix.learning.push({ key: due, tie: c.tie, id: c.id })
-  }
-
-  /** 仅入堆不计数（ensureBuilt 专用，计数已就绪） */
-  private pushOnly(c: Card, ix: DeckIndex): void {
-    if (c.tie == null) c.tie = ++this.orderCounter
-    const st = displayState(c)
-    if (st === 'new') {
-      ix.fresh.push({ key: c.createdAt, tie: c.tie, id: c.id })
-      return
-    }
-    const due = c.fsrs!.due
-    if (st === 'review') {
-      ix.review.push({ key: due, tie: c.tie, id: c.id })
-      return
-    }
-    ix.learning.push({ key: due, tie: c.tie, id: c.id })
-  }
-
-  /** 首次取卡前构建该牌组的堆（init 只建计数器，首次进学习页才付建堆成本）；取卡走牌组分桶，不扫全库 */
-  private ensureBuilt(deckId: string): DeckIndex {
-    const ix = this.deckIdx(deckId)
-    if (ix.built) return ix
-    ix.built = true
-    const hidden = this.hiddenDeckIds()
-    for (const c of this.byDeck.get(deckId) ?? []) {
-      if (c.deletedAt || c.suspended || hidden.has(c.deckId)) continue
-      if (c.tie == null) c.tie = ++this.orderCounter
-      this.pushOnly(c, ix)
-    }
-    return ix
-  }
-
-  /** 堆死条目（状态变更后旧条目惰性失效遗留）过半时全量重灌三堆：只重建堆不动计数器，
-   * 每次状态变更最多 +1 死条目，重灌 O(牌组卡数)，过半阈值摊销后均摊 O(log n)；
-   * 小堆（≤32 条目）不折腾，死条目顺带由 heapNext 弹出清理 */
-  private rebuildHeapsIfStale(deckId: string, ix: DeckIndex): void {
-    const total = ix.learning.size + ix.review.size + ix.fresh.size
-    if (ix.stale <= 32 || ix.stale * 2 <= total) return
-    if (this.hiddenDeckIds().has(deckId)) return // 隐藏牌组不取卡：堆内容保持现状，dueNowOf 口径不变
-    ix.learning = new MinHeap()
-    ix.review = new MinHeap()
-    ix.fresh = new MinHeap()
-    ix.stale = 0
-    const hidden = this.hiddenDeckIds()
-    for (const c of this.byDeck.get(deckId) ?? []) {
-      if (c.deletedAt || c.suspended || hidden.has(c.deckId)) continue
-      this.pushOnly(c, ix)
-    }
-  }
-
-  /** 按变更前状态减计数（堆条目不删，弹出时惰性失效）。总数只排除已删除卡（暂停卡仍是牌组成员）；学习/复习计数连暂停一起排除 */
-  private unclassCounts(before: Card, eot: number, deckId: string): void {
-    const ix = this.deckIdx(deckId)
-    if (!before.deletedAt) ix.counts.total--
-    if (before.deletedAt || before.suspended) return
-    // 该卡变更前有一条活堆条目（未删未暂停、牌组未隐藏——隐藏牌组的卡从未入堆），状态一变即成死条目
-    if (ix.built && !this.hiddenDeckIds().has(deckId)) ix.stale++
-    const st = displayState(before)
-    if (st === 'new') {
-      ix.counts.new--
-      return
-    }
-    const due = before.fsrs!.due
-    if (st === 'review') {
-      if (due <= eot) ix.counts.reviewDueToday--
-      return
-    }
-    ix.counts.learningAll--
-    if (due <= eot) ix.counts.learningDueToday--
-  }
-
-  /** 任一状态变化点统一调用：减掉变更前贡献、按新状态重新入堆计数（deckIdBefore 供移动跨牌组扣减） */
-  private reindexCard(card: Card, before: Card | null, deckIdBefore?: string): void {
-    const now = Date.now()
-    this.ensureDay(now)
-    const eot = endOfLocalDay(now)
-    if (before) this.unclassCounts(before, eot, deckIdBefore ?? before.deckId)
-    const hidden = this.hiddenDeckIds()
-    if (!card.deletedAt && !hidden.has(card.deckId)) {
-      if (card.suspended) {
-        this.deckIdx(card.deckId).counts.total++ // 暂停卡只进总数，学习/复习计数不含它
-      } else {
-        this.classPush(card, this.deckIdx(card.deckId), eot)
-      }
-    }
-  }
-
-  /** 取堆顶有效卡：跳过失效条目（已删/暂停/换牌组/due 已变），dueLimit 内未到期则返回 null。
-   * 有效卡只 peek 不 pop——pickNext 是幂等读，条目在卡片状态变化后按 key 不匹配惰性失效。 */
-  private heapNext(
-    h: MinHeap,
-    deckId: string,
-    dueLimit: number | null,
-    match: (c: Card, e: HeapEntry) => boolean
-  ): Card | null {
-    while (h.size > 0) {
-      const e = h.peek() as HeapEntry
-      const card = this.cards.get(e.id)
-      if (!card || card.deletedAt || card.suspended || card.deckId !== deckId || !match(card, e)) {
-        h.pop()
-        continue
-      }
-      if (dueLimit != null && e.key > dueLimit) return null
-      return card
-    }
-    return null
-  }
-
-  private pickNextIdx(deckId: string, now: number): Card | null {
-    const ix = this.ensureBuilt(deckId)
-    this.rebuildHeapsIfStale(deckId, ix)
-    const learning = this.heapNext(ix.learning, deckId, now, (c, e) => !!c.fsrs && displayState(c) === 'learning' && c.fsrs!.due === e.key)
-    if (learning) return learning
-    // 刷完旧卡才能刷新卡：当日会到期的复习卡（含今日稍后到点）都先于新卡出
-    const eot = endOfLocalDay(now)
-    const review = this.heapNext(ix.review, deckId, eot, (c, e) => displayState(c) === 'review' && c.fsrs!.due === e.key)
-    if (review) return review
-    return this.heapNext(ix.fresh, deckId, null, (c, e) => !c.fsrs && c.createdAt === e.key)
-  }
-
-  private remainingOf(deckId: string): number {
-    const ix = this.deckIdx(deckId)
-    return ix.counts.new + ix.counts.learningDueToday + ix.counts.reviewDueToday
-  }
-
   // ---------- 只读视图 ----------
 
   now(): number {
@@ -759,10 +457,10 @@ export class WorkspaceService {
   deckInfos(): DeckInfo[] {
     this.ensureDay()
     const active = this.decks.filter((d) => !d.deletedAt)
-    // 「到期」列读时计算（见 dueNowOf 注释）。堆未建的牌组若逐个调 dueNowOf，
+    // 「到期」列读时计算（见 schedule-index 的 dueNowOf 注释）。堆未建的牌组若逐个调 dueNowOf，
     // 会变成 O(牌组数 × 全库卡数)——首页每次刷新都重付。这里对未建堆的牌组
     // 合并为一次全库单趟扫描（O(全库)），已建堆的仍走 DFS 剪枝。
-    const pending = active.filter((d) => !this.deckIdx(d.id).built)
+    const pending = active.filter((d) => !this.sched.deckIdx(d.id).built)
     const bulk = new Map<string, number>()
     if (pending.length > 0) {
       const ids = new Set(pending.map((d) => d.id))
@@ -776,49 +474,14 @@ export class WorkspaceService {
       }
     }
     return active.map((d) => {
-      const ix = this.deckIdx(d.id)
+      const ix = this.sched.deckIdx(d.id)
       const counts: DeckTableCounts = {
         total: ix.counts.total,
         new: ix.counts.new,
-        due: bulk.has(d.id) ? (bulk.get(d.id) ?? 0) : this.dueNowOf(d.id, ix)
+        due: bulk.has(d.id) ? (bulk.get(d.id) ?? 0) : this.sched.dueNowOf(d.id, ix)
       }
       return { ...d, counts }
     })
-  }
-
-  /** 「到期」列：此刻 due <= now 的学习/复习卡数（不含新卡/未到期/暂停卡）。到期随时间推进无法增量维护，读时计算——
-   * 堆已构建时从根 DFS，key > now 剪枝（堆性质：子节点 key >= 父节点）；条目可能含失效/重复（惰性失效遗留），按卡 id 去重后以卡的真实 due 判定。
-   * 未构建时走该牌组的卡桶单趟扫描。 */
-  private dueNowOf(deckId: string, ix: DeckIndex): number {
-    const now = Date.now()
-    if (!ix.built) {
-      const hidden = this.hiddenDeckIds()
-      let n = 0
-      for (const c of this.byDeck.get(deckId) ?? []) {
-        if (c.deletedAt || c.suspended || hidden.has(c.deckId)) continue
-        if (c.fsrs && c.fsrs.due <= now) n++
-      }
-      return n
-    } else {
-      this.rebuildHeapsIfStale(deckId, ix)
-    }
-    const seen = new Set<string>()
-    let n = 0
-    for (const h of [ix.learning, ix.review]) {
-      const stack = [0]
-      while (stack.length > 0) {
-        const i = stack.pop()!
-        const e = h.at(i)
-        if (!e || e.key > now) continue
-        const c = this.cards.get(e.id)
-        if (c && !c.deletedAt && !c.suspended && c.deckId === deckId && !seen.has(c.id)) {
-          seen.add(c.id)
-          if (c.fsrs && c.fsrs.due <= now) n++
-        }
-        stack.push(2 * i + 1, 2 * i + 2)
-      }
-    }
-    return n
   }
 
   private todayStartMs(): number {
@@ -873,29 +536,19 @@ export class WorkspaceService {
 
   // ---------- 卡片文件写路径（追加 + 压实，需求 §19 L1） ----------
 
-  private contentRow(c: Card): string {
-    const { deckId: _d, fsrs: _f, reps: _r, lapses: _l, tie: _t, seqApplied: _s, ...content } = c
-    return JSON.stringify(content)
-  }
-
-  private snapshotRow(c: Card): string {
-    const { deckId: _d, tie: _t, seqApplied: _s, ...row } = c
-    return JSON.stringify(row)
-  }
-
   /** 新卡行追加到基文件尾（纯新增、无调度历史，不走全量重写） */
   private appendCardRows(deckId: string, cards: Card[]): void {
     if (cards.length === 0) return
-    fs.appendFileSync(this.deckCardsFile(deckId), cards.map((c) => this.contentRow(c)).join('\n') + '\n', 'utf-8')
-    this.noteWrite(this.deckCardsFile(deckId))
+    fs.appendFileSync(this.paths.deckCardsFile(deckId), cards.map((c) => contentRow(c)).join('\n') + '\n', 'utf-8')
+    this.watcher.noteWrite(this.paths.deckCardsFile(deckId))
   }
 
   /** 内容变更追加到 delta 文件（启动时覆盖基行并继承其调度快照） */
   private appendCardDelta(deckId: string, cards: Card[]): void {
     if (cards.length === 0) return
-    fs.appendFileSync(this.deckDeltaFile(deckId), cards.map((c) => this.contentRow(c)).join('\n') + '\n', 'utf-8')
+    fs.appendFileSync(this.paths.deckDeltaFile(deckId), cards.map((c) => contentRow(c)).join('\n') + '\n', 'utf-8')
     this.touchDelta(deckId)
-    this.noteWrite(this.deckDeltaFile(deckId))
+    this.watcher.noteWrite(this.paths.deckDeltaFile(deckId))
   }
 
   /** 移入牌组：delta 追加带调度快照的完整行（目标可能没有该卡基行，快照须自带）；
@@ -906,21 +559,21 @@ export class WorkspaceService {
       const { deckId: _d, tie: _t, seqApplied: _s, ...row } = c
       return JSON.stringify({ __mikiSeq: this.seq, ...row })
     })
-    fs.appendFileSync(this.deckDeltaFile(deckId), lines.join('\n') + '\n', 'utf-8')
+    fs.appendFileSync(this.paths.deckDeltaFile(deckId), lines.join('\n') + '\n', 'utf-8')
     this.touchDelta(deckId)
-    this.noteWrite(this.deckDeltaFile(deckId))
+    this.watcher.noteWrite(this.paths.deckDeltaFile(deckId))
   }
 
   /** 移出牌组的墓碑行（启动合并时删除对应基行；delta 内行序=时序，先移出后移回不会误删） */
   private appendCardTombstones(deckId: string, ids: string[]): void {
     if (ids.length === 0) return
     fs.appendFileSync(
-      this.deckDeltaFile(deckId),
+      this.paths.deckDeltaFile(deckId),
       ids.map((id) => JSON.stringify({ id, __mikiTombstone: true })).join('\n') + '\n',
       'utf-8'
     )
     this.touchDelta(deckId)
-    this.noteWrite(this.deckDeltaFile(deckId))
+    this.watcher.noteWrite(this.paths.deckDeltaFile(deckId))
   }
 
   private touchDelta(deckId: string): void {
@@ -934,14 +587,14 @@ export class WorkspaceService {
     const lines: string[] = [JSON.stringify({ __mikiCheckpoint: this.seq })]
     // 行序 = 卡 id 序：装饰排序（比 id 不比整行 JSON 串，短键比较），读取端按 id 建 Map 不依赖行序
     const cards = (this.byDeck.get(deckId) ?? []).slice().sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
-    const rows = cards.map((c) => this.snapshotRow(c))
-    atomicWrite(this.deckCardsFile(deckId), lines.join('\n') + '\n' + (rows.length ? rows.join('\n') + '\n' : ''))
-    fs.rmSync(this.deckDeltaFile(deckId), { force: true })
+    const rows = cards.map((c) => snapshotRow(c))
+    atomicWrite(this.paths.deckCardsFile(deckId), lines.join('\n') + '\n' + (rows.length ? rows.join('\n') + '\n' : ''))
+    fs.rmSync(this.paths.deckDeltaFile(deckId), { force: true })
     this.deltaCounts.set(deckId, 0)
     this.deckCheckpoints.set(deckId, this.seq)
     this.writeStatsCheckpoint()
-    this.noteWrite(this.deckCardsFile(deckId))
-    this.noteWrite(this.deckDeltaFile(deckId))
+    this.watcher.noteWrite(this.paths.deckCardsFile(deckId))
+    this.watcher.noteWrite(this.paths.deckDeltaFile(deckId))
   }
 
   /** 统计聚合检查点落盘（压实时调用，运行期不写避免高频重写） */
@@ -949,8 +602,8 @@ export class WorkspaceService {
     const daily: [string, [string, { total: number; again: number }][]][] = [...this.dailyAgg].map(
       ([d, m]) => [d, [...m]]
     )
-    atomicWrite(this.statsFile(), JSON.stringify({ checkpointSeq: this.seq, dailyAgg: daily }))
-    this.noteWrite(this.statsFile())
+    atomicWrite(this.paths.statsFile(), JSON.stringify({ checkpointSeq: this.seq, dailyAgg: daily }))
+    this.watcher.noteWrite(this.paths.statsFile())
   }
 
   /** 手动全量压实（运维入口；把所有牌组基文件、调度快照与聚合检查点对齐到当前 seq） */
@@ -973,7 +626,7 @@ export class WorkspaceService {
     this.cards.set(card.id, card)
     this.deckBucket(deckId).push(card)
     this.appendCardRows(deckId, [card])
-    this.reindexCard(card, null)
+    this.sched.reindexCard(card, null)
     return card
   }
 
@@ -1000,13 +653,8 @@ export class WorkspaceService {
     }
     this.appendCardRows(deckId, cards)
     // 批量路径：reindexCard 的公共量（跨天检测/当日界/隐藏牌组/堆索引）hoist 出来，逐卡只做计数+入堆；
-    // 新卡 deletedAt=null 且未暂停，走 reindexCard 与逐卡调它完全同口径
-    this.ensureDay(now)
-    const eot = endOfLocalDay(now)
-    if (!this.hiddenDeckIds().has(deckId)) {
-      const ix = this.deckIdx(deckId)
-      for (const c of cards) this.classPush(c, ix, eot)
-    }
+    // 新卡 deletedAt=null 且未暂停，走 addCardsNew 与逐卡调 reindexCard 完全同口径
+    this.sched.addCardsNew(deckId, cards, now)
     return cards
   }
 
@@ -1057,7 +705,7 @@ export class WorkspaceService {
     if (evs.length === 0) return { deleted: 0, missing }
     this.appendEvents(evs)
     for (const ev of evs) this.sessionOps.push({ seq: ev.seq, cardId: ev.cardId })
-    for (const t of touched) this.reindexCard(t.card, t.before)
+    for (const t of touched) this.sched.reindexCard(t.card, t.before)
     return { deleted: evs.length, missing }
   }
 
@@ -1101,7 +749,7 @@ export class WorkspaceService {
       }
       this.appendEvents([ev])
       card.suspended = suspended
-      this.reindexCard(card, before)
+      this.sched.reindexCard(card, before)
     }
     return card
   }
@@ -1139,7 +787,7 @@ export class WorkspaceService {
       const targetBucket = this.deckBucket(targetDeckId)
       for (const t of touched) targetBucket.push(t.card)
       for (const [deckId, ids] of bySource) this.appendCardTombstones(deckId, ids)
-      for (const t of touched) this.reindexCard(t.card, t.before, t.before.deckId)
+      for (const t of touched) this.sched.reindexCard(t.card, t.before, t.before.deckId)
     }
     return moved
   }
@@ -1173,14 +821,14 @@ export class WorkspaceService {
     // reset 不可撤销：把该卡的会话撤销栈一并作废
     const resetIds = new Set(evs.map((e) => e.cardId))
     this.sessionOps = this.sessionOps.filter((op) => !resetIds.has(op.cardId))
-    for (const t of touched) this.reindexCard(t.card, t.before)
+    for (const t of touched) this.sched.reindexCard(t.card, t.before)
     return evs.length
   }
 
   private appendEvents(evs: ReviewEvent[]): void {
     const byFile = new Map<string, string[]>()
     for (const ev of evs) {
-      const f = this.logFile(ev.t)
+      const f = this.paths.logFile(ev.t)
       const list = byFile.get(f) ?? []
       list.push(JSON.stringify(ev))
       byFile.set(f, list)
@@ -1188,7 +836,7 @@ export class WorkspaceService {
     for (const [f, lines] of byFile) {
       fs.mkdirSync(path.dirname(f), { recursive: true })
       fs.appendFileSync(f, lines.join('\n') + '\n', 'utf-8')
-      this.noteWrite(f)
+      this.watcher.noteWrite(f)
     }
     this.events.push(...evs)
     for (const ev of evs) this.eventBySeq.set(ev.seq, ev)
@@ -1202,7 +850,7 @@ export class WorkspaceService {
     const ev: ReviewEvent = { seq: ++this.seq, t: now, action: 'delete', cardId, deckId: card.deckId, before: card.fsrs }
     this.appendEvents([ev])
     card.deletedAt = now
-    this.reindexCard(card, before)
+    this.sched.reindexCard(card, before)
     this.sessionOps.push({ seq: ev.seq, cardId })
   }
 
@@ -1231,8 +879,8 @@ export class WorkspaceService {
     const now = Date.now()
     this.ensureDay(now)
     return {
-      card: this.pickNextIdx(deckId, now),
-      remaining: this.remainingOf(deckId),
+      card: this.sched.pickNextIdx(deckId, now),
+      remaining: this.sched.remainingOf(deckId),
       todayCount: this.todayCount()
     }
   }
@@ -1258,7 +906,7 @@ export class WorkspaceService {
     bumpDailyAgg(this.dailyAgg, card.deckId, ev.t, rating, 1)
     this.todayAnswers++
     this.totalAnsweredCache++
-    this.reindexCard(card, before)
+    this.sched.reindexCard(card, before)
     this.sessionOps.push({ seq: ev.seq, cardId })
     return { answeredCardId: cardId, ...this.getStudy(card.deckId) }
   }
@@ -1327,11 +975,11 @@ export class WorkspaceService {
       }
     }
     if (target.action === 'delete') card.deletedAt = null
-    this.reindexCard(card, before)
+    this.sched.reindexCard(card, before)
     return {
       restoredCardId: card.id,
       card,
-      remaining: this.remainingOf(card.deckId),
+      remaining: this.sched.remainingOf(card.deckId),
       todayCount: this.todayCount()
     }
   }
