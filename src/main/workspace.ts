@@ -975,7 +975,14 @@ export class WorkspaceService {
       this.deckBucket(deckId).push(c)
     }
     this.appendCardRows(deckId, cards)
-    for (const c of cards) this.reindexCard(c, null)
+    // 批量路径：reindexCard 的公共量（跨天检测/当日界/隐藏牌组/堆索引）hoist 出来，逐卡只做计数+入堆；
+    // 新卡 deletedAt=null 且未暂停，走 reindexCard 与逐卡调它完全同口径
+    this.ensureDay(now)
+    const eot = endOfLocalDay(now)
+    if (!this.hiddenDeckIds().has(deckId)) {
+      const ix = this.deckIdx(deckId)
+      for (const c of cards) this.classPush(c, ix, eot)
+    }
     return cards
   }
 
