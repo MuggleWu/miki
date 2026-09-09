@@ -307,7 +307,10 @@ describe('query', () => {
   it('多关键词 AND、大小写不敏感，正反面都搜', () => {
     // filterCards 关键词路径：小写化在函数内做，lowerOf 只需原样返回文本
     const ids = (params: Partial<QueryParams>) =>
-      filterCards(cards, { deckId: null, keywords: [], sort: [], ...params }, (c) => [c.front.toLowerCase(), c.back.toLowerCase()]).map((c) => c.id)
+      filterCards(cards, { deckId: null, keywords: [], sort: [], ...params }, (c) => [
+        c.front.toLowerCase(),
+        c.back.toLowerCase()
+      ]).map((c) => c.id)
     expect(ids({ keywords: ['增值税'] })).toEqual(['c1', 'c2'])
     expect(ids({ keywords: ['增值', '行测'] })).toEqual(['c2'])
     expect(ids({ keywords: ['ABC'] })).toEqual([])
@@ -323,9 +326,20 @@ describe('query', () => {
     expect(q({})).toBe(cards)
 
     // 状态：new（无 fsrs）、suspended、learning 的合并判定
-    const learn = { ...mk('cl', '学习卡', '', T0), fsrs: { state: FSRS_STATE.Learning, step: 0, stability: 1, difficulty: 5, due: T0 + 600_000, lastReview: T0 } as Card['fsrs'] }
+    const learn = {
+      ...mk('cl', '学习卡', '', T0),
+      fsrs: {
+        state: FSRS_STATE.Learning,
+        step: 0,
+        stability: 1,
+        difficulty: 5,
+        due: T0 + 600_000,
+        lastReview: T0
+      } as Card['fsrs']
+    }
     const withStates = [...cards, learn, { ...mk('cs', '暂停卡', '', T0), suspended: true }]
-    const qAll = (params: Partial<QueryParams>) => filterCards(withStates, { deckId: null, keywords: [], sort: [], ...params }, lowerOf)
+    const qAll = (params: Partial<QueryParams>) =>
+      filterCards(withStates, { deckId: null, keywords: [], sort: [], ...params }, lowerOf)
     expect(qAll({ state: 'new' }).map((c) => c.id)).toEqual(['c1', 'c2', 'c3'])
     expect(qAll({ state: 'learning' }).map((c) => c.id)).toEqual(['cl'])
     expect(qAll({ state: 'suspended' }).map((c) => c.id)).toEqual(['cs'])
@@ -334,9 +348,27 @@ describe('query', () => {
 
     // due 窗口：无调度卡一律排除；有调度卡按 due 落窗判定
     expect(qAll({ dueAfter: T0 + 1, dueBefore: T0 + 2 }).map((c) => c.id)).toEqual([])
-    const learnDue = { ...mk('cd', '到期学习卡', '', T0), fsrs: { state: FSRS_STATE.Learning, step: 0, stability: 1, difficulty: 5, due: T0 + 600_000, lastReview: T0 } as Card['fsrs'] }
-    expect(filterCards([learnDue], { deckId: null, keywords: [], sort: [], dueAfter: T0, dueBefore: T0 + 86_400_000 }, lowerOf).map((c) => c.id)).toEqual(['cd'])
-    expect(filterCards([learnDue], { deckId: null, keywords: [], sort: [], dueAfter: T0 + 86_400_000 }, lowerOf)).toEqual([])
+    const learnDue = {
+      ...mk('cd', '到期学习卡', '', T0),
+      fsrs: {
+        state: FSRS_STATE.Learning,
+        step: 0,
+        stability: 1,
+        difficulty: 5,
+        due: T0 + 600_000,
+        lastReview: T0
+      } as Card['fsrs']
+    }
+    expect(
+      filterCards(
+        [learnDue],
+        { deckId: null, keywords: [], sort: [], dueAfter: T0, dueBefore: T0 + 86_400_000 },
+        lowerOf
+      ).map((c) => c.id)
+    ).toEqual(['cd'])
+    expect(
+      filterCards([learnDue], { deckId: null, keywords: [], sort: [], dueAfter: T0 + 86_400_000 }, lowerOf)
+    ).toEqual([])
 
     // 组合：状态 + 关键词单趟同时生效
     expect(qAll({ state: 'new', keywords: ['税法'] }).map((c) => c.id)).toEqual(['c1'])
@@ -384,7 +416,19 @@ describe('query', () => {
     // null（无 fsrs → due/interval/stability 为 null）、同键值（逼 id 决胜）、中文、降序混合
     const mkDue = (id: string, due: number | null, front: string): Card => {
       const base = mk(id, front, '', T0 + 3)
-      return due == null ? base : { ...base, fsrs: { state: FSRS_STATE.Review, step: null, stability: 3, difficulty: 5, due, lastReview: T0 } as Card['fsrs'] }
+      return due == null
+        ? base
+        : {
+            ...base,
+            fsrs: {
+              state: FSRS_STATE.Review,
+              step: null,
+              stability: 3,
+              difficulty: 5,
+              due,
+              lastReview: T0
+            } as Card['fsrs']
+          }
     }
     const list = [
       mkDue('n1', null, '中文甲'),
@@ -398,7 +442,10 @@ describe('query', () => {
       [{ col: 'due', asc: false }],
       [{ col: 'front', asc: true }],
       [{ col: 'front', asc: false }],
-      [{ col: 'due', asc: true }, { col: 'front', asc: false }],
+      [
+        { col: 'due', asc: true },
+        { col: 'front', asc: false }
+      ],
       [] // 空键：跳过排序返回原引用
     ]
     for (const keys of keySets) {
@@ -407,8 +454,20 @@ describe('query', () => {
       expect(decorated.map((c) => c.id)).toEqual(direct.map((c) => c.id))
     }
     // null 恒排最前（升降序皆然），同 due 按 id 决胜，中文按拼音（乙 yǐ < 丙 bǐng？—— localeCompare 定序，只锁确定性）
-    expect(sortByKeys([...list], [{ col: 'due', asc: true }], deckOf).map((c) => c.id)).toEqual(['n1', 'r3', 'r1', 'r2', 'r4'])
-    expect(sortByKeys([...list], [{ col: 'due', asc: false }], deckOf).map((c) => c.id)).toEqual(['r4', 'r1', 'r2', 'r3', 'n1'])
+    expect(sortByKeys([...list], [{ col: 'due', asc: true }], deckOf).map((c) => c.id)).toEqual([
+      'n1',
+      'r3',
+      'r1',
+      'r2',
+      'r4'
+    ])
+    expect(sortByKeys([...list], [{ col: 'due', asc: false }], deckOf).map((c) => c.id)).toEqual([
+      'r4',
+      'r1',
+      'r2',
+      'r3',
+      'n1'
+    ])
     // 空键返回原数组引用
     const original = [list[1], list[0]]
     expect(sortByKeys(original, [], deckOf)).toBe(original)

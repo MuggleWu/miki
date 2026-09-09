@@ -62,12 +62,16 @@ Anki 是非常优秀的软件，帮助了很多人；FSRS 算法同样非常优�
 
 ```bash
 npm install
-npm run dev        # 开发模式
-npm run build      # 生产构建
-npm run pack:mac   # 打包 macOS App（release/mac-arm64/Miki.app）
-npm run typecheck  # TypeScript 严格检查（不产出文件）
-npm test           # FSRS 基准向量比对 + 核心回归测试
-npm start          # 运行构建产物
+npm run dev          # 开发模式
+npm run build        # 生产构建
+npm run pack:mac     # 打包 macOS App（release/mac-arm64/Miki.app）
+npm run typecheck    # TypeScript 严格检查（不产出文件）
+npm test             # FSRS 基准向量比对 + 核心回归测试
+npm run lint         # ESLint，提交前必须 0 error
+npm run lint:fix     # 自动修复 lint 问题
+npm run format       # Prettier 写入
+npm run format:check # 仅检查格式
+npm start            # 运行构建产物
 ```
 
 支持 macOS、Windows、Linux（标准 Electron 窗口，无平台专属 API）。
@@ -90,7 +94,7 @@ node scripts/mcp-server.mjs
 
 也可显式指定 token 与端口（旧行为）：`MIKI_TOKEN=<config.json 中的 api.token> node scripts/mcp-server.mjs`。
 
-提供 `list_decks`、`add_cards`、`search_cards`、`update_cards`、`move_cards`、`delete_cards`、`reset_progress`、`get_stats` 等工具。
+提供 `list_decks`、`add_cards`、`search_cards`、`update_cards`、`move_cards`、`set_suspended`、`delete_cards`、`reset_progress`、`get_stats` 等工具（批量工具单次最多 500 张卡；`search_cards` 日期参数接受 `YYYY-MM-DD`，按本地零点解析）。
 
 ## 文档
 

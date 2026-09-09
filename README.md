@@ -62,12 +62,16 @@ Single-key shortcuts are ignored while typing in a text field, so `Ctrl+C/V` etc
 
 ```bash
 npm install
-npm run dev        # dev mode
-npm run build      # production build
-npm run pack:mac   # package the macOS app (release/mac-arm64/Miki.app)
-npm run typecheck  # strict TypeScript, no emit
-npm test           # FSRS vector conformance + core regression tests
-npm start          # run the built app
+npm run dev         # dev mode
+npm run build       # production build
+npm run pack:mac    # package the macOS app (release/mac-arm64/Miki.app)
+npm run typecheck   # strict TypeScript, no emit
+npm test            # FSRS vector conformance + core regression tests
+npm run lint        # ESLint, 0 errors required before committing
+npm run lint:fix    # auto-fix lint issues
+npm run format      # Prettier write
+npm run format:check # Prettier check only
+npm start           # run the built app
 ```
 
 Runs on macOS, Windows and Linux (standard Electron window, no platform-specific APIs).
@@ -90,7 +94,7 @@ node scripts/mcp-server.mjs
 
 Explicit token & port (legacy behavior) also work: `MIKI_TOKEN=<token from config.json> node scripts/mcp-server.mjs`.
 
-It exposes tools such as `list_decks`, `add_cards`, `search_cards`, `update_cards`, `move_cards`, `delete_cards`, `reset_progress` and `get_stats`.
+It exposes tools such as `list_decks`, `add_cards`, `search_cards`, `update_cards`, `move_cards`, `set_suspended`, `delete_cards`, `reset_progress` and `get_stats` (batch tools accept up to 500 card IDs per call; `search_cards` date params accept `YYYY-MM-DD`, parsed at local midnight).
 
 ## Documentation
 
