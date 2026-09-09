@@ -245,12 +245,15 @@ function parseQuery(q: URLSearchParams): QueryParams {
     .map((s) => s.trim())
     .filter(Boolean)
   const sort = parseSort(q.get('sort'))
-  // 到期窗口：数字按 ms epoch；非数字尝试按日期解析（YYYY-MM-DD 或 ISO 字符串），降低 AI/脚本传参出错率
+  // 到期窗口：数字按 ms epoch；日期字符串按本地时区解析——YYYY-MM-DD 是本地零点
+  // （与 MCP toEpochMs 及「今天到期」直觉一致；Date.parse 会把纯日期解析成 UTC 零点，差 8 小时），其余按 ISO
   const dueBound = (key: string): number | null => {
     const raw = q.get(key)
     if (raw == null || raw === '') return null
     const n = Number(raw)
     if (Number.isFinite(n)) return n
+    const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw)
+    if (dateOnly) return new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3])).getTime()
     const t = Date.parse(raw)
     if (Number.isNaN(t)) throw new ApiError(400, `${key} 必须是 ms 时间戳或日期字符串（如 2026-09-30）`)
     return t

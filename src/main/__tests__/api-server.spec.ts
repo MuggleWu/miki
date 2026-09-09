@@ -234,6 +234,37 @@ describe('http api 牌组与卡片 CRUD', () => {
     expect(due.status).toBe(200)
     const badDue = await authed('GET', '/api/cards?dueBefore=not-a-date')
     expect(badDue.status).toBe(400)
+
+    // 纯日期串按本地零点解析（与 MCP toEpochMs 同口径，非 UTC 零点）。加一张刚答完的卡
+    // （due=now+60s 学习步长），窗口 [今天零点, 明天] 必命中它；两入口同窗对拍卡死口径差
+    const dueDeck = ws.addDeck('due 口径组').id
+    const c = ws.addCard(dueDeck, 'due 本地零点', '')
+    ws.answer(c.id, 3)
+    const dayKey = (t: number) => {
+      const d = new Date(t)
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    }
+    const now = Date.now()
+    const tomorrowKey = dayKey(now + 86_400_000)
+    const hit = await authed(
+      'GET',
+      `/api/cards?deckId=${dueDeck}&dueAfter=${encodeURIComponent(dayKey(now))}&dueBefore=${encodeURIComponent(tomorrowKey)}`
+    )
+    expect((hit.json as { rows: { id: string }[] }).rows.map((r) => r.id)).toContain(c.id)
+    // 同一日期串两条入口等价：HTTP 直接传串 vs MCP toEpochMs 先转本地零点时间戳，查到的行一致。
+    // 若 HTTP 错成 Date.parse（UTC 零点），dueAfter 比 MCP 早 8h，本测试环境的时区（UTC+8）下窗口右移，
+    // 且两入口结果可分辨
+    const mcpTs = (() => {
+      const m = dayKey(now).match(/^(\d{4})-(\d{2})-(\d{2})$/)
+      return new Date(Number(m![1]), Number(m![2]) - 1, Number(m![3])).getTime()
+    })()
+    const viaMcp = await authed(
+      'GET',
+      `/api/cards?deckId=${dueDeck}&dueAfter=${mcpTs}&dueBefore=${encodeURIComponent(tomorrowKey)}`
+    )
+    expect((viaMcp.json as { rows: { id: string }[] }).rows.map((r) => r.id)).toEqual(
+      (hit.json as { rows: { id: string }[] }).rows.map((r) => r.id)
+    )
   })
 
   it('暂停后按状态过滤命中', async () => {
