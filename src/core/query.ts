@@ -1,5 +1,5 @@
 // 卡片库查询：多关键词 AND 过滤 + rotate 排序（需求 B2/B4）+ 行 DTO 组装
-import type { Card, CardRow, CardState, SortKey, BrowserColumn } from '../shared/types'
+import type { Card, CardRow, CardState, QueryParams, SortKey, BrowserColumn } from '../shared/types'
 import { FSRS_STATE } from '../shared/types'
 
 export function displayState(card: Card): CardState {
@@ -44,6 +44,44 @@ export function filterByKeywords(cards: Card[], keywords: string[]): Card[] {
     const front = c.front.toLowerCase()
     const back = c.back.toLowerCase()
     return kws.every((k) => front.includes(k) || back.includes(k))
+  })
+}
+
+/** 关键词命中判定：每个关键词至少命中正面或反面之一（kws 须已小写非空） */
+export function matchKeywords(front: string, back: string, kws: string[]): boolean {
+  for (const k of kws) {
+    if (!front.includes(k) && !back.includes(k)) return false
+  }
+  return true
+}
+
+/**
+ * 单趟过滤（B3）：关键词 AND + 状态 + 到期窗口一趟判定，替代多趟 filter 中间数组。
+ * lowerOf 由调用方提供小写文本（可接缓存）；无任何条件时返回原数组引用。
+ */
+export function filterCards(
+  cards: Card[],
+  params: QueryParams,
+  lowerOf: (c: Card) => [string, string]
+): Card[] {
+  const kws = params.keywords.map((k) => k.toLowerCase()).filter((k) => k.length > 0)
+  const state = params.state
+  const dueAfter = params.dueAfter
+  const dueBefore = params.dueBefore
+  if (kws.length === 0 && state == null && dueAfter == null && dueBefore == null) return cards
+  return cards.filter((c) => {
+    if (state != null) {
+      if (state === 'suspended') {
+        if (!c.suspended) return false
+      } else if (c.suspended || displayState(c) !== state) return false
+    }
+    if (dueAfter != null && (c.fsrs == null || c.fsrs.due < dueAfter)) return false
+    if (dueBefore != null && (c.fsrs == null || c.fsrs.due > dueBefore)) return false
+    if (kws.length > 0) {
+      const [front, back] = lowerOf(c)
+      if (!matchKeywords(front, back, kws)) return false
+    }
+    return true
   })
 }
 

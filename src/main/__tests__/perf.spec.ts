@@ -48,6 +48,11 @@ describe.skipIf(!enabled)(`性能基准（N=${N}）`, () => {
       const r = ws.queryCards({ deckId: null, keywords: ['关键词7'], sort: [], limit: N })
       if (r.rows.length === 0) throw new Error('keyword query hit nothing')
     })
+    // 稳态复测：小写缓存已建满后的同一查询（冷启动首查含建缓存成本，稳态才是真实收益）
+    time('关键词查询·缓存稳态（命中约 1%）', N, () => {
+      const r = ws.queryCards({ deckId: null, keywords: ['关键词7'], sort: [], limit: N })
+      if (r.rows.length === 0) throw new Error('keyword query hit nothing')
+    })
   })
 
   it(`逐张答题 ${Math.min(1000, N)} 次`, () => {

@@ -28,7 +28,7 @@ import {
 import { FsrScheduler, DEFAULT_FSRS_PARAMS } from '../core/fsrs'
 import { MinHeap, type HeapEntry } from '../core/min-heap'
 import { applyEvent } from '../core/replay'
-import { displayState, filterByKeywords, sortByKeys, toRow } from '../core/query'
+import { displayState, filterCards, sortByKeys, toRow } from '../core/query'
 import type { MikiConfigPatch } from '../shared/ipc'
 import { bumpDailyAgg, computeStats, endOfLocalDay, localDateKey, type DailyAgg } from '../core/stats'
 
@@ -98,6 +98,9 @@ export class WorkspaceService {
    * 按牌组取卡/建堆/压实/到期计数走桶，把 O(全库) 扫描降到 O(牌组卡数)；
    * loadCardsWithCheckpoint 全量重建，addCard(s) 追加、moveCards 跨牌组迁移 */
   private byDeck = new Map<string, Card[]>()
+  /** 搜索小写缓存：cardId → [lowerFront, lowerBack]，卡内容只在编辑时变，
+   * 查询热路径反复 toLowerCase 是纯重复分配；无条目=未缓存（惰性建） */
+  private lowerCache = new Map<string, [string, string]>()
   /** 各牌组基文件检查点 seq（该 seq 及之前的事件已反映在快照行里） */
   private deckCheckpoints = new Map<string, number>()
   /** 各牌组 delta 行数（压实阈值触发） */
@@ -270,6 +273,7 @@ export class WorkspaceService {
     this.cards = new Map()
     this.deckCheckpoints = new Map()
     this.byDeck = new Map()
+    this.lowerCache = new Map() // 外部变更（git pull 等）可能改了卡面，小写缓存全清
     for (const deck of this.decks) {
       const rows = new Map<string, CardCheckpointRow>()
       let cp = 0
@@ -516,6 +520,16 @@ export class WorkspaceService {
       this.hiddenCache = new Set(this.decks.filter((d) => d.deletedAt).map((d) => d.id))
     }
     return this.hiddenCache
+  }
+
+  /** 取卡面小写文本（搜索用）：命中缓存直接返回，未命中现算并落缓存 */
+  private lowerTextOf(c: Card): [string, string] {
+    let hit = this.lowerCache.get(c.id)
+    if (hit === undefined) {
+      hit = [c.front.toLowerCase(), c.back.toLowerCase()]
+      this.lowerCache.set(c.id, hit)
+    }
+    return hit
   }
 
   /** 取该牌组的卡桶，不存在则建空桶 */
@@ -971,6 +985,7 @@ export class WorkspaceService {
       if (it.front === undefined && it.back === undefined) continue // 空 patch：无变化，不计入任何计数
       if (it.front !== undefined) card.front = it.front
       if (it.back !== undefined) card.back = it.back
+      this.lowerCache.delete(card.id)
       card.updatedAt = now
       updated++
       const list = touched.get(card.deckId) ?? []
@@ -1023,6 +1038,7 @@ export class WorkspaceService {
     if (patch.front === undefined && patch.back === undefined) return card
     if (patch.front !== undefined) card.front = patch.front
     if (patch.back !== undefined) card.back = patch.back
+    this.lowerCache.delete(cardId)
     card.updatedAt = Date.now()
     this.appendCardDelta(card.deckId, [card])
     return card
@@ -1280,16 +1296,8 @@ export class WorkspaceService {
 
   queryCards(params: QueryParams): QueryResult {
     const nameById = new Map(this.decks.map((d) => [d.id, d.name]))
-    let list = this.deckCards(params.deckId)
-    list = filterByKeywords(list, params.keywords)
-    if (params.state) {
-      list = list.filter((c) => {
-        if (params.state === 'suspended') return c.suspended
-        return !c.suspended && displayState(c) === params.state
-      })
-    }
-    if (params.dueAfter != null) list = list.filter((c) => c.fsrs != null && c.fsrs.due >= params.dueAfter!)
-    if (params.dueBefore != null) list = list.filter((c) => c.fsrs != null && c.fsrs.due <= params.dueBefore!)
+    // 关键词/状态/到期窗口单趟合并过滤（B3），小写文本走缓存（A1）
+    let list = filterCards(this.deckCards(params.deckId), params, (c) => this.lowerTextOf(c))
     const deckNameOf = (c: Card) => nameById.get(c.deckId) ?? ''
     list = sortByKeys(list, params.sort, deckNameOf)
     const offset = params.offset ?? 0
