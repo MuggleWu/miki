@@ -14,19 +14,31 @@ It is a very small open-source project. Perhaps by the time I grow old, no one i
 
 ## Features
 
+### Scheduling & review
+
 - **FSRS-6 scheduling** — ported from py-fsrs v6.3.2, verified against 550+ generated conformance vectors; every rating button previews the next due date before you commit
-- **Five views** — decks (table sorted by name), study, card browser, stats (forecast / heatmap / reviews / card states / intervals), and settings
-- **Standalone card window** — add/edit happens in a child window that can be dragged out of the main window (even onto another screen); its position and size are remembered across launches, and add mode supports continuous card entry
+- **Unlimited daily review** — learning comebacks slot back in when due, and new cards only start once every old card due today has been cleared: finish the old, then the new
 - **Leech handling** — a card that reaches the lapse threshold is auto-suspended: it leaves the queue and all counts, shows as ⏸ in the browser, and can be unsuspended with one click
+
+### Views & card workflow
+
+- **Five views** — decks (table sorted by name), study, card browser, stats (forecast / heatmap / reviews / card states / intervals), and settings
 - **Card browser** — multi-keyword AND search, configurable columns with drag-resizable widths and rotate sort, resizable side/panel dividers, inline editor with live Markdown preview, and virtual scrolling that stays smooth with tens of thousands of cards; due shown in two columns — relative ("in 5 minutes") and absolute ("2026-09-06 16:49")
-- **Study fonts** — configurable typeface and size for the card face, with a live sample in Settings; defaults follow the system font at 16px, matching Obsidian
+- **Standalone card window** — add/edit happens in a child window that can be dragged out of the main window (even onto another screen); its position and size are remembered across launches, and add mode supports continuous card entry
 - **Rich card content** — Markdown + KaTeX + syntax highlighting
+
+### Data & workspace
+
+- **Plain-file workspace** — data lives in a folder separate from the app, git-friendly, sync with any tool
+- **Multi-workspace (multi-user profiles)** — each workspace folder is a complete profile: decks, cards, review log and config are all independent; first launch guides you to pick any folder as the workspace, profiles can be switched in-app (the app restarts automatically), and the window title shows the active workspace name
 - **Event-sourced review log** — append-only NDJSON; undo works by compensating events with self-contained snapshots
 - **Million-card performance** — extreme-scale engineering on top of the event-sourced core: historical events are streamed and never retained in memory (a restart over 1M past events settles at 22MB), scheduling is served by incremental indexes (0.12ms per answer, 0.3ms per undo), and card files use checkpoints + delta appends (undo write amplification drops from a full-file rewrite to a single append; cold start 5.3s); randomized differential tests keep index semantics strictly identical to a full scan
-- **Plain-file workspace** — data lives in a folder separate from the app, git-friendly, sync with any tool
 - **Workspace hot reload** — external changes while the app runs (git pull, another machine's writes) are detected and applied without a restart: the in-progress study card keeps its phase, self-writes never trigger a reload loop, and the session undo stack is safely invalidated on conflict
+
+### Interface & personalization
+
+- **Study fonts** — configurable typeface and size for the card face, with a live sample in Settings; defaults follow the system font at 16px, matching Obsidian
 - **Light / dark themes** — light by default
-- **Unlimited daily review** — learning comebacks slot back in when due, and new cards only start once every old card due today has been cleared: finish the old, then the new
 
 ## Keyboard shortcuts
 
@@ -64,7 +76,7 @@ Runs on macOS, Windows and Linux (standard Electron window, no platform-specific
 
 `npm run pack:mac` builds a standalone app with electron-builder: `release/mac-arm64/Miki.app` — Dock and menu show Miki with the app icon (appId `com.mugglewu.miki`); local builds are unsigned. Copy it to `/Applications` and launch from **Raycast (type `miki`)**, Spotlight, or the Dock; the app is single-instance — launching it again just focuses the existing window.
 
-Workspace resolution for the packaged app: `MIKI_WORKSPACE` env → `~/Library/Application Support/Miki/workspace.json` (`{"workspacePath": …}`) → defaults to `~/miki-base`. For the packaging workflow and LaunchServices registration details, see the "Packaging" section in [docs/en/development.md](docs/en/development.md).
+Workspace resolution for the packaged app: `MIKI_WORKSPACE` env → `current` in `~/Library/Application Support/Miki/workspace.json` (which also holds the multi-workspace registry; the legacy `{workspacePath}` format is upgraded automatically) → first-launch onboarding (suggested default `~/miki-base`). For the packaging workflow and LaunchServices registration details, see the "Packaging" section in [docs/en/development.md](docs/en/development.md).
 
 ## HTTP API & MCP
 
@@ -98,7 +110,7 @@ Docs live in [docs/](docs/) in two languages:
 
 ## Workspace format
 
-Data is stored in a plain folder (resolved from the `MIKI_WORKSPACE` env var, falling back to `~/miki-base`):
+Data is stored in a plain folder (resolved from the `MIKI_WORKSPACE` env var, the workspace pointer file, or first-launch onboarding — suggested default `~/miki-base`):
 
 ```
 config.json                       # app config (FSRS parameters, theme, study fonts, leech threshold, browser & home layout)
