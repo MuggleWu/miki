@@ -31,7 +31,7 @@ src/
 │   ├── replay.ts    #   事件重放（review-log → 卡片状态）
 │   ├── queue.ts     #   学习队列与计数（学习到点 → 当日复习 → 新卡）
 │   ├── query.ts     #   卡片库过滤 / 排序 / 视图行
-│   └── stats.ts     #   统计五板块
+│   └── stats.ts     #   统计六板块（含留存率）
 ├── main/            # Electron 主进程
 │   ├── workspace-manager.ts #   多工作区（多用户档案）注册表：指针文件读写、引导确认、切换
 │   ├── workspace.ts #   WorkspaceService：唯一写入口（内存态 + 同步落盘）

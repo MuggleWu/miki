@@ -3,9 +3,9 @@ import { describe, expect, it } from 'vitest'
 import { replayCard } from '../replay'
 import { deckCounts, pickNext, remainingCount } from '../queue'
 import { compareByKeys, filterCards, rotateSort, sortByKeys, toRow } from '../query'
-import { bumpDailyAgg, computeStats, type DailyAgg } from '../stats'
+import { bumpDailyAgg, computeStats, normalizeBucket, type DailyAgg } from '../stats'
 import { FsrScheduler, DEFAULT_FSRS_PARAMS } from '../fsrs'
-import type { Card, CardContent, QueryParams, ReviewEvent, SortKey } from '../../shared/types'
+import type { Card, CardContent, QueryParams, Rating, ReviewEvent, SortKey } from '../../shared/types'
 import { FSRS_STATE } from '../../shared/types'
 
 const DAY = 86_400_000
@@ -42,11 +42,12 @@ function aggOf(evs: ReviewEvent[]): DailyAgg {
   const answers = new Map<number, ReviewEvent>()
   for (const e of evs) {
     if (e.action === 'answer') {
-      bumpDailyAgg(agg, e.deckId, e.t, e.rating, 1)
+      // durationMs 与 workspace 重放路径一致地传下去（留存率摘要要用它算均耗时）
+      bumpDailyAgg(agg, e.deckId, e.t, e.rating, 1, e.durationMs)
       answers.set(e.seq, e)
     } else if (e.action === 'undo' && e.targetSeq != null) {
       const t = answers.get(e.targetSeq)
-      if (t) bumpDailyAgg(agg, t.deckId, t.t, t.rating, -1)
+      if (t) bumpDailyAgg(agg, t.deckId, t.t, t.rating, -1, t.durationMs)
     }
   }
   return agg
@@ -515,12 +516,12 @@ describe('stats', () => {
     })
     const cards = [tmp, c2]
     const agg = aggOf(evs)
-    const s = computeStats({ cards, dailyAgg: agg, deckId: null, range: 'year', now })
+    const s = computeStats({ desiredRetention: 0.9, cards, dailyAgg: agg, deckId: null, range: 'year', now })
     expect(s.reviews.reduce((acc, r) => acc + r.total, 0)).toBe(2) // undo 抵消后
     expect(s.stateCounts.new).toBe(1) // c2 是 d2 的 new 卡
     expect(s.heatmap.length).toBe(365)
     expect(s.forecast.length).toBe(38) // 等宽自适应分桶，柱数不变
-    const s2 = computeStats({ cards, dailyAgg: agg, deckId: 'd1', range: 'year', now })
+    const s2 = computeStats({ desiredRetention: 0.9, cards, dailyAgg: agg, deckId: 'd1', range: 'year', now })
     expect(s2.stateCounts.new).toBe(0)
   })
 
@@ -540,7 +541,7 @@ describe('stats', () => {
       return c
     }
     const cards = [mk('f1', 100), mk('f2', 400), mk('f3', 50, true), mk('f4', 0)] // f2 超一年 f3 暂停 f4 今天内
-    const s = computeStats({ cards, dailyAgg: new Map(), deckId: null, range: 'year', now })
+    const s = computeStats({ desiredRetention: 0.9, cards, dailyAgg: new Map(), deckId: null, range: 'year', now })
     expect(s.forecast.length).toBe(38)
     expect(s.forecast.reduce((a, f) => a + f.count, 0)).toBe(1)
     // f1 距窗口左界约 99.33 天，桶宽 365/38 ≈ 9.605 天 → 第 10 桶
@@ -563,7 +564,7 @@ describe('stats', () => {
       return c
     }
     const cards = [mk('g1', 2), mk('g2', 40), mk('g3', 100)] // 跨度 98 天，桶宽 98/38 ≈ 2.579 天
-    const s = computeStats({ cards, dailyAgg: new Map(), deckId: null, range: 'all', now })
+    const s = computeStats({ desiredRetention: 0.9, cards, dailyAgg: new Map(), deckId: null, range: 'all', now })
     expect(s.forecast.length).toBe(38)
     expect(s.forecast[0].count).toBe(1) // 最早逾期（g1）
     // g2 offset 38 天 → floor(38/2.5789) = 14
@@ -571,12 +572,19 @@ describe('stats', () => {
     expect(s.forecast[37].count).toBe(1) // 最远到期 clamp 末柱
     expect(s.forecast.reduce((a, f) => a + f.count, 0)).toBe(3)
     // 同一批卡在 year 档：逾期 g1 不计；g2(10-21)、g3(12-19) 落入未来窗口
-    const sy = computeStats({ cards, dailyAgg: new Map(), deckId: null, range: 'year', now })
+    const sy = computeStats({ desiredRetention: 0.9, cards, dailyAgg: new Map(), deckId: null, range: 'year', now })
     expect(sy.forecast.reduce((a, f) => a + f.count, 0)).toBe(2)
   })
 
   it('预测等宽分桶：无已调度卡时回退零柱', () => {
-    const s = computeStats({ cards: [cardOf('h1')], dailyAgg: new Map(), deckId: null, range: 'all', now: T0 })
+    const s = computeStats({
+      desiredRetention: 0.9,
+      cards: [cardOf('h1')],
+      dailyAgg: new Map(),
+      deckId: null,
+      range: 'all',
+      now: T0
+    })
     expect(s.forecast.length).toBe(38)
     expect(s.forecast.every((f) => f.count === 0)).toBe(true)
   })
@@ -592,7 +600,166 @@ describe('stats', () => {
       due: T0 + 5 * DAY + 6 * DAY,
       lastReview: T0 + 5 * DAY
     }
-    const s = computeStats({ cards: [c], dailyAgg: new Map(), deckId: null, range: 'all', now })
+    const s = computeStats({ desiredRetention: 0.9, cards: [c], dailyAgg: new Map(), deckId: null, range: 'all', now })
     expect(s.intervals.find((b) => b.bucket === '4-7')!.count).toBe(1)
+  })
+})
+
+// 留存率与答题耗时：原先 StatsPayload 完全没有留存率，config.desiredRetention
+// （默认 0.9，FSRS 的核心旋钮）在界面上无处可看；answer 事件里的 durationMs
+// 也是只写不读。这里钉住口径：rate = 非重来 / 已答题（undo 已抵消）。
+describe('留存率与答题耗时', () => {
+  const ans = (seq: number, rating: Rating, extra: Partial<ReviewEvent> = {}): ReviewEvent => ({
+    seq,
+    t: T0,
+    action: 'answer',
+    cardId: 'c1',
+    deckId: 'd1',
+    rating,
+    ...extra
+  })
+
+  it('rate = 非重来 / 已答题；Again 计入分母不计入分子', () => {
+    const cards = [cardOf('c1')]
+    const agg = aggOf([ans(1, 3), ans(2, 1), ans(3, 4), ans(4, 2)])
+    const s = computeStats({ desiredRetention: 0.9, cards, dailyAgg: agg, deckId: null, range: 'year', now: T0 + DAY })
+    expect(s.retention.total).toBe(4)
+    expect(s.retention.correct).toBe(3)
+    expect(s.retention.rate).toBeCloseTo(0.75, 6)
+    expect(s.retention.desired).toBe(0.9)
+  })
+
+  it('undo 抵消后留存率同步回落（撤销的 Again 不再拖低留存）', () => {
+    const cards = [cardOf('c1')]
+    const events = [ans(1, 3), ans(2, 1), ans(3, 3)]
+    const undone = [...events, { seq: 4, t: T0, action: 'undo' as const, cardId: 'c1', deckId: 'd1', targetSeq: 2 }]
+    const s0 = computeStats({
+      desiredRetention: 0.9,
+      cards,
+      dailyAgg: aggOf(events),
+      deckId: null,
+      range: 'year',
+      now: T0 + DAY
+    })
+    const s1 = computeStats({
+      desiredRetention: 0.9,
+      cards,
+      dailyAgg: aggOf(undone),
+      deckId: null,
+      range: 'year',
+      now: T0 + DAY
+    })
+    expect(s0.retention.rate).toBeCloseTo(2 / 3, 6)
+    expect(s1.retention.total).toBe(2)
+    expect(s1.retention.rate).toBe(1) // 那次 Again 被撤销了
+  })
+
+  it('范围内没有答题 → rate 为 null（不是 0，否则显示成「全忘了」）', () => {
+    const s = computeStats({
+      desiredRetention: 0.85,
+      cards: [cardOf('c1')],
+      dailyAgg: new Map(),
+      deckId: null,
+      range: 'year',
+      now: T0
+    })
+    expect(s.retention.total).toBe(0)
+    expect(s.retention.rate).toBeNull()
+    expect(s.retention.avgAnswerMs).toBeNull()
+    expect(s.retention.trend).toEqual([])
+    expect(s.retention.desired).toBe(0.85)
+  })
+
+  it('平均答题耗时只除以「带耗时的次数」，缺耗时的答题不拉低均值', () => {
+    const cards = [cardOf('c1')]
+    // 三次带耗时（2s/4s/6s）+ 一次缺耗时（算 0 或 undefined）
+    const agg = aggOf([
+      ans(1, 3, { durationMs: 2000 }),
+      ans(2, 3, { durationMs: 4000 }),
+      ans(3, 1, { durationMs: 6000 }),
+      ans(4, 3)
+    ])
+    const s = computeStats({ desiredRetention: 0.9, cards, dailyAgg: agg, deckId: null, range: 'year', now: T0 + DAY })
+    expect(s.retention.total).toBe(4)
+    expect(s.retention.avgAnswerMs).toBe(4000) // (2000+4000+6000)/3，不是 /4
+  })
+
+  it('耗时为 0 / 负数（旧路径或时钟回拨）不计入均值分母', () => {
+    const cards = [cardOf('c1')]
+    const agg = aggOf([ans(1, 3, { durationMs: 0 }), ans(2, 3, { durationMs: -500 }), ans(3, 3, { durationMs: 3000 })])
+    const s = computeStats({ desiredRetention: 0.9, cards, dailyAgg: agg, deckId: null, range: 'year', now: T0 + DAY })
+    expect(s.retention.avgAnswerMs).toBe(3000)
+  })
+
+  it('趋势只含有答题的分档，且与热力图/复习同一分档口径', () => {
+    const cards = [cardOf('c1')]
+    const agg = aggOf([ans(1, 3, { t: T0 }), ans(2, 1, { t: T0 }), ans(3, 3, { t: T0 + 2 * DAY })])
+    const s = computeStats({
+      desiredRetention: 0.9,
+      cards,
+      dailyAgg: agg,
+      deckId: null,
+      range: 'year',
+      now: T0 + 3 * DAY
+    })
+    const nonEmpty = s.reviews.filter((r) => r.total > 0)
+    expect(s.retention.trend.map((p) => p.label)).toEqual(nonEmpty.map((r) => r.label))
+    const first = s.retention.trend.find((p) => p.total === 2)!
+    expect(first.correct).toBe(1) // 一次 Again + 一次 Good
+  })
+
+  it('牌组过滤同样作用于留存率（只看该牌组）', () => {
+    const cards = [cardOf('c1')]
+    const agg: DailyAgg = new Map()
+    bumpDailyAgg(agg, 'd1', T0, 3, 1)
+    bumpDailyAgg(agg, 'd2', T0, 1, 1)
+    bumpDailyAgg(agg, 'd2', T0, 1, 1)
+    const all = computeStats({
+      desiredRetention: 0.9,
+      cards,
+      dailyAgg: agg,
+      deckId: null,
+      range: 'year',
+      now: T0 + DAY
+    })
+    const d1 = computeStats({ desiredRetention: 0.9, cards, dailyAgg: agg, deckId: 'd1', range: 'year', now: T0 + DAY })
+    expect(all.retention.rate).toBeCloseTo(1 / 3, 6)
+    expect(d1.retention.total).toBe(1)
+    expect(d1.retention.rate).toBe(1)
+  })
+})
+
+describe('normalizeBucket（旧 stats.json 兼容）', () => {
+  it('旧格式只有 total/again → correct 按 total-again 兜底，耗时项补 0', () => {
+    expect(normalizeBucket({ total: 10, again: 3 })).toEqual({
+      total: 10,
+      again: 3,
+      correct: 7,
+      timed: 0,
+      durationSumMs: 0
+    })
+  })
+
+  it('新格式原样保留（不被兜底覆盖）', () => {
+    expect(normalizeBucket({ total: 10, again: 3, correct: 6, timed: 2, durationSumMs: 5000 })).toEqual({
+      total: 10,
+      again: 3,
+      correct: 6,
+      timed: 2,
+      durationSumMs: 5000
+    })
+  })
+
+  it('缺字段/垃圾值不产生 NaN（NaN 会一路污染均值与百分比）', () => {
+    const b = normalizeBucket({ total: undefined, again: 'x' as unknown as number })
+    expect(b).toEqual({ total: 0, again: 0, correct: 0, timed: 0, durationSumMs: 0 })
+    expect(Number.isNaN(b.total)).toBe(false)
+  })
+
+  it('旧格式下留存率仍然等于 (total-again)/total', () => {
+    const cards = [cardOf('c1')]
+    const agg: DailyAgg = new Map([['d1', new Map([['1970-01-02', normalizeBucket({ total: 4, again: 1 })]])]])
+    const s = computeStats({ desiredRetention: 0.9, cards, dailyAgg: agg, deckId: null, range: 'all', now: T0 + DAY })
+    expect(s.retention.rate).toBeCloseTo(0.75, 6)
   })
 })

@@ -180,6 +180,17 @@ export interface StatsPayload {
   reviews: { label: string; total: number; again: number }[]
   stateCounts: DeckCounts
   intervals: { bucket: string; count: number }[]
+  /** 留存率（范围内已答题中评非重来的比例）与答题耗时，见 docs 统计口径 */
+  retention: {
+    total: number
+    correct: number
+    /** null = 范围内没有答题 */
+    rate: number | null
+    /** 平均单卡答题耗时 ms；null = 没有带耗时的答题 */
+    avgAnswerMs: number | null
+    desired: number
+    trend: { label: string; total: number; correct: number }[]
+  }
 }
 
 export type Theme = 'light' | 'dark'

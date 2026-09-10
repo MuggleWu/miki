@@ -34,7 +34,7 @@ Launching: the packaged app lives at `/Applications/Miki.app` (type `miki` in Ra
 
 ## Stats
 
-- Five panels: forecast / review heatmap / reviews / card states / interval distribution.
+- Six panels: forecast / review heatmap / reviews / **retention** / card states / interval distribution.
 - The dropdown at the top filters by deck; the time range toggles between "last year / all".
 - The forecast is 38 equal-width time bars: "last year" splits the next 365 days into 38 buckets; "all" splits the span from the furthest due date to the earliest overdue card (overdue backlog lands on the far left). Hover to see each bucket's range and count.
 

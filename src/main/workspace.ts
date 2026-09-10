@@ -30,7 +30,15 @@ import { FsrScheduler } from '../core/fsrs'
 import { applyEvent } from '../core/replay'
 import { filterCards, sortByKeys, toRow } from '../core/query'
 import type { MikiConfigPatch } from '../shared/ipc'
-import { bumpDailyAgg, computeStats, endOfLocalDay, localDateKey, type DailyAgg } from '../core/stats'
+import {
+  bumpDailyAgg,
+  computeStats,
+  endOfLocalDay,
+  localDateKey,
+  normalizeBucket,
+  type DailyAgg,
+  type DailyBucket
+} from '../core/stats'
 import { ScheduleIndex } from './schedule-index'
 import { WorkspacePaths, contentRow, readNdjson, snapshotRow, type CardCheckpointRow } from './workspace-io'
 import { WorkspaceWatcher } from './workspace-watcher'
@@ -214,11 +222,12 @@ export class WorkspaceService {
     try {
       const raw = JSON.parse(fs.readFileSync(file, 'utf-8')) as {
         checkpointSeq?: number
-        dailyAgg?: [string, [string, { total: number; again: number }][]][]
+        /** 新格式含 correct/timed/durationSumMs；旧格式只有 total/again（缺项按 0 补，语义无损） */
+        dailyAgg?: [string, [string, Partial<DailyBucket>][]][]
       }
       this.statsCheckpoint = Number(raw.checkpointSeq) || 0
       for (const [deckId, days] of raw.dailyAgg ?? []) {
-        this.dailyAgg.set(deckId, new Map(days))
+        this.dailyAgg.set(deckId, new Map(days.map(([k, c]) => [k, normalizeBucket(c)])))
       }
       // 今日净计数与累计总数直接从聚合恢复（今日跨天由 ensureDay 清零）
       const tk = localDateKey(Date.now())
@@ -336,7 +345,10 @@ export class WorkspaceService {
       dayKeyCache = localDateKey(t)
       return dayKeyCache
     }
-    const win = new Map<number, { action: ReviewEvent['action']; rating?: Rating; t: number; deckId: string }>()
+    const win = new Map<
+      number,
+      { action: ReviewEvent['action']; rating?: Rating; t: number; deckId: string; durationMs?: number }
+    >()
     for (const f of files) {
       for (const line of readNdjson(path.join(dir, f))) {
         let ev: ReviewEvent
@@ -359,16 +371,16 @@ export class WorkspaceService {
         }
         if (ev.seq > this.statsCheckpoint) {
           if (ev.action === 'answer') {
-            bumpDailyAgg(this.dailyAgg, ev.deckId, ev.t, ev.rating, 1)
+            bumpDailyAgg(this.dailyAgg, ev.deckId, ev.t, ev.rating, 1, ev.durationMs)
             if (dayKeyOf(ev.t) === todayKey) this.todayAnswers++
             this.totalAnsweredCache++
           } else if (ev.action === 'undo' && wEntry?.action === 'answer') {
-            bumpDailyAgg(this.dailyAgg, wEntry.deckId, wEntry.t, wEntry.rating, -1)
+            bumpDailyAgg(this.dailyAgg, wEntry.deckId, wEntry.t, wEntry.rating, -1, wEntry.durationMs)
             if (dayKeyOf(wEntry.t) === todayKey) this.todayAnswers--
             this.totalAnsweredCache--
           }
         }
-        win.set(ev.seq, { action: ev.action, rating: ev.rating, t: ev.t, deckId: ev.deckId })
+        win.set(ev.seq, { action: ev.action, rating: ev.rating, t: ev.t, deckId: ev.deckId, durationMs: ev.durationMs })
         // 窗口外 undo 在重放侧丢失聚合抵消（统计差 1，compact 自愈）。40k→200k：单会话
         // 4 万事件（约 40 天千卡量）仍可撤销抵消；上限只约束重放瞬时内存（约 30MB 峰值）
         if (win.size > 200_000) {
@@ -624,10 +636,7 @@ export class WorkspaceService {
 
   /** 统计聚合检查点落盘（压实时调用，运行期不写避免高频重写） */
   private writeStatsCheckpoint(): void {
-    const daily: [string, [string, { total: number; again: number }][]][] = [...this.dailyAgg].map(([d, m]) => [
-      d,
-      [...m]
-    ])
+    const daily: [string, [string, DailyBucket][]][] = [...this.dailyAgg].map(([d, m]) => [d, [...m]])
     atomicWrite(this.paths.statsFile(), JSON.stringify({ checkpointSeq: this.seq, dailyAgg: daily }))
     this.watcher.noteWrite(this.paths.statsFile())
   }
@@ -956,7 +965,7 @@ export class WorkspaceService {
       evs.push({ seq: ++this.seq, t: now, action: 'suspend', cardId: card.id, deckId: card.deckId, suspended: true })
     }
     this.appendEvents(evs)
-    bumpDailyAgg(this.dailyAgg, card.deckId, ev.t, rating, 1)
+    bumpDailyAgg(this.dailyAgg, card.deckId, ev.t, rating, 1, durationMs)
     this.todayAnswers++
     this.totalAnsweredCache++
     this.sched.reindexCard(card, before)
@@ -1001,7 +1010,9 @@ export class WorkspaceService {
     if (target.action === 'answer') {
       card.reps = Math.max(0, card.reps - 1)
       if (target.rating === 1) card.lapses = Math.max(0, card.lapses - 1)
-      bumpDailyAgg(this.dailyAgg, target.deckId, target.t, target.rating, -1)
+      // durationMs 必须一并抵消：bumpDailyAgg 用「有耗时才动 timed」判断，
+      // 只传 rating 会让 timed 减 1 而 durationSumMs 不减，均耗时被凭空抬高。
+      bumpDailyAgg(this.dailyAgg, target.deckId, target.t, target.rating, -1, target.durationMs)
       if (target.t >= this.todayStartMs()) this.todayAnswers--
       this.totalAnsweredCache--
     }
@@ -1060,7 +1071,9 @@ export class WorkspaceService {
   // ---------- 统计 ----------
 
   getStats(params: StatsParams) {
-    const key = `${params.deckId ?? ''}|${params.range}|${localDateKey(Date.now())}|${this.seq}`
+    // 缓存键必须覆盖所有进 computeStats 的输入：desiredRetention 虽不改变答题聚合，
+    // 但它进 payload（留存率对比的目标值），改设置后旧键命中就会一直显示旧目标值。
+    const key = `${params.deckId ?? ''}|${params.range}|${localDateKey(Date.now())}|${this.seq}|${this.config.desiredRetention}`
     const hit = this.statsCache.get(key)
     if (hit) return hit
     const payload = computeStats({
@@ -1068,7 +1081,8 @@ export class WorkspaceService {
       dailyAgg: this.dailyAgg,
       deckId: params.deckId,
       range: params.range,
-      now: Date.now()
+      now: Date.now(),
+      desiredRetention: this.config.desiredRetention
     })
     // 上限 8 组：覆盖 全部/单牌组 × 年/全部 的常用组合，超出即全清（命中失效成本低且罕见）
     if (this.statsCache.size >= 8) this.statsCache.clear()

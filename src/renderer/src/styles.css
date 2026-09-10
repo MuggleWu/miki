@@ -797,6 +797,28 @@ input {
   color: var(--text-dim);
   font-weight: 500;
 }
+/* 留存率摘要行 + 口径脚注（口径差异必须写在图旁，否则会被当成 FSRS 目标留存率读） */
+.retention-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  align-items: baseline;
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+.retention-summary b {
+  font-size: 16px;
+  font-weight: 600;
+}
+.retention-summary .dim {
+  color: var(--text-dim);
+}
+.chart-foot {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
 .chart {
   width: 100%;
   height: 260px;

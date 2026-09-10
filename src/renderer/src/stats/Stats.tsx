@@ -149,6 +149,52 @@ export function Stats() {
     ]
   }
 
+  // 留存率趋势：只画有答题的分档，避免空档把折线拉到 0
+  const retentionOption: echarts.EChartsOption | null =
+    stats && stats.retention.trend.length > 0
+      ? {
+          ...chartBg,
+          grid: { left: 46, right: 16, top: 24, bottom: 28 },
+          xAxis: { type: 'category', data: stats.retention.trend.map((p) => p.label.slice(5)), ...AXIS },
+          yAxis: { ...AXIS, type: 'value', min: 0, max: 100, axisLabel: { color: dim, formatter: '{value}%' } },
+          series: [
+            {
+              type: 'line',
+              name: '留存率',
+              smooth: true,
+              symbolSize: 4,
+              data: stats.retention.trend.map((p) =>
+                p.total > 0 ? Math.round((p.correct / p.total) * 1000) / 10 : null
+              ),
+              itemStyle: { color: okColor },
+              lineStyle: { color: okColor },
+              // 目标留存率参考线（与实测口径不同，见面板脚注）
+              markLine: {
+                silent: true,
+                symbol: 'none',
+                label: {
+                  formatter: `目标 ${Math.round(stats.retention.desired * 100)}%`,
+                  color: dim,
+                  position: 'insideEndTop'
+                },
+                lineStyle: { color: warnColor, type: 'dashed' },
+                data: [{ yAxis: Math.round(stats.retention.desired * 1000) / 10 }]
+              }
+            }
+          ],
+          tooltip: {
+            trigger: 'axis',
+            ...TOOLTIP,
+            formatter: (ps: unknown) => {
+              const arr = ps as { dataIndex: number; value: number | null }[]
+              const i = arr[0]?.dataIndex ?? 0
+              const p = stats.retention.trend[i]
+              return `${p.label}<br/>答题 ${p.total} 次<br/>非重来 ${p.correct} 次<br/>留存率 ${arr[0]?.value ?? '—'}%`
+            }
+          }
+        }
+      : null
+
   const intervalOption: echarts.EChartsOption | null = stats && {
     ...chartBg,
     grid: { left: 40, right: 16, top: 20, bottom: 28 },
@@ -194,6 +240,18 @@ export function Stats() {
         {reviewsOption && <Chart option={reviewsOption} />}
       </div>
 
+      <div className="chart-card">
+        <h4>留存率（{range === 'year' ? '按天' : '按月'}）</h4>
+        {stats && <RetentionSummary retention={stats.retention} />}
+        {retentionOption && <Chart option={retentionOption} />}
+        <p className="chart-foot">
+          口径：范围内已答题中「评非重来」的比例（撤销已抵消）。它 <b>不等于</b> FSRS 的目标留存率
+          {stats ? ` ${Math.round(stats.retention.desired * 100)}%` : ''}
+          ——目标值算的是「到期时还记得的概率」，只统计到期的复习卡；本图分母含新卡与学习中卡，
+          也与调度参数的预测值不同源，两者只能各自看趋势。
+        </p>
+      </div>
+
       <div className="grid2">
         <div className="chart-card">
           <h4>卡片数量</h4>
@@ -204,6 +262,26 @@ export function Stats() {
           {intervalOption && <Chart option={intervalOption} />}
         </div>
       </div>
+    </div>
+  )
+}
+
+/** 留存率/耗时摘要行：rate 为 null 时显示「—」而不是 0%，避免误读成全忘了 */
+function RetentionSummary({ retention }: { retention: StatsPayload['retention'] }) {
+  const pct = retention.rate === null ? '—' : `${(retention.rate * 100).toFixed(1)}%`
+  const avg = retention.avgAnswerMs === null ? '—' : `${(retention.avgAnswerMs / 1000).toFixed(1)} 秒`
+  return (
+    <div className="retention-summary">
+      <span>
+        <b>{pct}</b> 留存率
+      </span>
+      <span className="dim">
+        （{retention.total} 次答题，{retention.correct} 次非重来）
+      </span>
+      <span>
+        平均 <b>{avg}</b>/卡
+      </span>
+      <span className="dim">目标 {Math.round(retention.desired * 100)}%</span>
     </div>
   )
 }

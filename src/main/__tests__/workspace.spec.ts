@@ -377,6 +377,85 @@ describe('saveConfig', () => {
   })
 })
 
+// 留存率与答题耗时链路：answer 的 durationMs 原先只写进事件、无人消费；
+// 现在进 dailyAgg 供统计页算均耗时。这条链路跨 answer → 聚合 → computeStats → 落盘重启，
+// core 层单测只认入参看不全，故在服务层再盯一遍。
+describe('留存率与答题耗时', () => {
+  it('answer 的 durationMs 进入留存率摘要（均值只除带耗时的次数）', () => {
+    const w = newWs(tmpKept())
+    const d = w.addDeck('耗时').id
+    const [c1, c2] = w.addCards(d, [
+      { front: '一', back: '' },
+      { front: '二', back: '' }
+    ])
+    w.answer(c1.id, 3, 2000)
+    w.answer(c2.id, 4, 4000)
+    w.answer(c1.id, 1) // 未上报耗时
+    const r = w.getStats({ deckId: null, range: 'year' }).retention
+    expect(r.total).toBe(3)
+    expect(r.correct).toBe(2)
+    expect(r.rate).toBeCloseTo(2 / 3, 6)
+    expect(r.avgAnswerMs).toBe(3000) // (2000+4000)/2
+  })
+
+  it('desiredRetention 跟着 config 走，暴露给统计页做对比', () => {
+    const w = newWs(tmpKept())
+    expect(w.getStats({ deckId: null, range: 'year' }).retention.desired).toBe(DEFAULT_CONFIG.desiredRetention)
+    w.saveConfig({ desiredRetention: 0.8 })
+    expect(w.getStats({ deckId: null, range: 'year' }).retention.desired).toBe(0.8)
+  })
+
+  it('undo 抵消耗时，压实 + 重启后聚合仍自洽', () => {
+    const d = tmpKept()
+    const w = newWs(d)
+    const deck = w.addDeck('耗时持久化').id
+    const [c1, c2] = w.addCards(deck, [
+      { front: '甲', back: '' },
+      { front: '乙', back: '' }
+    ])
+    w.answer(c1.id, 3, 5000)
+    w.answer(c2.id, 3, 1000)
+    w.undo() // 撤掉 c2 的 1000ms
+    let r = w.getStats({ deckId: null, range: 'year' }).retention
+    expect(r.total).toBe(1)
+    expect(r.avgAnswerMs).toBe(5000)
+
+    w.compact() // stats.json 检查点落盘（含新字段）
+    const w2 = newWs(d)
+    r = w2.getStats({ deckId: null, range: 'year' }).retention
+    expect(r.total).toBe(1)
+    expect(r.correct).toBe(1)
+    expect(r.rate).toBe(1)
+    expect(r.avgAnswerMs).toBe(5000)
+  })
+
+  it('旧 stats.json（只有 total/again）重启后留存率仍成立，均耗时如实为 null', () => {
+    const d = tmpKept()
+    const w = newWs(d)
+    const deck = w.addDeck('旧聚合').id
+    const c = w.addCard(deck, '甲', '')
+    w.answer(c.id, 3, 1000)
+    w.answer(c.id, 1, 3000)
+    w.compact()
+    // 把 stats.json 降级成旧格式（模拟升级前落盘的数据）
+    const f = path.join(d, 'stats.json')
+    const raw = JSON.parse(fs.readFileSync(f, 'utf-8')) as {
+      checkpointSeq: number
+      dailyAgg: [string, [string, { total: number; again: number }][]][]
+    }
+    const legacy = raw.dailyAgg.map(
+      ([dk, days]) => [dk, days.map(([k, b]) => [k, { total: b.total, again: b.again }])] as const
+    )
+    fs.writeFileSync(f, JSON.stringify({ checkpointSeq: raw.checkpointSeq, dailyAgg: legacy }))
+
+    const w2 = newWs(d)
+    const r = w2.getStats({ deckId: null, range: 'year' }).retention
+    expect(r.total).toBe(2)
+    expect(r.rate).toBeCloseTo(0.5, 6) // (2-1)/2，靠 normalizeBucket 的 total-again 兜底
+    expect(r.avgAnswerMs).toBeNull() // 旧格式没存耗时，如实返回 null 而不是 0
+  })
+})
+
 describe('loadConfig 写盘节流（内容未变不回写）', () => {
   const cfgFile = (d: string) => path.join(d, 'config.json')
   const readCfg = (d: string) => fs.readFileSync(cfgFile(d), 'utf-8')
