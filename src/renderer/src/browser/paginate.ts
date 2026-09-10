@@ -35,6 +35,8 @@ export interface Paginator {
   /** 滚动近底部预取（给 UI 用）：返回「是否真的追加了行」，调用方据此把结果回写自己的视图状态。
    * 未越线/已取完/被守卫拦下都 resolve false，UI 不必区分 */
   loadMoreIfNearBottom(scrollTop: number, clientHeight: number, rowH: number): Promise<boolean>
+  /** 逐页加载直到目标卡出现（学习页 B 键定位）；返回最终是否在已加载行里 */
+  loadUntilCard(cardId: string): Promise<boolean>
   /** 测试与组件同步内部游标 */
   loaded(): number
   /** 未决追加进行中 */
@@ -120,6 +122,23 @@ export function createPaginator(fetcher: Fetcher, pageSize = 400, aheadPx = 600)
       const nearBottom = scrollTop + clientHeight >= loaded * rowH - aheadPx
       if (loaded < total && nearBottom) return loadMore()
       return Promise.resolve(false)
+    },
+    /**
+     * 逐页加载直到目标卡出现（学习页 B 键定位用）。
+     *
+     * 为什么需要：分页只加载首页时，选中态是从已加载行里查的（Browser 的 rowById），
+     * 于是定位第一页之外的卡只会设上一个查不到的 id——编辑区空白、表格也没高亮，
+     * 用户看到的是「按了 B 没反应」。这里按需把页翻到位（真实数据 6657 张 = 最多 17 页，
+     * 实测每页 ~1.6ms），再交给调用方滚动定位。
+     */
+    async loadUntilCard(cardId: string): Promise<boolean> {
+      if (rows.some((r) => r.id === cardId)) return true
+      while (loaded < total) {
+        const appended = await loadMore()
+        if (!appended) break // 守卫拒绝/空页：不再空转
+        if (rows.some((r) => r.id === cardId)) return true
+      }
+      return rows.some((r) => r.id === cardId)
     },
     loaded() {
       return loaded

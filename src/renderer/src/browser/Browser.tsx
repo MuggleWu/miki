@@ -230,11 +230,30 @@ export function Browser({ saveDebounceMs = 800 }: { saveDebounceMs?: number } = 
     }
   }, [selValue])
 
-  // 外部焦点定位（学习页 B 键）
+  // 外部焦点定位（学习页 B 键 / ⌘D 后返回）
   useEffect(() => {
-    if (browserFocusCardId) {
+    if (!browserFocusCardId) return
+    let alive = true
+    // 目标卡可能在第一页之外：先把页翻到位再选中，否则选中态查不到行
+    // （rowById 只认已加载行）→ 编辑区空白、表格无高亮，看起来像「按了 B 没反应」
+    void paginator.loadUntilCard(browserFocusCardId).then((found) => {
+      if (!alive) return
+      syncFromPaginator() // 翻了页要把结果回写 state，否则新页的行不在 rows 里
       setSelectedId(browserFocusCardId)
+      setSelection([browserFocusCardId])
+      // 滚到该行：虚拟滚动的绝对位置 = 行序号 × 行高（行高是实测均值，够用）
+      if (found) {
+        const idx = paginator.rows.findIndex((r) => r.id === browserFocusCardId)
+        if (idx >= 0) {
+          const top = Math.max(0, idx * rowH - ROW_H_ESTIMATE * 2)
+          gridWrapRef.current?.scrollTo({ top })
+          setScrollTop(top)
+        }
+      }
       openBrowser(browserDeckId, null)
+    })
+    return () => {
+      alive = false
     }
   }, [browserFocusCardId]) // eslint-disable-line react-hooks/exhaustive-deps
 

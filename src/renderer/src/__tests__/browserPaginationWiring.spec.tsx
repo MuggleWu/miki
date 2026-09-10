@@ -243,3 +243,46 @@ describe('卡片库分页滚动预取 → React 状态', () => {
     expect(countText()).toBe(`${TOTAL} 张（显示前 ${PAGE}）`)
   })
 })
+
+// 学习页 B 键定位：目标卡可能在第 1 页之外。选中态是从「已加载行」里查的（rowById），
+// 不先把页翻到位就只会设上一个查不到的 id——编辑区空白、表格无高亮，
+// 用户看到的是「按了 B 没反应」。
+describe('外部焦点定位（B 键）翻到目标卡所在页', () => {
+  const target = () => `c${TOTAL - 1}` // 最后一张：必然在第 3 页
+
+  it('定位第 3 页的卡：翻页后选中且编辑区显示该卡内容', async () => {
+    await mountBrowser()
+    // 初始只加载首页
+    expect(countText()).toBe(`${TOTAL} 张（显示前 ${PAGE}）`)
+
+    await act(async () => {
+      useApp.setState({ browserFocusCardId: target() })
+    })
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    // 翻页请求发到了 offset=800（第 3 页）
+    expect(offsets()).toContain(PAGE * 2)
+    // 选中态落在该卡上，且编辑区真的显示了它（正面 = 行文本）
+    expect(useApp.getState().browserSelectedId).toBe(target())
+    const editors = [...host.querySelectorAll('.editor textarea')] as HTMLTextAreaElement[]
+    expect(editors.length).toBeGreaterThan(0)
+    expect(editors[0].value).toBe(`正面 ${target()}`)
+  })
+
+  it('目标卡在首页时不额外翻页', async () => {
+    await mountBrowser()
+    const before = appendCalls()
+    await act(async () => {
+      useApp.setState({ browserFocusCardId: 'c0' })
+    })
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(useApp.getState().browserSelectedId).toBe('c0')
+    expect(appendCalls()).toBe(before) // 已经在首页，不必再翻
+  })
+})
