@@ -188,3 +188,46 @@ describe('学习页评级在途闸门', () => {
     expect(answer).toHaveBeenLastCalledWith('card-b', 4, expect.any(Number))
   })
 })
+
+// 答题耗时是「题目上屏 → 按下评级」的墙钟差值，待机/合盖/去吃饭都会算进去。真实数据里
+// 最大一条 29.9 分钟，会让统计页的「平均单卡答题耗时」整个失真。这里钉住封顶行为。
+/** 5 分钟。这里写死而不是 import：模块级常量在测试期经 vi.mock 处理后读不到，
+ * 而且把它当契约断言更合适——改上限就得同时改这里，属于有意的摩擦 */
+const CAP_MS = 300_000
+
+describe('答题耗时封顶', () => {
+  it('待机很久后作答，耗时被截到 MAX_ANSWER_MS 而不是墙钟时长', async () => {
+    await mountStudy()
+    await showAnswer()
+    // 题目上屏后过了 2 小时（模拟合盖/离开）
+    const real = Date.now
+    const spy = vi.spyOn(Date, 'now').mockImplementation(() => real() + 2 * 60 * 60 * 1000)
+    try {
+      await act(async () => {
+        key('3')
+      })
+    } finally {
+      spy.mockRestore() // 只撤这一个桩；restoreAllMocks 会连 answer 的调用记录一起清掉
+    }
+    expect(answer).toHaveBeenCalledTimes(1)
+    const [, , durationMs] = answer.mock.calls[0] as [string, number, number]
+    expect(durationMs).toBe(CAP_MS)
+  })
+
+  it('正常作答（几秒）如实记录，不被封顶影响', async () => {
+    await mountStudy()
+    await showAnswer()
+    const real = Date.now
+    const spy = vi.spyOn(Date, 'now').mockImplementation(() => real() + 4000)
+    try {
+      await act(async () => {
+        key('3')
+      })
+    } finally {
+      spy.mockRestore()
+    }
+    const [, , durationMs] = answer.mock.calls[0] as [string, number, number]
+    expect(durationMs).toBeGreaterThanOrEqual(4000)
+    expect(durationMs).toBeLessThan(CAP_MS)
+  })
+})

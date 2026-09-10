@@ -7,6 +7,13 @@ import type { Rating, StudyPayload } from '../../../shared/types'
 
 const RATING_LABEL: Record<Rating, string> = { 1: '重来', 2: '困难', 3: '良好', 4: '轻松' }
 
+/** 单卡答题耗时上限（ms）：超出即视为「人不在」而不是「在想」。
+ * durationMs 是评级键与题目上屏的墙钟差值，待机/合盖/去吃饭都会算进去——真实数据 561 条
+ * 里最大一条 29.9 分钟，会把统计页的「平均单卡答题耗时」整个带偏。
+ * 分布：P50 4.8 秒、P90 15 秒；封顶取 5 分钟只影响 0.5% 的样本，既保留「这题我花了
+ * 4 分钟」的真实信息，又堵住「待机 8 小时」。只影响耗时统计，不参与 FSRS 调度 */
+const MAX_ANSWER_MS = 300_000
+
 function fmtInterval(ms: number): string {
   const days = ms / 86_400_000
   if (days >= 1) return `${Math.floor(days)} 天`
@@ -85,7 +92,7 @@ export function Study() {
       answeringRef.current = true
       setAnswering(true)
       try {
-        const durationMs = Date.now() - questionShownAt.current
+        const durationMs = Math.min(Date.now() - questionShownAt.current, MAX_ANSWER_MS)
         const p = await window.miki.answer(payload.card.id, rating, durationMs)
         setPayload(p)
         loadedCardIdRef.current = p.card?.id ?? null
