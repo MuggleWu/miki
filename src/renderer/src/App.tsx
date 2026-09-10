@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { isTypingTarget, useApp } from './store'
 import { workspaceName, type DamageReport } from '../../shared/workspace'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import { WorkspaceOnboarding } from './WorkspaceOnboarding'
 import { Home } from './home/Home'
 import { Study } from './study/Study'
@@ -192,11 +193,32 @@ function MainApp() {
           </div>
         )}
         <div className="page">
-          {tab === 'home' && <Home />}
-          {tab === 'study' && <Study />}
-          {tab === 'browser' && <Browser />}
-          {tab === 'stats' && <Stats />}
-          {tab === 'settings' && <Settings />}
+          {/* 每个页面各自一个边界：一个页面崩了不影响顶部导航与切换，用户能直接换页继续用 */}
+          {tab === 'home' && (
+            <ErrorBoundary label="牌组页出错了">
+              <Home />
+            </ErrorBoundary>
+          )}
+          {tab === 'study' && (
+            <ErrorBoundary label="学习页出错了">
+              <Study />
+            </ErrorBoundary>
+          )}
+          {tab === 'browser' && (
+            <ErrorBoundary label="卡片库出错了">
+              <Browser />
+            </ErrorBoundary>
+          )}
+          {tab === 'stats' && (
+            <ErrorBoundary label="统计页出错了">
+              <Stats />
+            </ErrorBoundary>
+          )}
+          {tab === 'settings' && (
+            <ErrorBoundary label="设置页出错了">
+              <Settings />
+            </ErrorBoundary>
+          )}
         </div>
       </div>
     </div>

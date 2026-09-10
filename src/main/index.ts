@@ -388,3 +388,52 @@ app.whenReady().then(() => {
 app.on('window-all-closed', () => {
   app.quit()
 })
+
+// ---------- 未捕获异常兜底 ----------
+//
+// 主进程原先没有任何 handler：一次未捕获异常（定时器回调、监听器、启动链）会让整个 app
+// 直接消失。打包后没有终端，用户看不到任何输出——只能看到「应用自己退了」，无从排查。
+// 这里把异常落盘到工作区的 miki-error.log 并弹一次可见提示，然后继续运行：
+// 单机工具的一个后台任务失败不该带走整个应用（用户可能正在录卡）。
+let fatalReported = false
+/** 兜底自身出错时的递归防护：任一步骤抛错都不能让 handler 再抛 */
+let inFatalHandler = false
+
+function reportFatal(kind: string, err: unknown): void {
+  if (inFatalHandler) return
+  inFatalHandler = true
+  try {
+    const detail = err instanceof Error ? (err.stack ?? err.message) : String(err)
+    const line = `[${new Date().toISOString()}] ${kind}\n${detail}\n\n`
+    // 落盘优先：工作区未就绪时退回 userData
+    const roots = [ws?.root, app.getPath('userData')].filter((p): p is string => !!p)
+    for (const root of roots) {
+      try {
+        fs.appendFileSync(path.join(root, 'miki-error.log'), line, 'utf-8')
+        break
+      } catch {
+        // 该目录不可写就试下一个
+      }
+    }
+    console.error(`[miki] ${kind}:`, detail) // 开发期终端可见
+    if (!fatalReported) {
+      fatalReported = true // 只弹一次：连发异常不该刷屏
+      const owner = win && !win.isDestroyed() ? win : null
+      const opts = {
+        type: 'warning' as const,
+        title: 'Miki 遇到错误',
+        message: kind,
+        detail: `应用会继续运行。详细信息已写入工作区的 miki-error.log。\n\n${detail.slice(0, 800)}`
+      }
+      const p = owner ? dialog.showMessageBox(owner, opts) : dialog.showMessageBox(opts)
+      void p.catch(() => {}) // 对话框失败不能再抛（否则又回到未捕获）
+    }
+  } catch {
+    // 兜底失败：静默——此时已无处可报，但绝不能因此再抛
+  } finally {
+    inFatalHandler = false
+  }
+}
+
+process.on('uncaughtException', (err) => reportFatal('未捕获异常', err))
+process.on('unhandledRejection', (reason) => reportFatal('未处理的 Promise 拒绝', reason))
