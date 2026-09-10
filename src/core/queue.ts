@@ -1,4 +1,6 @@
 // 学习队列（需求 §5，D3 不限额）：旧卡优先，当日旧卡清完才出新卡
+// 身份：测试对照 oracle，不是生产路径——生产出卡/计数走 main/schedule-index.ts 的三堆索引；
+// core.spec 与 schedule-index.spec 用这里的线性实现校验堆索引语义一致。改出卡口径时两边必须同步。
 import type { Card, DeckCounts } from '../shared/types'
 import { FSRS_STATE } from '../shared/types'
 
