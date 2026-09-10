@@ -64,6 +64,7 @@ docs/                # 本目录
 | `src/main/__tests__/api-server.spec.ts` | HTTP API 安全链与 CRUD（真实监听临时端口）：鉴权/Origin/Host 校验、HEAD 镜像 GET、suspend 严格布尔、到期窗口两入口口径、分页 clamp |
 | `src/main/__tests__/card-dialog.spec.ts` | 独立卡片窗口管理器：open 载荷、位置尺寸持久化、主窗关闭联动 |
 | `src/main/__tests__/workspace-manager.spec.ts` | 多工作区注册表：指针文件升级、引导确认、切换/添加/移除 |
+| `src/main/__tests__/workspace-io.spec.ts` | NDJSON 行读原语：语义与旧实现逐样本对拍（CRLF/空行/超长行）、惰性提前退出 |
 | `src/renderer/src/__tests__/highlighter.spec.ts` | Shiki 代码高亮、懒加载契约（就绪前返回 null、按语言加载、别名解析）与 markdown 集成 |
 | `src/renderer/src/__tests__/md.spec.tsx` | Markdown 渲染（KaTeX）与 Md 的引擎就绪重渲染补色 |
 | `src/renderer/src/__tests__/backtick.spec.ts` | 编辑器反引号快捷包裹（单按行内代码、三连按围栏） |
@@ -121,6 +122,20 @@ MIKI_BENCH=1 NODE_OPTIONS=--expose-gc npx vitest run src/main/__tests__/minevent
   后者在模块顶层就完成了静态 import，语言包照样进主 chunk，懒加载形同虚设。
 - `Md` 用 `useMemo` 缓存渲染结果，依赖里必须带上引擎版本号（`useHighlighterVersion`），
   否则引擎就绪后不重渲染，代码块会永久停在纯文本。
+
+### NDJSON 行读
+
+卡片基文件与 review-log 都会随使用无限增长，行读走 `iterateNdjson`（生成器）而不是
+「`readFileSync().split('\n').filter(...)`」：旧的写法会同时持有整份文本与全部行的数组，
+峰值约等于文件的 2 倍。三个调用点（卡片基文件 / delta / review-log）都是「解析一行、
+丢掉一行」的流式消费，改成生成器后行不驻留，需要数组时用 `readNdjson`（薄封装）。
+
+实测（2026-09-10，8.86MB 卡文件，独立 node 进程 + `--expose-gc`）：旧实现 16.56MB、
+只读文本 14.77MB、流式 14.77MB——行数组的额外开销约等于文件大小的 19%。vitest 里量不准
+（worker 进程与 GC 时机让 heapUsed 失真到 2 倍误差），所以内存对照不写成断言，只留这段记录。
+
+语义差异只有一处：新实现把行两端空白 trim 掉（顺带挡掉 CRLF 的 `\r`）。全部调用方都是
+`JSON.parse`，尾随空白本来就被忽略；`workspace-io.spec.ts` 里有与旧实现逐样本对拍。
 
 ## FSRS 升级路径
 `core/fsrs.ts` 是 py-fsrs scheduler 的逐行移植（含 Python banker's rounding 与 timedelta floor 语义的复刻）。py-fsrs 发布新版本后：diff 官方 `scheduler.py`，同步改动，再用基准向量脚本对固定输入重新生成期望输出——向量不一致即移植有误或语义变化。

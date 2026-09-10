@@ -64,6 +64,7 @@ Key constraints:
 | `src/main/__tests__/api-server.spec.ts` | HTTP API security chain & CRUD (real listener on a temp port): auth/Origin/Host checks, HEAD mirrors GET, suspend strict boolean, due-window parity between entries, pagination clamp |
 | `src/main/__tests__/card-dialog.spec.ts` | Standalone card dialog manager: open payload, position/size persistence, close on main-window close |
 | `src/main/__tests__/workspace-manager.spec.ts` | Multi-workspace registry: pointer file upgrade, onboarding confirm, switch/add/remove |
+| `src/main/__tests__/workspace-io.spec.ts` | NDJSON line-reading primitives: sample-by-sample parity with the old implementation (CRLF / blank lines / oversized lines) and lazy early exit |
 | `src/renderer/src/__tests__/highlighter.spec.ts` | Shiki syntax highlighting, lazy-loading contract (null before ready, per-language loading, alias resolution), and markdown integration |
 | `src/renderer/src/__tests__/md.spec.tsx` | Markdown rendering (KaTeX) plus the `Md` re-render that colours code blocks once the highlight engine lands |
 | `src/renderer/src/__tests__/backtick.spec.ts` | Editor backtick wrapping (single press → inline code, triple press → fenced block) |

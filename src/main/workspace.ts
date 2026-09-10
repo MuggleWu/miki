@@ -40,7 +40,7 @@ import {
   type DailyBucket
 } from '../core/stats'
 import { ScheduleIndex } from './schedule-index'
-import { WorkspacePaths, contentRow, readNdjson, snapshotRow, type CardCheckpointRow } from './workspace-io'
+import { WorkspacePaths, contentRow, iterateNdjson, snapshotRow, type CardCheckpointRow } from './workspace-io'
 import { WorkspaceWatcher } from './workspace-watcher'
 
 export class WorkspaceService {
@@ -256,7 +256,7 @@ export class WorkspaceService {
     for (const deck of this.decks) {
       const rows = new Map<string, CardCheckpointRow>()
       let cp = 0
-      for (const line of readNdjson(this.paths.deckCardsFile(deck.id))) {
+      for (const line of iterateNdjson(this.paths.deckCardsFile(deck.id))) {
         let row: CardCheckpointRow
         try {
           row = JSON.parse(line) as CardCheckpointRow
@@ -272,7 +272,7 @@ export class WorkspaceService {
           rows.set(row.id, row)
         }
       }
-      for (const line of readNdjson(this.paths.deckDeltaFile(deck.id))) {
+      for (const line of iterateNdjson(this.paths.deckDeltaFile(deck.id))) {
         let row: (CardCheckpointRow & { __mikiTombstone?: boolean }) | null
         try {
           row = JSON.parse(line) as CardCheckpointRow & { __mikiTombstone?: boolean }
@@ -350,7 +350,7 @@ export class WorkspaceService {
       { action: ReviewEvent['action']; rating?: Rating; t: number; deckId: string; durationMs?: number }
     >()
     for (const f of files) {
-      for (const line of readNdjson(path.join(dir, f))) {
+      for (const line of iterateNdjson(path.join(dir, f))) {
         let ev: ReviewEvent
         try {
           ev = JSON.parse(line) as ReviewEvent
