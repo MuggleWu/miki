@@ -52,6 +52,16 @@ import { WorkspaceWatcher } from './workspace-watcher'
  * 又不会频繁重写文件搅动 git 历史 */
 const DELTA_COMPACT_ROWS = 200
 
+/** 删除/移出「待落盘」计数达到它即自动压实该牌组。
+ *
+ * 为什么删除要单独有个更低的阈值：删卡只写 review-log（唯一真理）与内存，**完全不碰卡片文件**
+ * ——基文件里那张行还在、deletedAt 仍是 null。于是「只读卡片文件」的程序（MCP 工具、AI、脚本）
+ * 会把已删除的卡当成还在：真实数据里基文件 6716 行 vs 应用可见 6657 张，差 59 张全部是这种
+ * 幽灵卡，而文件里没有任何线索指向 review-log。跨牌组移动的墓碑行同理（源基文件仍留着那张卡）。
+ * 压实会把内存态（含 deletedAt）写回基文件，所以让它及时发生，文件才真的是「内容真理」。
+ * 阈值取 20 而不是 1：压实要全量重写基文件，逐次删除都重写太费；20 能把漂移压在用户可忽略的量级 */
+const PENDING_DELETE_COMPACT = 20
+
 export class WorkspaceService {
   root!: string
   config!: MikiConfig
@@ -102,6 +112,10 @@ export class WorkspaceService {
   private loadIssues: LoadIssues = newLoadIssues()
   /** 热加载作废撤销栈时的通知回调（丢掉的步数） */
   private undoDiscardedCbs: ((dropped: number) => void)[] = []
+  /** 各牌组「改了卡片文件之外的东西」的待落盘计数（删卡 / 跨牌组移出的墓碑）。
+   * 这些操作不写卡片文件，只有压实才会把内存态写回去；计数到 PENDING_DELETE_COMPACT 就压实，
+   * 免得文件长期把已删除的卡显示成还在 */
+  private pendingDeletes = new Map<string, number>()
 
   // ---------- 加载 ----------
 
@@ -431,6 +445,7 @@ export class WorkspaceService {
     if (droppedUndo > 0) this.undoDiscardedCbs.forEach((cb) => cb(droppedUndo))
     // 与重启一致：压实阈值从零重新计数；不主动压实——避免热加载改写他人刚同步的文件
     this.deltaCounts = new Map()
+    this.pendingDeletes = new Map()
     // 重载完成即重建基线（含本链自身的 config 写入），后续轮询只认真外部变化，并通知 UI 刷新
     this.watcher.rebase()
     this.watcher.notify()
@@ -603,6 +618,17 @@ export class WorkspaceService {
     )
     this.touchDelta(deckId)
     this.watcher.noteWrite(this.paths.deckDeltaFile(deckId))
+    this.bumpPendingDeletes(deckId, ids.length)
+  }
+
+  /** 记若干条「只在内存里生效、需压实才落盘」的改动（n 默认 1），够数就压实该牌组。
+   * n 按**条数**而不是调用次数：一次批量移动/删除可能带多个 id，按调用次数会严重低估 */
+  private bumpPendingDeletes(deckId: string, n = 1): void {
+    const total = (this.pendingDeletes.get(deckId) ?? 0) + n
+    this.pendingDeletes.set(deckId, total)
+    if (total >= PENDING_DELETE_COMPACT) {
+      if (this.compactDeck(deckId)) this.writeStatsCheckpoint()
+    }
   }
 
   private touchDelta(deckId: string): void {
@@ -614,10 +640,17 @@ export class WorkspaceService {
   }
 
   /** 压实一个牌组：全量重写基文件（检查点 seq + 调度快照行）→ 清 delta。
-   * delta 不存在（没有待合并内容）→ 直接返回，连基文件都不重写：否则每次触发都要改写
-   * 全部基文件，git 里全是噪声。返回是否真的压实了（调用方据此决定要不要落聚合检查点） */
+   * 没有待落盘内容（delta 不存在且无删除/墓碑）→ 直接返回，连基文件都不重写：否则每次触发
+   * 都要改写全部基文件，git 里全是噪声。返回是否真的压实了（调用方据此决定要不要落聚合检查点）。
+   *
+   * 注意「无 delta 也可能需要压实」：新增卡直接追加基文件、删卡与跨牌组移出只动内存态，
+   * 三种都不建 delta，所以 delta 可能压根不存在，而基文件已经与内存态不一致——典型是
+   * **软删卡的 deletedAt 还停在 null**（删卡只写 review-log 与内存）。老版本这里只看 delta
+   * 是否存在，会让这条路径永远压不动，只读卡片文件的程序就一直把已删除的卡当成还在。
+   * 注意压实**保留**软删行（行数不变，只是 deletedAt 落成时间戳）：内容要留着供撤销/查看 */
   private compactDeck(deckId: string): boolean {
-    if (!fs.existsSync(this.paths.deckDeltaFile(deckId))) return false
+    const hasDelta = fs.existsSync(this.paths.deckDeltaFile(deckId))
+    if (!hasDelta && (this.pendingDeletes.get(deckId) ?? 0) === 0) return false
     const lines: string[] = [JSON.stringify({ __mikiCheckpoint: this.session.seq })]
     // 行序 = 卡 id 序：装饰排序（比 id 不比整行 JSON 串，短键比较），读取端按 id 建 Map 不依赖行序
     const cards = (this.byDeck.get(deckId) ?? []).slice().sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
@@ -625,6 +658,8 @@ export class WorkspaceService {
     atomicWrite(this.paths.deckCardsFile(deckId), lines.join('\n') + '\n' + (rows.length ? rows.join('\n') + '\n' : ''))
     fs.rmSync(this.paths.deckDeltaFile(deckId), { force: true })
     this.deltaCounts.set(deckId, 0)
+    // 内存态已全部写回基文件：待落盘计数（删除/墓碑）随之归零
+    this.pendingDeletes.set(deckId, 0)
     this.deckCheckpoints.set(deckId, this.session.seq)
     this.watcher.noteWrite(this.paths.deckCardsFile(deckId))
     this.watcher.noteWrite(this.paths.deckDeltaFile(deckId))
@@ -943,6 +978,8 @@ export class WorkspaceService {
     card.deletedAt = now
     this.sched.reindexCard(card, before)
     this.session.pushUndoable([ev])
+    // 删除不进卡片文件（见 PENDING_DELETE_COMPACT）：计够数就压实，让基文件重新等于内容真理
+    this.bumpPendingDeletes(card.deckId)
   }
 
   // ---------- 学习 ----------

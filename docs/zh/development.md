@@ -77,6 +77,10 @@ docs/                # 本目录
 - **基文件不是立即更新的**：关窗写入落在 `.delta.ndjson`，`<deck>.ndjson` 只在压实时
   合并，所以「关窗后直接读基文件发现是旧内容」是正常现象，判断落盘要看 delta 或用
   `WorkspaceService.getCard` 读回。
+- **删除/移出不写卡片文件**，只写 review-log 与内存态；靠 `pendingDeletes` 计数（20 条）
+  触发压实才落进基文件。所以 `compactDeck` 的「没有 delta 就跳过」前提必须带上这个计数，
+  否则这条路径永远压不动，而只读基文件的程序会把已删除的卡当成还在。改这里时注意
+  `bumpPendingDeletes` 的 n 要按**条数**（一次批量移动可能带多个 id）。
 
 ## 测试
 

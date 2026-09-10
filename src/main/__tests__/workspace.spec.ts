@@ -773,6 +773,108 @@ describe('previewIntervals（评级预览）', () => {
   })
 })
 
+describe('删除要及时落进卡片文件（只读文件的程序不该看到幽灵卡）', () => {
+  // 删卡只写 review-log（唯一真理）与内存，**不碰卡片文件**：基文件里那张行还在、deletedAt
+  // 仍是 null。只读卡片文件的程序（MCP 工具 / AI / 脚本）因此会把已删除的卡当成还在——
+  // 真实数据里基文件 6716 行 vs 应用可见 6657 张，差 59 张全是这种幽灵卡。
+  // 压实会把内存态（含 deletedAt）写回基文件，所以关键是让它及时发生。
+  // 注意：压实**保留**软删行（行数不变，deletedAt 落成时间戳），内容要留着供撤销/查看。
+  const cardsFilePath = (d: string, deckId: string) => path.join(d, 'cards', `${deckId}.ndjson`)
+  /** 模拟只读文件的读者：数基文件里「看起来还活着」（deletedAt 为 null）的行 */
+  const aliveRows = (d: string, deckId: string): number => {
+    const f = cardsFilePath(d, deckId)
+    if (!fs.existsSync(f)) return 0
+    let n = 0
+    for (const l of fs.readFileSync(f, 'utf-8').split('\n')) {
+      if (l.trim() === '' || l.includes('__mikiCheckpoint')) continue
+      try {
+        if (JSON.parse(l).deletedAt === null) n++
+      } catch {
+        // 坏行不计
+      }
+    }
+    return n
+  }
+  const totalRows = (d: string, deckId: string): number => {
+    const f = cardsFilePath(d, deckId)
+    if (!fs.existsSync(f)) return 0
+    return fs
+      .readFileSync(f, 'utf-8')
+      .split('\n')
+      .filter((l) => l.trim() !== '' && !l.includes('__mikiCheckpoint')).length
+  }
+
+  it('阈值内的少量删除暂时只记在事件日志里（漂移有界，不是永久）', () => {
+    const d = tmpKept()
+    const w = newWs(d)
+    const deck = w.addDeck('幽灵卡组')
+    const cards = Array.from({ length: 5 }, (_, i) => w.addCard(deck.id, `正面${i}`, `反面${i}`))
+    for (const c of cards) w.deleteCard(c.id)
+    // 内存态已认删除，文件里 5 行仍显示存活 —— 这是有界漂移：再删够阈值就落盘
+    expect(w.deckInfos()[0].counts.total).toBe(0)
+    expect(aliveRows(d, deck.id)).toBe(5)
+  })
+
+  it('删除达到阈值 → 自动压实，基文件的 deletedAt 落盘，只读读者不再看到幽灵卡', () => {
+    const d = tmpKept()
+    const w = newWs(d)
+    const deck = w.addDeck('压实组')
+    const cards = Array.from({ length: 25 }, (_, i) => w.addCard(deck.id, `正面${i}`, `反面${i}`))
+    expect(aliveRows(d, deck.id)).toBe(25)
+
+    for (const c of cards.slice(0, 20)) w.deleteCard(c.id)
+
+    // 关键：只读文件的读者看到的「存活卡数」与内存态一致了
+    expect(aliveRows(d, deck.id)).toBe(5)
+    expect(w.deckInfos()[0].counts.total).toBe(5)
+    // 软删行被保留（内容留着供撤销/查看），总行数不变
+    expect(totalRows(d, deck.id)).toBe(25)
+  })
+
+  it('压实后存活卡的内容与调度状态完整，软删卡也仍可查', () => {
+    const d = tmpKept()
+    const w = newWs(d)
+    const deck = w.addDeck('保内容组')
+    const cards = Array.from({ length: 21 }, (_, i) => w.addCard(deck.id, `正面${i}`, `反面${i}`))
+    w.answer(cards[20].id, 3) // 给存活卡记一次复习，压实要把它带过去
+    for (const c of cards.slice(0, 20)) w.deleteCard(c.id)
+
+    // 重启（从文件读回）：内存态应与压实前一致
+    const w2 = newWs(d)
+    expect(w2.deckInfos()[0].counts.total).toBe(1)
+    expect(w2.getCard(cards[20].id)?.front).toBe('正面20')
+    expect(w2.getCard(cards[20].id)?.reps).toBe(1)
+    expect(w2.getCard(cards[0].id)?.deletedAt).not.toBeNull()
+    expect(w2.getCard(cards[0].id)?.front).toBe('正面0') // 内容仍在，可撤销/查看
+  })
+
+  it('跨牌组移动：源基文件不再把已移出的卡算作存活', () => {
+    const d = tmpKept()
+    const w = newWs(d)
+    const src = w.addDeck('源组')
+    const dst = w.addDeck('目标组')
+    const cards = Array.from({ length: 21 }, (_, i) => w.addCard(src.id, `正面${i}`, `反面${i}`))
+    expect(
+      w.moveCards(
+        cards.map((c) => c.id),
+        dst.id
+      )
+    ).toBe(21)
+    // 墓碑达到阈值即压实：源文件里这些卡不再「看起来活着」，目标文件里是 21 张存活
+    // 源牌组：21 条墓碑一次到位（按条数计数）→ 压实，源基文件不再把这些卡算作存活
+    expect(aliveRows(d, src.id)).toBe(0)
+    // 目标牌组：移入行写在 delta 里（基文件是压实产物，此刻还不存在）。
+    // 这是**已知边界**：只读基文件、不合并 delta 的程序在源牌组压实前会认为这些卡
+    // 「既不在目标也不在源」——但内容仍在源文件里（不会丢），且源压实后源侧不再误报存活。
+    // 真正的修复方向是让只读消费者走 HTTP API（权威合并视图），见 docs/zh/data-format.md
+    expect(fs.existsSync(path.join(d, 'cards', `${dst.id}.delta.ndjson`))).toBe(true)
+    // 源侧压实后，内存态与磁盘口径一致
+    expect(w.getCard(cards[0].id)?.deckId).toBe(dst.id)
+    expect(w.deckInfos().find((x) => x.id === dst.id)?.counts.total).toBe(21)
+    expect(w.deckInfos().find((x) => x.id === src.id)?.counts.total).toBe(0)
+  })
+})
+
 describe('乐观锁改卡（编辑弹窗的 lost update 防护）', () => {
   it('未被动过时正常写入，并返回新的 updatedAt', () => {
     const d = tmpKept()

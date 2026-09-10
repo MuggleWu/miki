@@ -54,7 +54,9 @@ The checkpointed form of card truth: the first line is a metadata line, followed
 
 - `__mikiCheckpoint`: the event watermark (global seq) this file's snapshot reflects.
 - `fsrs` / `reps` / `lapses`: scheduling snapshot (state / step / stability / difficulty / due / lastReview + counters), consistent with event replay. Legacy rows without these three fields are treated as zeros and fully replayed (auto-upgraded).
-- New cards are appended to the file tail directly; when the delta grows past 2000 lines it is auto-"compacted": the base file is fully rewritten and the delta cleared.
+- New cards are appended to the file tail directly; when the delta grows past **200 lines** it is auto-"compacted": the base file is fully rewritten and the delta cleared.
+- Deleting a card and moving one out of a deck do **not** write the card files (only review-log and in-memory state), so a separate pending counter applies: 20 deletions/moves trigger auto-compaction of that deck, writing in-memory state (including `deletedAt`) back to the base file. Without it, programs that read only the card files treat deleted cards as still present (real data was off by 59), with nothing in the files pointing at review-log.
+- Compaction **keeps** soft-deleted rows (`deletedAt` becomes a timestamp, row count unchanged): card content is retained for undo and inspection.
 
 ## cards/&lt;deck-id&gt;.delta.ndjson (delta)
 
@@ -69,6 +71,18 @@ Append-only journal of content changes; **line order is operation order**. Each 
 - Content override rows: carry only the changed content fields; scheduling snapshot fields are inherited from the base row (whichever fields are missing are inherited).
 - Move-in rows (with `__mikiSeq`): written to the target deck on cross-deck moves, carrying a complete scheduling snapshot and event watermark.
 - Tombstone rows: written to the source deck on cross-deck moves; removed from the corresponding base row at load time. Within one delta, "tombstone first, move-in later" resolves naturally by line order, so a move there and back never loses a card.
+
+### Read-only consumers: the base file is not the current content
+
+A naive reader that only reads `cards/*.ndjson` will see numbers that do not match the app:
+
+1. **Soft-deleted cards remain in the base file**: a non-null `deletedAt` means deleted; you must filter on that field rather than counting rows.
+2. **Deletions may not be flushed yet**: they only go to review-log and reach the base file on compaction (see the pending counter above).
+3. **The destination side of a cross-deck move lives only in the delta**: the move-in row is written to the target deck's `.delta.ndjson`; the target base file only appears after compaction.
+
+For an authoritative view, **use the HTTP API** (`counts.total` from `GET /api/decks`, `GET /api/cards`),
+or merge `base file + delta (content-override / move-in / tombstone rows) + review-log events` yourself.
+A base-file-only count can be too large.
 
 ## stats.json
 
