@@ -56,6 +56,7 @@ const api: MikiApi = {
     ipcRenderer.on(IPC.cardDialogVisibility, h)
     return () => ipcRenderer.removeListener(IPC.cardDialogVisibility, h)
   },
+  dataDamageReport: () => ipcRenderer.invoke(IPC.dataDamageReport),
   workspaceStatus: () => ipcRenderer.invoke(IPC.workspaceStatus),
   workspaceChooseFolder: () => ipcRenderer.invoke(IPC.workspaceChooseFolder),
   workspaceConfirm: (p) => ipcRenderer.invoke(IPC.workspaceConfirm, p),

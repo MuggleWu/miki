@@ -34,7 +34,16 @@ import { endOfLocalDay, localDateKey } from '../core/stats'
 import { ScheduleIndex } from './schedule-index'
 import { SessionLog } from './session-log'
 import { StatsLedger } from './stats-ledger'
-import { WorkspacePaths, contentRow, iterateNdjson, snapshotRow, type CardCheckpointRow } from './workspace-io'
+import {
+  WorkspacePaths,
+  contentRow,
+  iterateNdjson,
+  newLoadIssues,
+  noteDamaged,
+  snapshotRow,
+  type CardCheckpointRow,
+  type LoadIssues
+} from './workspace-io'
 import { WorkspaceWatcher } from './workspace-watcher'
 
 /** delta 压实阈值（行）：追加超过它、或启动时发现 delta 现存行数超过它，就把该牌组压实。
@@ -88,6 +97,9 @@ export class WorkspaceService {
   /** 软删牌组 id 集（调度索引/学习页/首页共用）：这些牌组下的卡不算学习计数、不进学习队列。
    * 缓存复用避免热路径每次重分配；deleteDeck/loadDecks 时失效 */
   private hiddenCache: Set<string> | null = null
+  /** 最近一次全量加载发现的文件级损坏（无法解析的行 / 末尾缺换行）。UI 据此提示用户，
+   * 否则坏行只会被静默 continue 掉，用户看到的是「数字对不上」而不是「有数据坏了」 */
+  private loadIssues: LoadIssues = newLoadIssues()
 
   // ---------- 加载 ----------
 
@@ -114,8 +126,9 @@ export class WorkspaceService {
     this.previewScheduler = this.buildScheduler(this.config, true)
     this.loadDecks()
     this.loadStatsCheckpoint()
-    this.loadCardsWithCheckpoint()
-    this.streamEvents()
+    this.loadIssues = newLoadIssues()
+    this.loadCardsWithCheckpoint(this.loadIssues)
+    this.streamEvents(this.loadIssues)
     this.ensureDay()
     this.ensureGitignore()
     // 启动结算积压的 delta（幂等，无积压时一次 fs.existsSync 都不写盘）
@@ -221,7 +234,7 @@ export class WorkspaceService {
 
   /** 读全部卡片：基文件（含检查点快照行）→ delta 覆盖/墓碑（行序=时序）→ 卡片内存态。
    * 每行跟踪 seq 水位：快照行自带 __mikiSeq，内容行继承基行水位，重放时按卡跳过水位前事件 */
-  private loadCardsWithCheckpoint(): void {
+  private loadCardsWithCheckpoint(issues: LoadIssues): void {
     this.cards = new Map()
     this.deckCheckpoints = new Map()
     this.byDeck = new Map()
@@ -231,11 +244,12 @@ export class WorkspaceService {
       const rows = new Map<string, CardCheckpointRow>()
       let cp = 0
       let deltaRows = 0 // delta 现存行数：启动时据此决定要不要压实（见 compactOversizedDeltas）
-      for (const line of iterateNdjson(this.paths.deckCardsFile(deck.id))) {
+      for (const line of iterateNdjson(this.paths.deckCardsFile(deck.id), issues)) {
         let row: CardCheckpointRow
         try {
           row = JSON.parse(line) as CardCheckpointRow
         } catch {
+          noteDamaged(issues, this.paths.deckCardsFile(deck.id))
           continue
         }
         if (row && typeof row === 'object' && '__mikiCheckpoint' in row) {
@@ -247,11 +261,12 @@ export class WorkspaceService {
           rows.set(row.id, row)
         }
       }
-      for (const line of iterateNdjson(this.paths.deckDeltaFile(deck.id))) {
+      for (const line of iterateNdjson(this.paths.deckDeltaFile(deck.id), issues)) {
         let row: (CardCheckpointRow & { __mikiTombstone?: boolean }) | null
         try {
           row = JSON.parse(line) as CardCheckpointRow & { __mikiTombstone?: boolean }
         } catch {
+          noteDamaged(issues, this.paths.deckDeltaFile(deck.id))
           continue
         }
         if (!row || typeof row.id !== 'string') continue
@@ -298,7 +313,7 @@ export class WorkspaceService {
    * 历史事件不驻留内存：undo 抵消目标靠最近事件窗口（undo 与 target 同会话，距离有限）；
    * 新版 undo 事件自带 targetAction/targetRating，窗口只是旧库兼容兜底。
    */
-  private streamEvents(): void {
+  private streamEvents(issues: LoadIssues): void {
     const dir = path.join(this.root, 'review-log')
     const files = fs.existsSync(dir)
       ? fs
@@ -316,11 +331,12 @@ export class WorkspaceService {
       { action: ReviewEvent['action']; rating?: Rating; t: number; deckId: string; durationMs?: number }
     >()
     for (const f of files) {
-      for (const line of iterateNdjson(path.join(dir, f))) {
+      for (const line of iterateNdjson(path.join(dir, f), issues)) {
         let ev: ReviewEvent
         try {
           ev = JSON.parse(line) as ReviewEvent
         } catch {
+          noteDamaged(issues, path.join(dir, f))
           continue
         }
         ev.seq = this.session.nextSeq()
@@ -394,8 +410,9 @@ export class WorkspaceService {
     this.previewScheduler = this.buildScheduler(this.config, true)
     this.loadDecks()
     this.loadStatsCheckpoint()
-    this.loadCardsWithCheckpoint()
-    this.streamEvents()
+    this.loadIssues = newLoadIssues()
+    this.loadCardsWithCheckpoint(this.loadIssues)
+    this.streamEvents(this.loadIssues)
     // 卡对象/调度状态全换新：索引含 due key 与 tie 分配，必须全量重建（不走跨天清零语义，
     // todayAnswers 已由 loadStatsCheckpoint 从聚合重导；与跨天/启动同路径）
     this.sched.forceRebuild(localDateKey(Date.now()), Date.now())
@@ -483,6 +500,19 @@ export class WorkspaceService {
   /** 历史累计净答题数（undo 已抵消；启动时算一次，之后答题/撤销增量维护，O(1)） */
   totalAnswered(): number {
     return this.ledger.totalAnsweredCount()
+  }
+
+  /** 本次加载发现的文件损坏摘要（UI 启动提示用）。
+   * 之前坏行被静默 continue 掉：app 照常启动、数字悄悄偏移，用户只会觉得「数字不对」
+   * 而不知道有数据坏了。这里如实报出，并给出去重后的文件名（最多 5 个） */
+  damageReport(): { damagedLines: number; truncatedFiles: string[]; files: string[] } {
+    const damagedLines = [...this.loadIssues.damaged.values()].reduce((a, b) => a + b, 0)
+    const rel = (p: string) => path.relative(this.root, p)
+    return {
+      damagedLines,
+      truncatedFiles: [...this.loadIssues.truncated].map(rel),
+      files: [...this.loadIssues.damaged.keys()].map(rel).slice(0, 5)
+    }
   }
 
   // ---------- 牌组 ----------

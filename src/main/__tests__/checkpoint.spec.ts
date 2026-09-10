@@ -220,3 +220,88 @@ describe('启动压实积压的 delta', () => {
     expect(w2.getCard(c.id)!.fsrs).not.toBeNull()
   })
 })
+
+// 损坏检测：坏行本来被静默 continue 掉——app 照常启动、数字悄悄少算，用户无从察觉。
+// 这几条钉住「如实报出」，其中「末尾缺换行」是追加写被中断的典型信号（僵尸行会被丢弃）。
+describe('加载期损坏检测（damageReport）', () => {
+  it('干净工作区报告为空', () => {
+    const d = tmp()
+    const w = newWs(d)
+    const deck = w.addDeck('干净组').id
+    w.addCard(deck, '正常卡', '')
+    const rep = w.damageReport()
+    expect(rep.damagedLines).toBe(0)
+    expect(rep.truncatedFiles).toEqual([])
+    expect(rep.files).toEqual([])
+  })
+
+  it('基文件里的坏行按条数报出，并给出文件名', () => {
+    const d = tmp()
+    const w = newWs(d)
+    const deck = w.addDeck('坏行组').id
+    w.addCard(deck, '甲', '')
+    const file = path.join(d, 'cards', `${deck}.ndjson`)
+    fs.appendFileSync(file, '{"id":"broken\n{"id":"also-broken\n')
+
+    const rep = newWs(d).damageReport()
+    expect(rep.damagedLines).toBe(2)
+    expect(rep.files).toEqual([`cards/${deck}.ndjson`])
+  })
+
+  it('delta 里的坏行也报出（内容变更行丢失 = 编辑回退）', () => {
+    const d = tmp()
+    const w = newWs(d)
+    const deck = w.addDeck('坏delta').id
+    const c = w.addCard(deck, '原内容', '')
+    w.updateCard(c.id, { front: '新内容' })
+    fs.appendFileSync(path.join(d, 'cards', `${deck}.delta.ndjson`), '{"id":"半截')
+
+    const w2 = newWs(d)
+    expect(w2.damageReport().damagedLines).toBe(1)
+    expect(w2.damageReport().files).toEqual([`cards/${deck}.delta.ndjson`])
+  })
+
+  it('review-log 里的坏行报出（事件丢失 = 统计少算）', () => {
+    const d = tmp()
+    const w = newWs(d)
+    const deck = w.addDeck('坏日志').id
+    const c = w.addCard(deck, '卡', '')
+    w.answer(c.id, 3)
+    const logFile = path.join(
+      d,
+      'review-log',
+      `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}.ndjson`
+    )
+    fs.appendFileSync(logFile, '{"seq":99,"action":"ans\n')
+
+    expect(newWs(d).damageReport().damagedLines).toBe(1)
+  })
+
+  it('末尾缺换行（追加写被中断）如实标记 truncatedFiles', () => {
+    const d = tmp()
+    const w = newWs(d)
+    const deck = w.addDeck('截断组').id
+    w.addCard(deck, '甲', '')
+    const file = path.join(d, 'cards', `${deck}.ndjson`)
+    // 去掉结尾换行：最后一条记录可能是半截写
+    fs.writeFileSync(file, fs.readFileSync(file, 'utf-8').trimEnd())
+
+    const rep = newWs(d).damageReport()
+    expect(rep.truncatedFiles).toEqual([`cards/${deck}.ndjson`])
+    // 整行内容仍能读出来（只是标记不完整），所以不额外算坏行
+    expect(rep.damagedLines).toBe(0)
+  })
+
+  it('坏行不影响其余数据：好行照常加载，只是被报出来', () => {
+    const d = tmp()
+    const w = newWs(d)
+    const deck = w.addDeck('好坏混合').id
+    const keep = w.addCard(deck, '保留卡', '')
+    const file = path.join(d, 'cards', `${deck}.ndjson`)
+    fs.appendFileSync(file, '不是 JSON\n')
+
+    const w2 = newWs(d)
+    expect(w2.getCard(keep.id)!.front).toBe('保留卡')
+    expect(w2.damageReport().damagedLines).toBe(1)
+  })
+})

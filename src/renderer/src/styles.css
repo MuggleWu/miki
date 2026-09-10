@@ -178,6 +178,47 @@ input {
   flex: 1;
   overflow: hidden;
   display: flex;
+  /* 纵向：顶部可能有数据异常提示条，下面是页面本体 */
+  flex-direction: column;
+}
+
+/* 页面本体：占满提示条以下的区域，保持原先「内容区是横向 flex」的布局语义 */
+.content > .page {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+/* 加载期数据损坏提示条（坏行被静默跳过时的可见出口） */
+.damage-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  background: color-mix(in srgb, var(--warn) 14%, var(--panel));
+  border-bottom: 1px solid color-mix(in srgb, var(--warn) 40%, var(--border));
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.damage-banner span {
+  flex: 1;
+}
+
+.damage-dismiss {
+  flex: 0 0 auto;
+  border: 1px solid color-mix(in srgb, var(--warn) 50%, var(--border));
+  background: transparent;
+  color: var(--warn);
+  border-radius: 6px;
+  padding: 2px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.damage-dismiss:hover {
+  background: var(--hover);
 }
 
 /* ---------- 工作区（多用户档案） ---------- */

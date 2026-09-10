@@ -252,6 +252,7 @@ app.whenReady().then(() => {
     now: () => Date.now()
   })
 
+  ipcMain.handle(IPC.dataDamageReport, () => ws.damageReport())
   ipcMain.handle(IPC.workspaceStatus, () => workspaceManager.getStatus(!workspaceReady))
   ipcMain.handle(IPC.workspaceChooseFolder, async () => {
     const r = await dialog.showOpenDialog({ properties: ['openDirectory', 'createDirectory'] })

@@ -2,7 +2,7 @@
 // 卡片添加/编辑为独立弹窗子窗口（main 进程管理）：这里只负责请求开/关 + 同步开关状态 + 数据刷新
 import { useEffect, useState } from 'react'
 import { isTypingTarget, useApp } from './store'
-import { workspaceName } from '../../shared/workspace'
+import { workspaceName, type DamageReport } from '../../shared/workspace'
 import { WorkspaceOnboarding } from './WorkspaceOnboarding'
 import { Home } from './home/Home'
 import { Study } from './study/Study'
@@ -29,6 +29,16 @@ function MainApp() {
   const setTab = useApp((s) => s.setTab)
   const openBrowser = useApp((s) => s.openBrowser)
   const openDialog = useApp((s) => s.openDialog)
+  // 加载期数据损坏提示：坏行会被静默跳过（内容与统计悄悄少算），给用户一个可见出口。
+  // 只在启动查一次；用户关掉后本会话不再出现（热加载会重新结算，但循环弹出比漏报更烦人）
+  const [damage, setDamage] = useState<DamageReport | null>(null)
+
+  useEffect(() => {
+    void window.miki
+      .dataDamageReport()
+      .then(setDamage)
+      .catch(() => setDamage(null))
+  }, [])
 
   // 窗口标题携带当前工作区名（Miki - 工作区名），多工作区时便于区分窗口；
   // 引导页（config 未就绪）或工作区路径缺失时保持默认 Miki。
@@ -166,11 +176,28 @@ function MainApp() {
       </div>
 
       <div className="content">
-        {tab === 'home' && <Home />}
-        {tab === 'study' && <Study />}
-        {tab === 'browser' && <Browser />}
-        {tab === 'stats' && <Stats />}
-        {tab === 'settings' && <Settings />}
+        {damage && (damage.damagedLines > 0 || damage.truncatedFiles.length > 0) && (
+          <div className="damage-banner">
+            <span>
+              检测到数据异常：
+              {damage.damagedLines > 0 && `${damage.damagedLines} 行无法解析（这些行的效果已丢失）`}
+              {damage.damagedLines > 0 && damage.truncatedFiles.length > 0 && '；'}
+              {damage.truncatedFiles.length > 0 &&
+                `${damage.truncatedFiles.length} 个文件末尾不完整（多半是异常退出时写入被中断）`}
+              {damage.files.length > 0 && `。涉及：${damage.files.join('、')}`}
+            </span>
+            <button className="damage-dismiss" onClick={() => setDamage(null)} title="关闭提示（数据不会因此恢复）">
+              知道了
+            </button>
+          </div>
+        )}
+        <div className="page">
+          {tab === 'home' && <Home />}
+          {tab === 'study' && <Study />}
+          {tab === 'browser' && <Browser />}
+          {tab === 'stats' && <Stats />}
+          {tab === 'settings' && <Settings />}
+        </div>
       </div>
     </div>
   )

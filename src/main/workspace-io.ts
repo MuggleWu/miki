@@ -45,6 +45,24 @@ export class WorkspacePaths {
   }
 }
 
+/** 一次加载里发现的文件级问题（损坏检测用）：非空行无法 JSON.parse / 文件末尾没有换行 */
+export interface LoadIssues {
+  /** file → 无法解析的非空行数 */
+  damaged: Map<string, number>
+  /** file → 末尾缺换行（很可能是追加写被中断，那一行可能已被丢掉） */
+  truncated: Set<string>
+}
+
+export function newLoadIssues(): LoadIssues {
+  return { damaged: new Map(), truncated: new Set() }
+}
+
+/** 记一条无法解析的非空行 */
+export function noteDamaged(issues: LoadIssues | undefined, file: string): void {
+  if (!issues) return
+  issues.damaged.set(file, (issues.damaged.get(file) ?? 0) + 1)
+}
+
 /**
  * 惰性切出 NDJSON 的非空行：每次只产出一个行的子串，不构造「全部行」数组。
  *
@@ -56,10 +74,15 @@ export class WorkspacePaths {
  *
  * 语义与旧实现一致（都跳过只有空白的行），差别仅在于顺带 trim 了两端空白：
  * 全部调用方都是 JSON.parse，尾随空白本来就被忽略（顺带把 CRLF 的 \r 也挡在外面）。
+ *
+ * issues 可选：传了就顺带记录「末尾缺换行」（追加写被中断的典型信号，否则只能静默）。
+ * 无法解析的行由调用方在 catch 里调 noteDamaged 记账——解析在调用方做。
  */
-export function* iterateNdjson(file: string): Generator<string> {
+export function* iterateNdjson(file: string, issues?: LoadIssues): Generator<string> {
   if (!fs.existsSync(file)) return
   const text = fs.readFileSync(file, 'utf-8')
+  // 末尾没有换行 = 最后一条记录可能只写了一半（appendFileSync 不是原子写）
+  if (issues && text.length > 0 && !text.endsWith('\n')) issues.truncated.add(file)
   // 单趟正则找出「至少含一个非空白字符」的最长片段，避免逐行 subarray + trim 的中间对象
   const LINE = /[^\s](?:[^\n]*[^\s])?/g
   let m: RegExpExecArray | null

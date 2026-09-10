@@ -28,12 +28,28 @@ export interface WorkspaceStatus {
   defaultSuggestion: string
 }
 
+/**
+ * 加载期数据损坏摘要（IPC dataDamageReport）。
+ * 坏行一旦存在，app 仍能启动、但被跳过的行会悄悄影响内容与统计数字；之前完全没有出口，
+ * 用户只会觉得「数字对不上」而不知道有数据坏了——这个结构就是那个出口。
+ */
+export interface DamageReport {
+  /** 无法 JSON.parse 的非空行总数（这些行的效果已丢失） */
+  damagedLines: number
+  /** 末尾缺换行的文件（相对工作区路径）：多半是追加写被中断，最后一条可能只写了一半 */
+  truncatedFiles: string[]
+  /** 含坏行的文件（相对工作区路径，最多 5 个，按发现顺序） */
+  files: string[]
+}
+
+/** 没有损坏时的空报告（渲染层判断要不要显示提示只看 damagedLines/truncatedFiles） */
+export const NO_DAMAGE: DamageReport = { damagedLines: 0, truncatedFiles: [], files: [] }
+
 /** 展示名 = 末段文件夹名；兼容 / 与 \ 分隔 */
 export function workspaceName(p: string): string {
   const parts = p.split(/[/\\]/).filter(Boolean)
   return parts[parts.length - 1] ?? p
 }
-
 /** 首次启动引导的默认建议路径（纯字符串拼接，不探测存在性） */
 export function defaultWorkspaceSuggestion(home: string, sep: string): string {
   return home.endsWith(sep) ? `${home}miki-base` : `${home}${sep}miki-base`

@@ -11,7 +11,7 @@ import type {
   StudyPayload,
   UndoResult
 } from './types'
-import type { WorkspaceStatus } from './workspace'
+import type { DamageReport, WorkspaceStatus } from './workspace'
 
 /** 深合并的配置补丁：study/browser 允许只传部分字段（如选中态、只改字号） */
 export type MikiConfigPatch = Partial<Omit<MikiConfig, 'browser' | 'study'>> & {
@@ -100,6 +100,8 @@ export interface MikiApi {
   onCardDialogVisibility(cb: (visible: boolean) => void): () => void
   /** 工作区状态：是否需要首次引导 + 当前路径 + 已记住的多工作区列表 */
   workspaceStatus(): Promise<WorkspaceStatus>
+  /** 加载期数据损坏摘要：坏行被静默跳过时给用户一个可见出口（无损坏时各字段为空） */
+  dataDamageReport(): Promise<DamageReport>
   /** 打开系统文件夹选择对话框（openDirectory + createDirectory），返回所选路径或 null */
   workspaceChooseFolder(): Promise<string | null>
   /** 首次引导确认：创建/复用该文件夹并设为当前工作区（主进程随后完成初始化） */
@@ -154,6 +156,8 @@ export const IPC = {
   cardsChanged: 'miki:cards-changed',
   /** renderer → main：多工作区（多用户档案）管理 */
   workspaceStatus: 'miki:workspace-status',
+  /** renderer → main：加载期损坏摘要（坏行/末尾缺换行） */
+  dataDamageReport: 'miki:data-damage-report',
   workspaceChooseFolder: 'miki:workspace-choose-folder',
   workspaceConfirm: 'miki:workspace-confirm',
   workspaceAdd: 'miki:workspace-add',
