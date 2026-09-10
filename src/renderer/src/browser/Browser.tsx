@@ -68,7 +68,7 @@ function fmtDue(ms: number | null): string {
   return `${Math.ceil(diff / 3_600_000)} 小时后`
 }
 
-export function Browser() {
+export function Browser({ saveDebounceMs = 800 }: { saveDebounceMs?: number } = {}) {
   const decks = useApp((s) => s.decks)
   const config = useApp((s) => s.config)
   const browserDeckId = useApp((s) => s.browserDeckId)
@@ -118,7 +118,9 @@ export function Browser() {
   const [selection, setSelection] = useState<string[]>([])
   const [editFront, setEditFront] = useState<string | null>(null)
   const [editBack, setEditBack] = useState<string | null>(null)
+  /** 在途未落盘的编辑（含目标卡 id）：切卡/离开页面前必须先落这张卡的这份内容 */
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pendingSave = useRef<{ cardId: string; front: string; back: string } | null>(null)
   const searchRef = useRef<HTMLInputElement>(null)
   const gridWrapRef = useRef<HTMLDivElement>(null)
   const [scrollTop, setScrollTop] = useState(0)
@@ -286,18 +288,38 @@ export function Browser() {
     }
   }, [selected?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // 编辑自动保存（B5：debounce 800ms）
+  // 编辑自动保存（B5：debounce 800ms）。目标卡在排计时时就固定进 pendingSave，
+  // 不依赖闭包里的 selected——切卡时那份内容仍要落回原卡。
   const scheduleSave = useCallback(
     (front: string, back: string) => {
       if (!selected) return
+      const cardId = selected.id
+      pendingSave.current = { cardId, front, back }
       if (saveTimer.current) clearTimeout(saveTimer.current)
-      saveTimer.current = setTimeout(async () => {
-        await window.miki.updateCard(selected.id, { front, back })
-        await query()
-      }, 800)
+      saveTimer.current = setTimeout(() => {
+        saveTimer.current = null
+        const p = pendingSave.current
+        pendingSave.current = null
+        if (!p) return
+        void window.miki.updateCard(p.cardId, { front: p.front, back: p.back }).then(() => query())
+      }, saveDebounceMs)
     },
-    [selected, query]
+    [selected, query, saveDebounceMs]
   )
+
+  /** 在途编辑立即落盘（切卡/离开页面前调用）：无在途计时是 no-op */
+  const flushPendingSave = useCallback(() => {
+    if (saveTimer.current) clearTimeout(saveTimer.current)
+    saveTimer.current = null
+    const p = pendingSave.current
+    pendingSave.current = null
+    if (!p) return
+    void window.miki.updateCard(p.cardId, { front: p.front, back: p.back }).then(() => query())
+  }, [query])
+
+  // 切卡或离开卡片库前，先把上一张卡未落盘的编辑写掉。缺了这步：选中 A 打字 → 800ms 内
+  // 切到 B，B 的 onChange 会 clearTimeout 掉 A 的计时，A 的编辑静默丢失（无提示）。
+  useEffect(() => () => flushPendingSave(), [selected?.id, flushPendingSave]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const onHeaderClick = (col: BrowserColumn) => {
     // 列宽拖动结束时浏览器在 th 上派发的 click 不算排序点击
