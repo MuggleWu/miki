@@ -252,6 +252,7 @@ export function CardForm(props: CardFormProps) {
         setFront(card.front)
         setBack(card.back)
         setEditDeckId(card.deckId) // 牌组名从 decks 派生（decks 异步到达后自动补显）
+        loadedUpdatedAt.current = card.updatedAt // 乐观锁基准：提交时校验期间有没有被别处改过
       }
       setLoaded(true)
     })
@@ -275,6 +276,10 @@ export function CardForm(props: CardFormProps) {
   // 判定必须发生在同一次事件循环内（setState 要等下一帧生效，挡不住第二次点击）
   const submitting = useRef(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
+  /** 打开时读到的 updatedAt（乐观锁基准）：提交时若已变化说明这张卡被别处改过 */
+  const loadedUpdatedAt = useRef<number | null>(null)
+  /** 冲突时对方的最新正面内容（非 null = 显示冲突选择条） */
+  const [conflict, setConflict] = useState<string | null>(null)
   const submit = async () => {
     if (submitting.current) return
     if (front.trim() === '' && back.trim() === '') return
@@ -291,7 +296,24 @@ export function CardForm(props: CardFormProps) {
           frontRef.current?.focus()
         }
       } else if (cardId) {
-        await window.miki.updateCard(cardId, { front, back })
+        // 乐观锁提交：弹窗从打开到提交之间隔着用户思考时间，主窗口可能已改过同一张卡。
+        // 无校验时这里会带着打开时的旧内容整体覆盖，主窗口那次改动被静默丢弃。
+        const expected = loadedUpdatedAt.current
+        const r =
+          expected === null
+            ? { status: 'ok' as const, card: await window.miki.updateCard(cardId, { front, back }) }
+            : await window.miki.updateCardChecked(cardId, { front, back }, expected)
+        if (r.status === 'conflict') {
+          // 不覆盖：把最新内容摆出来，让用户自己决定留哪一版
+          setConflict(r.card.front)
+          setSubmitError('这张卡在别处（卡片库或另一个窗口）已被改动，你的改动尚未保存')
+          return
+        }
+        if (r.status === 'missing' || !r.card) {
+          setSubmitError('这张卡已被删除，改动无法保存')
+          return
+        }
+        loadedUpdatedAt.current = r.card.updatedAt
         bumpContent() // 学习页当前卡就地重取内容（同卡保留提问/答案相位）
       }
       onSubmitted?.(mode)
@@ -375,6 +397,22 @@ export function CardForm(props: CardFormProps) {
           <span role="alert" style={{ color: 'var(--danger)', fontSize: 12, marginRight: 'auto', alignSelf: 'center' }}>
             {submitError}
           </span>
+        )}
+        {conflict !== null && (
+          <button
+            onClick={() => {
+              // 采用对方那一版：把表单换成最新内容并重新取基准，再提交即会用最新值覆盖
+              setFront(conflict)
+              setConflict(null)
+              setSubmitError(null)
+              void window.miki.getCard(cardId!).then((c) => {
+                if (c) loadedUpdatedAt.current = c.updatedAt
+              })
+            }}
+            title="丢弃你的改动，载入这张卡当前的最新内容"
+          >
+            载入对方的最新内容
+          </button>
         )}
         {showHint && (
           <span style={{ color: 'var(--text-dim)', fontSize: 12, marginRight: 'auto', alignSelf: 'center' }}>

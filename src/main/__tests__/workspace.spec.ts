@@ -773,6 +773,57 @@ describe('previewIntervals（评级预览）', () => {
   })
 })
 
+describe('乐观锁改卡（编辑弹窗的 lost update 防护）', () => {
+  it('未被动过时正常写入，并返回新的 updatedAt', () => {
+    const d = tmpKept()
+    const w = newWs(d)
+    const deck = w.addDeck('乐观锁组')
+    const card = w.addCard(deck.id, '原正面', '原反面')
+    const r = w.updateCardChecked(card.id, { front: '新正面' }, card.updatedAt)
+    expect(r.status).toBe('ok')
+    if (r.status !== 'ok') throw new Error('unreachable')
+    expect(r.card.front).toBe('新正面')
+    expect(r.card.updatedAt).toBeGreaterThanOrEqual(card.updatedAt)
+  })
+
+  it('期间被别处改过 → 报冲突且不写盘（旧内容不得覆盖新内容）', () => {
+    const d = tmpKept()
+    const w = newWs(d)
+    const deck = w.addDeck('冲突组')
+    const card = w.addCard(deck.id, '原正面', '原反面')
+    const held = card.updatedAt // 弹窗打开时读到的基准
+
+    // 模拟主窗口/卡片库改了同一张卡（此刻内容已经是「别处改的」）
+    w.updateCard(card.id, { front: '别处改的' })
+
+    const r = w.updateCardChecked(card.id, { front: '弹窗里的旧内容' }, held)
+    expect(r.status).toBe('conflict')
+    if (r.status !== 'conflict') throw new Error('unreachable')
+    // 关键：报冲突必须不写盘，卡上仍是「别处改的」
+    expect(r.card.front).toBe('别处改的')
+    expect(w.getCard(card.id)?.front).toBe('别处改的')
+  })
+
+  it('卡已被删除 → missing，不写盘', () => {
+    const d = tmpKept()
+    const w = newWs(d)
+    const deck = w.addDeck('删除组')
+    const card = w.addCard(deck.id, '正面', '反面')
+    w.deleteCard(card.id)
+    expect(w.updateCardChecked(card.id, { front: 'x' }, card.updatedAt).status).toBe('missing')
+  })
+
+  it('卡片库的自动保存（updateCard）不受版本校验影响', () => {
+    const d = tmpKept()
+    const w = newWs(d)
+    const deck = w.addDeck('自动保存组')
+    const card = w.addCard(deck.id, '原', '原')
+    w.updateCard(card.id, { front: '一次' })
+    // 拿着过期基准调用普通 updateCard 仍应写入（它本来就没有长窗口语义）
+    expect(w.updateCard(card.id, { front: '两次' })?.front).toBe('两次')
+  })
+})
+
 describe('热加载作废撤销栈的通知', () => {
   it('有可撤销操作时，外部变更触发的重载会通知丢掉的步数', () => {
     const d = tmpKept()

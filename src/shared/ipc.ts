@@ -1,6 +1,7 @@
 // IPC 通道与调用签名（main / preload / renderer 共用）
 import type {
   Card,
+  CardUpdateResult,
   DeckInfo,
   MikiConfig,
   QueryParams,
@@ -57,6 +58,12 @@ export interface MikiApi {
   undo(): Promise<UndoResult>
   addCard(deckId: string, front: string, back: string): Promise<Card>
   updateCard(cardId: string, patch: { front?: string; back?: string }): Promise<Card | null>
+  /** 乐观锁版改卡（编辑弹窗用）：传入打开时的 updatedAt，期间被别处改过则返回 conflict 且不写盘 */
+  updateCardChecked(
+    cardId: string,
+    patch: { front?: string; back?: string },
+    expectedUpdatedAt: number
+  ): Promise<CardUpdateResult>
   /** 同步落盘一张卡的编辑内容，返回是否写入成功。
    * 只在窗口卸载（beforeunload）时用：异步 invoke 发出去后进程可能先被杀掉，
    * 同步调用能保证主进程收下并完成写盘再返回。 */
@@ -130,6 +137,7 @@ export const IPC = {
   undo: 'miki:undo',
   addCard: 'miki:add-card',
   updateCard: 'miki:update-card',
+  updateCardChecked: 'miki:update-card-checked',
   /** 同步通道：窗口关闭前把在途编辑直接交给主进程落盘（见 preload 注释） */
   flushPendingEdit: 'miki:flush-pending-edit',
   getCard: 'miki:get-card',

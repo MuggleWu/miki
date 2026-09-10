@@ -785,9 +785,31 @@ export class WorkspaceService {
     if (patch.front !== undefined) card.front = patch.front
     if (patch.back !== undefined) card.back = patch.back
     this.lowerCache.delete(cardId)
-    card.updatedAt = Date.now()
+    // 严格单调：updatedAt 同时是内容版本号（编辑弹窗的乐观锁基准）。纯 Date.now() 在同一
+    // 毫秒内的两次写入会得到相同时间戳，乐观锁会把「刚被别处改过」误判成「没变」而放行覆盖。
+    card.updatedAt = Math.max(Date.now(), card.updatedAt + 1)
     this.appendCardDelta(card.deckId, [card])
     return card
+  }
+
+  /** 乐观锁版单卡改内容（编辑弹窗用）。
+   *
+   * 弹窗从打开到提交之间隔着用户思考时间，期间主窗口可能已经改过同一张卡——没有版本校验时
+   * 弹窗提交会带着打开时的旧内容整体覆盖，主窗口那次改动被静默丢弃（lost update）。
+   * 这里比对调用方持有的 updatedAt：不一致即报冲突且**不写盘**，由 UI 提示用户。
+   *
+   * 与 updateCard 分开而不是加参数：卡片库的自动保存是「边打字边落盘」，天然没有长窗口，
+   * 不该被版本校验挡下来。 */
+  updateCardChecked(
+    cardId: string,
+    patch: { front?: string; back?: string },
+    expectedUpdatedAt: number
+  ): { status: 'ok'; card: Card } | { status: 'missing' } | { status: 'conflict'; card: Card } {
+    const card = this.cards.get(cardId)
+    if (!card || card.deletedAt) return { status: 'missing' }
+    if (card.updatedAt !== expectedUpdatedAt) return { status: 'conflict', card }
+    const next = this.updateCard(cardId, patch)
+    return next ? { status: 'ok', card: next } : { status: 'missing' }
   }
 
   /** 暂停/解除：追加 suspend 事件（不可撤销，不入会话撤销栈），不重写卡片文件 */

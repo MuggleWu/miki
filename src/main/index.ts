@@ -328,6 +328,11 @@ app.whenReady().then(() => {
   ipcMain.handle(IPC.updateCard, (_e, cardId: string, patch: { front?: string; back?: string }) =>
     ws.updateCard(cardId, patch)
   )
+  ipcMain.handle(
+    IPC.updateCardChecked,
+    (_e, cardId: string, patch: { front?: string; back?: string }, expectedUpdatedAt: number) =>
+      ws.updateCardChecked(cardId, patch, expectedUpdatedAt)
+  )
   // 同步版：窗口卸载时渲染层用它把在途编辑交过来。ipcMain.on + returnValue 是 sendSync 的配对写法；
   // 这里刻意同步——异步 invoke 在窗口随后被销毁时不保证写盘完成，用户最后那次编辑会丢。
   ipcMain.on(IPC.flushPendingEdit, (e, cardId: string, patch: { front: string; back: string }) => {

@@ -107,6 +107,9 @@ export interface UndoResult extends StudyPayload {
   restoredCardId: string | null
 }
 
+/** 乐观锁改卡结果：conflict = 期间被别处改过（附带当前内容供 UI 展示） */
+export type CardUpdateResult = { status: 'ok'; card: Card } | { status: 'missing' } | { status: 'conflict'; card: Card }
+
 export type BrowserColumn =
   | 'front'
   | 'deckName'
