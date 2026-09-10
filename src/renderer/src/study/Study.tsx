@@ -41,16 +41,25 @@ export function Study() {
   const questionShownAt = useRef<number>(Date.now())
   // 最近一次装载进界面的卡（编辑弹窗确认后的重取用它判断「同卡」→ 保留当前相位）
   const loadedCardIdRef = useRef<string | null>(null)
-  // 异步竞态防护：快速换牌组时旧响应晚到不得覆盖（重取 + 评级预览各一个守卫）
+  // 本页「当前卡」的代次守卫。它同时承担两件事：
+  //   1. 快速换牌组时旧的重取响应晚到不得覆盖（原 studySeq 的职责）
+  //   2. 改变当前卡的写操作（评级/撤销/删除）发出请求时推进代次，作废此前发起、此后才回包的
+  //      重取——否则那条响应带的是「已经答完的同一张卡」的旧快照，会把刚推进的界面盖回去，
+  //      而且此时重入闸门已释放，同一张卡会被答第二次（污染 reps/lapses 与 FSRS 调度）。
+  // 写操作自己的响应**不**受代次门控：它是权威结果，恒可覆盖并发重取的结果。
   const studySeq = useRef(createSeqGuard())
   const previewSeq = useRef(createSeqGuard())
+  /** 作废所有在途重取：写操作发出请求时调用 */
+  const bumpCardEpoch = useCallback(() => {
+    studySeq.current.next()
+  }, [])
 
   const deck = decks.find((d) => d.id === studyDeckId)
   const font = config?.study
 
   const refresh = useCallback(
     async (id: string, keepPhase = false) => {
-      const seq = studySeq.current.next() // 竞态防护：快速换牌组时旧响应晚到不得覆盖
+      const seq = studySeq.current.next() // 竞态防护：旧响应晚到不得覆盖
       const prevId = loadedCardIdRef.current
       const p = await window.miki.getStudy(id)
       if (!studySeq.current.isLatest(seq)) return
@@ -91,6 +100,8 @@ export function Study() {
       if (!payload?.card || !studyDeckId) return
       answeringRef.current = true
       setAnswering(true)
+      // 发出请求就先作废在途重取：本调用返回权威的下一张，界面不该被并发重取的旧快照盖回
+      bumpCardEpoch()
       try {
         const durationMs = Math.min(Date.now() - questionShownAt.current, MAX_ANSWER_MS)
         const p = await window.miki.answer(payload.card.id, rating, durationMs)
@@ -104,7 +115,7 @@ export function Study() {
         setAnswering(false)
       }
     },
-    [payload, studyDeckId, setStudyCurrentCardId]
+    [payload, studyDeckId, setStudyCurrentCardId, bumpCardEpoch]
   )
 
   const showAnswer = useCallback(() => {
@@ -114,12 +125,14 @@ export function Study() {
 
   const deleteCurrent = useCallback(async () => {
     if (!payload?.card || !studyDeckId) return
+    bumpCardEpoch() // 作废在途重取：删除后紧跟的 refresh 才是权威
     await window.miki.deleteCard(payload.card.id)
     await refresh(studyDeckId)
-  }, [payload, studyDeckId, refresh])
+  }, [payload, studyDeckId, refresh, bumpCardEpoch])
 
   const undo = useCallback(async () => {
     if (!studyDeckId) return
+    bumpCardEpoch() // 作废在途重取：否则撤销结果会被并发重取的旧快照盖回
     const r = await window.miki.undo()
     if (r.restoredCardId && r.card) {
       // 回到被恢复卡的提问态（需求 §7）
@@ -129,7 +142,7 @@ export function Study() {
       questionShownAt.current = Date.now()
       setStudyCurrentCardId(r.card.id)
     }
-  }, [studyDeckId, setStudyCurrentCardId])
+  }, [studyDeckId, setStudyCurrentCardId, bumpCardEpoch])
 
   useEffect(() => {
     const h = (e: KeyboardEvent) => {

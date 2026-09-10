@@ -25,6 +25,7 @@ const CARD_A: Card = {
 }
 
 const CARD_B: Card = { ...CARD_A, id: 'card-b', front: '正面 B' }
+const CARD_C: Card = { ...CARD_A, id: 'card-c', front: '正面 C' }
 
 function payload(card: Card | null): StudyPayload {
   return { card, remaining: 1, todayCount: 0 }
@@ -61,8 +62,8 @@ function installApi() {
 }
 
 /** 派发真实 window keydown（Study 在 window 上挂监听） */
-function key(k: string) {
-  window.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }))
+function key(k: string, meta = false) {
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: k, metaKey: meta, bubbles: true, cancelable: true }))
 }
 
 /** 挂载并等首张卡装载完成（getStudy 的 await 链走完） */
@@ -191,6 +192,135 @@ describe('学习页评级在途闸门', () => {
 
 // 答题耗时是「题目上屏 → 按下评级」的墙钟差值，待机/合盖/去吃饭都会算进去。真实数据里
 // 最大一条 29.9 分钟，会让统计页的「平均单卡答题耗时」整个失真。这里钉住封顶行为。
+// 「取卡」与「改变当前卡的写操作」是两条互不知情的异步链：前者有 studySeq 守卫、后者有
+// answeringRef 闸门，但谁也管不到对方。若一条 getStudy 在写操作之前发起、之后才回包，
+// 它带回的是「已经答完的同一张卡」的旧快照——界面被盖回去，且闸门已释放，同一张卡会被
+// 答第二次，review-log 追两条 answer 事件。这组测试钉住「写操作发出即作废在途重取」。
+describe('取卡与写操作交错：在途重取不得覆盖写操作结果', () => {
+  /** 手动放行的 getStudy 响应（模拟外部变更触发的取卡，响应慢到写操作之后才回来） */
+  function slowGetStudy() {
+    const d = deferred<unknown>()
+    const api = (window as unknown as { miki: { getStudy: ReturnType<typeof vi.fn> } }).miki
+    api.getStudy.mockImplementationOnce(() => d.promise)
+    return d
+  }
+
+  it('评级在途重取之后回包：旧快照被丢弃，且不会把已答完的卡放回去', async () => {
+    await mountStudy()
+    await showAnswer()
+
+    // 1. 外部变更触发重取，响应挂住（带的是 card-a 的旧快照）
+    const slow = slowGetStudy()
+    await act(async () => {
+      useApp.setState({ dataEpoch: 1 })
+    })
+
+    // 2. 用户评级：立即回包，界面推进到 card-b
+    answer.mockImplementation(async () => ({ ...payload(CARD_B), answeredCardId: 'card-a' }))
+    await act(async () => {
+      key('3')
+    })
+    expect(useApp.getState().studyCurrentCardId).toBe('card-b')
+
+    // 3. 挂住的取卡响应现在才到（旧快照 card-a）
+    await act(async () => {
+      slow.resolve(payload(CARD_A))
+      await Promise.resolve()
+    })
+    // 关键断言：当前卡仍是 card-b，未被旧快照盖回 card-a
+    expect(useApp.getState().studyCurrentCardId).toBe('card-b')
+
+    // 4. 再评一次：必须是 card-b，不能又出现 card-a（否则同卡答两次）
+    await showAnswer()
+    await act(async () => {
+      key('4')
+    })
+    expect(answer).toHaveBeenCalledTimes(2)
+    expect(answer).toHaveBeenLastCalledWith('card-b', 4, expect.any(Number))
+  })
+
+  it('撤销之后新发起的重取仍然生效（它是权威最新状态，不该被压制）', async () => {
+    const api = (window as unknown as { miki: Record<string, unknown> }).miki as {
+      getStudy: ReturnType<typeof vi.fn>
+      undo: () => Promise<unknown>
+    }
+    await mountStudy()
+    await showAnswer()
+    answer.mockImplementation(async () => ({ ...payload(CARD_B), answeredCardId: 'card-a' }))
+    await act(async () => {
+      key('3')
+    })
+    expect(useApp.getState().studyCurrentCardId).toBe('card-b')
+
+    // 撤销发出（挂住）
+    const undoD = deferred<{ restoredCardId: string; card: Card; remaining: number; todayCount: number }>()
+    api.undo = () => undoD.promise
+    await act(async () => {
+      key('z', true) // ⌘Z
+    })
+
+    // 撤销在途时用户完成一次编辑 → 重取发出（在撤销之后发起 → 代次更新）
+    const slow = deferred<unknown>()
+    api.getStudy.mockImplementationOnce(() => slow.promise)
+    await act(async () => {
+      useApp.setState({ dataEpoch: 1 })
+    })
+
+    await act(async () => {
+      undoD.resolve({ restoredCardId: 'card-a', card: CARD_A, remaining: 1, todayCount: 0 })
+      await Promise.resolve()
+    })
+    // 撤销先回包 → 暂时回到 card-a
+    expect(useApp.getState().studyCurrentCardId).toBe('card-a')
+
+    // 后发起的重取回包：它是「读主进程最新状态」，应生效（否则界面会停留在已失效的 card-a）
+    await act(async () => {
+      slow.resolve(payload(CARD_C))
+      await Promise.resolve()
+    })
+    expect(useApp.getState().studyCurrentCardId).toBe('card-c')
+  })
+
+  it('撤销之前发起的重取，回包时必须被丢弃（不得盖回撤销结果）', async () => {
+    const api = (window as unknown as { miki: Record<string, unknown> }).miki as {
+      getStudy: ReturnType<typeof vi.fn>
+    }
+    await mountStudy()
+    await showAnswer()
+    answer.mockImplementation(async () => ({ ...payload(CARD_B), answeredCardId: 'card-a' }))
+    await act(async () => {
+      key('3')
+    })
+    expect(useApp.getState().studyCurrentCardId).toBe('card-b')
+
+    // 1. 重取先发起并挂住（此时界面还停在 card-b）
+    const slow = deferred<unknown>()
+    api.getStudy.mockImplementationOnce(() => slow.promise)
+    await act(async () => {
+      useApp.setState({ dataEpoch: 1 })
+    })
+
+    // 2. 用户按 ⌘Z：撤销结果随回包生效
+    const undoD = deferred<{ restoredCardId: string; card: Card; remaining: number; todayCount: number }>()
+    ;(api as unknown as { undo: () => Promise<unknown> }).undo = () => undoD.promise
+    await act(async () => {
+      key('z', true)
+    })
+    await act(async () => {
+      undoD.resolve({ restoredCardId: 'card-a', card: CARD_A, remaining: 1, todayCount: 0 })
+      await Promise.resolve()
+    })
+    expect(useApp.getState().studyCurrentCardId).toBe('card-a')
+
+    // 3. 那条早于撤销发起的重取现在才回包：必须被丢弃，否则界面被旧快照盖成 card-c
+    await act(async () => {
+      slow.resolve(payload(CARD_C))
+      await Promise.resolve()
+    })
+    expect(useApp.getState().studyCurrentCardId).toBe('card-a')
+  })
+})
+
 /** 5 分钟。这里写死而不是 import：模块级常量在测试期经 vi.mock 处理后读不到，
  * 而且把它当契约断言更合适——改上限就得同时改这里，属于有意的摩擦 */
 const CAP_MS = 300_000
