@@ -57,6 +57,7 @@ The checkpointed form of card truth: the first line is a metadata line, followed
 - New cards are appended to the file tail directly; when the delta grows past **200 lines** it is auto-"compacted": the base file is fully rewritten and the delta cleared.
 - Deleting a card and moving one out of a deck do **not** write the card files (only review-log and in-memory state), so a separate pending counter applies: 20 deletions/moves trigger auto-compaction of that deck, writing in-memory state (including `deletedAt`) back to the base file. Without it, programs that read only the card files treat deleted cards as still present (real data was off by 59), with nothing in the files pointing at review-log.
 - Compaction **keeps** soft-deleted rows (`deletedAt` becomes a timestamp, row count unchanged): card content is retained for undo and inspection.
+- Startup also **settles pre-existing backlog**: the base file's deletion marks are snapshotted before the delta merge, then compared with in-memory state after replay; if a deck has 20+ cards that are deleted in memory but still look alive in the base file, that deck is compacted once (idempotent, no write when there is no backlog). This exists for deletions accumulated before the mechanism above — back then compaction was unreachable and deletions could stay unflushed forever.
 
 ## cards/&lt;deck-id&gt;.delta.ndjson (delta)
 
