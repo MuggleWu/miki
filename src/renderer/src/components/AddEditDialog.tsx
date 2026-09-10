@@ -270,24 +270,42 @@ export function CardForm(props: CardFormProps) {
     el.setSelectionRange(end, end)
   }, [loaded, mode])
 
+  // 提交在途标志：addCard/updateCard 是异步的，await 期间按钮仍可点、⌘Enter 仍可再触发，
+  // 于是双击（或快捷键重复触发）会建出两张一模一样的卡。用 ref 而不是 state：
+  // 判定必须发生在同一次事件循环内（setState 要等下一帧生效，挡不住第二次点击）
+  const submitting = useRef(false)
+  const [submitError, setSubmitError] = useState<string | null>(null)
   const submit = async () => {
+    if (submitting.current) return
     if (front.trim() === '' && back.trim() === '') return
-    if (mode === 'add') {
-      if (!deck) return
-      await window.miki.addCard(deck, front, back)
-      if (keepAfterAdd) {
-        // 连续新增：保留表单，清空输入继续录下一张
-        setFront('')
-        setBack('')
-        frontRef.current?.focus()
+    if (mode === 'add' && !deck) return
+    submitting.current = true
+    setSubmitError(null)
+    try {
+      if (mode === 'add') {
+        await window.miki.addCard(deck, front, back)
+        if (keepAfterAdd) {
+          // 连续新增：保留表单，清空输入继续录下一张
+          setFront('')
+          setBack('')
+          frontRef.current?.focus()
+        }
+      } else if (cardId) {
+        await window.miki.updateCard(cardId, { front, back })
+        bumpContent() // 学习页当前卡就地重取内容（同卡保留提问/答案相位）
       }
-    } else if (cardId) {
-      await window.miki.updateCard(cardId, { front, back })
-      bumpContent() // 学习页当前卡就地重取内容（同卡保留提问/答案相位）
+      onSubmitted?.(mode)
+      await reload()
+      if (mode === 'edit' || !keepAfterAdd) onCancelled?.()
+    } catch {
+      // 写盘/刷新失败：把错误显示出来并保留表单内容（否则用户看到的是「点了没反应」，
+      // 未捕获的拒绝还会变成 unhandled rejection）
+      setSubmitError('保存失败：内容已保留在表单里，请重试')
+    } finally {
+      // 连续新增模式下表单没关，必须放锁才能录下一张；
+      // 关窗模式下这次放锁无副作用（组件即将卸载）
+      submitting.current = false
     }
-    onSubmitted?.(mode)
-    await reload()
-    if (mode === 'edit' || !keepAfterAdd) onCancelled?.()
   }
 
   const form = (
@@ -353,6 +371,11 @@ export function CardForm(props: CardFormProps) {
         </>
       )}
       <div className="actions">
+        {submitError && (
+          <span role="alert" style={{ color: 'var(--danger)', fontSize: 12, marginRight: 'auto', alignSelf: 'center' }}>
+            {submitError}
+          </span>
+        )}
         {showHint && (
           <span style={{ color: 'var(--text-dim)', fontSize: 12, marginRight: 'auto', alignSelf: 'center' }}>
             <kbd className="kbd">⌘</kbd>+<kbd className="kbd">B</kbd> 加粗 · <kbd className="kbd">`</kbd>{' '}
