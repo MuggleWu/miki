@@ -322,6 +322,17 @@ app.whenReady().then(() => {
   ipcMain.handle(IPC.updateCard, (_e, cardId: string, patch: { front?: string; back?: string }) =>
     ws.updateCard(cardId, patch)
   )
+  // 同步版：窗口卸载时渲染层用它把在途编辑交过来。ipcMain.on + returnValue 是 sendSync 的配对写法；
+  // 这里刻意同步——异步 invoke 在窗口随后被销毁时不保证写盘完成，用户最后那次编辑会丢。
+  ipcMain.on(IPC.flushPendingEdit, (e, cardId: string, patch: { front: string; back: string }) => {
+    try {
+      ws.updateCard(cardId, patch)
+      e.returnValue = true
+    } catch {
+      // 落盘失败不能让关闭流程卡住：返回 false，由调用方决定是否提示
+      e.returnValue = false
+    }
+  })
   ipcMain.handle(IPC.getCard, (_e, cardId: string) => ws.getCard(cardId))
   ipcMain.handle(IPC.deleteCard, (_e, cardId: string) => ws.deleteCard(cardId))
   ipcMain.handle(IPC.queryCards, (_e, params: QueryParams) => ws.queryCards(params))

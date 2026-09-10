@@ -57,6 +57,10 @@ export interface MikiApi {
   undo(): Promise<UndoResult>
   addCard(deckId: string, front: string, back: string): Promise<Card>
   updateCard(cardId: string, patch: { front?: string; back?: string }): Promise<Card | null>
+  /** 同步落盘一张卡的编辑内容，返回是否写入成功。
+   * 只在窗口卸载（beforeunload）时用：异步 invoke 发出去后进程可能先被杀掉，
+   * 同步调用能保证主进程收下并完成写盘再返回。 */
+  flushPendingEdit(cardId: string, patch: { front: string; back: string }): boolean
   getCard(cardId: string): Promise<Card | null>
   deleteCard(cardId: string): Promise<void>
   queryCards(params: QueryParams): Promise<QueryResult>
@@ -120,6 +124,8 @@ export const IPC = {
   undo: 'miki:undo',
   addCard: 'miki:add-card',
   updateCard: 'miki:update-card',
+  /** 同步通道：窗口关闭前把在途编辑直接交给主进程落盘（见 preload 注释） */
+  flushPendingEdit: 'miki:flush-pending-edit',
   getCard: 'miki:get-card',
   deleteCard: 'miki:delete-card',
   queryCards: 'miki:query-cards',

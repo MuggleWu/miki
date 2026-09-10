@@ -64,6 +64,7 @@ function installApi() {
     queryCards: vi.fn(async (): Promise<QueryResult> => ({ rows: ROWS, total: ROWS.length })),
     updateCard: vi.fn(async () => null),
     saveConfig: vi.fn(async () => CONFIG),
+    flushPendingEdit: vi.fn(() => true),
     onWorkspaceChanged: vi.fn(() => () => {}),
     onCardDialogVisibility: vi.fn(() => () => {}),
     onCardsChanged: vi.fn(() => () => {}),
@@ -217,6 +218,43 @@ describe('卡片库编辑自动保存', () => {
     })
     expect(miki.updateCard).toHaveBeenCalledTimes(1)
     expect(miki.updateCard).toHaveBeenCalledWith('card-a', { front: '离开前的编辑', back: '反面 A' })
+  })
+
+  // 关窗/退出路径：React 不会执行卸载清理（进程直接结束），所以走 beforeunload + 同步 IPC。
+  // jsdom 里只有手动派发事件才能覆盖这条路径——上面那条 unmount 用例测不到它。
+  it('窗口关闭（beforeunload）时把未落盘的编辑交给同步通道落盘', async () => {
+    await mountBrowser()
+    await selectAndEdit('正面 A', '关窗前的编辑')
+    expect(miki.updateCard).not.toHaveBeenCalled()
+    expect(miki.flushPendingEdit).not.toHaveBeenCalled()
+
+    await act(async () => {
+      window.dispatchEvent(new Event('beforeunload'))
+    })
+    expect(miki.flushPendingEdit).toHaveBeenCalledTimes(1)
+    expect(miki.flushPendingEdit).toHaveBeenCalledWith('card-a', { front: '关窗前的编辑', back: '反面 A' })
+    // 走了同步通道就不该再走异步通道（否则同一份内容写两次）
+    expect(miki.updateCard).not.toHaveBeenCalled()
+  })
+
+  it('窗口关闭时没有在途编辑则不发起写（避免多余的同步 IPC）', async () => {
+    await mountBrowser()
+    await click(rowFor('正面 A'))
+    await act(async () => {
+      window.dispatchEvent(new Event('beforeunload'))
+    })
+    expect(miki.flushPendingEdit).not.toHaveBeenCalled()
+  })
+
+  it('窗口关闭落盘后，防抖计时不会再补写一次', async () => {
+    await mountBrowser()
+    await selectAndEdit('正面 A', '关窗前的编辑')
+    await act(async () => {
+      window.dispatchEvent(new Event('beforeunload'))
+    })
+    await wait(PAST_DEBOUNCE)
+    expect(miki.flushPendingEdit).toHaveBeenCalledTimes(1)
+    expect(miki.updateCard).not.toHaveBeenCalled()
   })
 
   it('卡被删除离场时也先落盘在途编辑，编辑不随行消失', async () => {

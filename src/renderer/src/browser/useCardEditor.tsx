@@ -90,5 +90,20 @@ export function useCardEditor(
   // 切卡或离开卡片库前先落盘在途编辑（见文件头注释：缺这步会静默丢编辑）
   useEffect(() => () => flush(), [selected?.id, flush])
 
+  // 窗口卸载（关窗/退出）时也落一次盘：这条路径上 React 不会执行上面的卸载清理
+  // （进程直接结束，jsdom 里的 unmount 测试覆盖不到），用户最后那次编辑会随 debounce 一起丢。
+  // 用同步通道：异步 invoke 发出去后进程可能先被杀掉，写盘不保证完成。
+  useEffect(() => {
+    const onUnload = () => {
+      if (timer.current) clearTimeout(timer.current)
+      timer.current = null
+      const p = pending.current
+      pending.current = null
+      if (p) window.miki.flushPendingEdit(p.cardId, { front: p.front, back: p.back })
+    }
+    window.addEventListener('beforeunload', onUnload)
+    return () => window.removeEventListener('beforeunload', onUnload)
+  }, [])
+
   return { front, back, setFront, setBack, scheduleSave, flush }
 }

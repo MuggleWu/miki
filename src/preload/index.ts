@@ -13,6 +13,9 @@ const api: MikiApi = {
   addCard: (deckId: string, front: string, back: string) => ipcRenderer.invoke(IPC.addCard, deckId, front, back),
   updateCard: (cardId: string, patch: { front?: string; back?: string }) =>
     ipcRenderer.invoke(IPC.updateCard, cardId, patch),
+  // sendSync：窗口关闭路径上唯一能保证「写完再返回」的方式（见 MikiApi 注释）
+  flushPendingEdit: (cardId: string, patch: { front: string; back: string }) =>
+    ipcRenderer.sendSync(IPC.flushPendingEdit, cardId, patch) as boolean,
   getCard: (cardId: string) => ipcRenderer.invoke(IPC.getCard, cardId),
   deleteCard: (cardId: string) => ipcRenderer.invoke(IPC.deleteCard, cardId),
   queryCards: (params: unknown) => ipcRenderer.invoke(IPC.queryCards, params),
