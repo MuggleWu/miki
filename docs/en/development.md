@@ -13,6 +13,10 @@ npm run build      # production build into out/
 npm start          # run the built output
 npm run typecheck  # strict TypeScript, no emit
 npm test           # all tests (perf benchmarks skipped by default)
+npm run lint       # ESLint: 0 errors required before committing
+npm run lint:fix   # auto-fix lint issues
+npm run format     # Prettier write
+npm run format:check # Prettier check only
 ```
 
 Test data is fully isolated from development data: tests always use `os.tmpdir()` temporary directories and delete them when done.
@@ -57,8 +61,18 @@ Key constraints:
 | `src/main/__tests__/workspace.spec.ts` | Service-layer invariants: undo semantics, leech, suspend as an event, replay consistency, no event retention, corruption tolerance, config persistence |
 | `src/main/__tests__/schedule-index.spec.ts` | Scheduling index cross-check: after 200 random steps (answers/undoes/deletes/suspends/resets/day rolls), index-based picks and counts are compared per deck against a full-scan baseline |
 | `src/main/__tests__/checkpoint.spec.ts` | Checkpoint + delta write path: zero card writes for scheduling ops, move tombstone round-trip idempotence, pre/post compaction consistency, stats.json incremental replay, legacy format compatibility |
-| `src/main/__tests__/api-server.spec.ts` | HTTP API security chain & CRUD (real listener on a temp port) |
+| `src/main/__tests__/api-server.spec.ts` | HTTP API security chain & CRUD (real listener on a temp port): auth/Origin/Host checks, HEAD mirrors GET, suspend strict boolean, due-window parity between entries, pagination clamp |
+| `src/main/__tests__/card-dialog.spec.ts` | Standalone card dialog manager: open payload, position/size persistence, close on main-window close |
+| `src/main/__tests__/workspace-manager.spec.ts` | Multi-workspace registry: pointer file upgrade, onboarding confirm, switch/add/remove |
 | `src/renderer/src/__tests__/md.spec.ts` | Markdown rendering |
+| `src/renderer/src/__tests__/highlighter.spec.ts` | Shiki syntax highlighting and its markdown integration |
+| `src/renderer/src/__tests__/backtick.spec.ts` | Editor backtick wrapping (single press → inline code, triple press → fenced block) |
+| `src/renderer/src/__tests__/bold.spec.ts` | Editor selection bold toggle |
+| `src/renderer/src/__tests__/list.spec.ts` | Editor list continuation (ordered increment, indent carry-over, empty-item exit) |
+| `src/renderer/src/__tests__/paginate.spec.ts` | Browser pagination fetch guards |
+| `src/renderer/src/__tests__/staleGuard.spec.ts` | Async race guard: late responses never overwrite newer data |
+| `src/renderer/src/__tests__/debouncedPersist.spec.ts` | Debounced persistence for selection state |
+| `src/renderer/src/__tests__/numericDraft.spec.tsx` | Settings numeric drafts: debounce/flush/unmount flush, echo suppression via pending-value multiset |
 
 ### Regenerating FSRS conformance vectors
 

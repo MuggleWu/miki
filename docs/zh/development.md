@@ -13,6 +13,10 @@ npm run build      # 生产构建到 out/
 npm start          # 运行构建产物
 npm run typecheck  # TypeScript 严格检查（不产出文件）
 npm test           # 全部测试（性能基准默认跳过）
+npm run lint       # ESLint：提交前必须 0 error
+npm run lint:fix   # 自动修复 lint 问题
+npm run format     # Prettier 写入
+npm run format:check # 仅检查格式
 ```
 
 测试数据与开发数据完全隔离：测试一律用 `os.tmpdir()` 临时目录，跑完即删。
@@ -57,8 +61,18 @@ docs/                # 本目录
 | `src/main/__tests__/workspace.spec.ts` | 服务层不变量：undo 语义、leech、suspend 事件化、重放一致性、事件不驻留、损坏容错、配置持久化 |
 | `src/main/__tests__/schedule-index.spec.ts` | 调度索引对拍：200 步随机操作（答题/撤销/删除/暂停/重置/跨天）后，索引取卡与计数逐牌组比对全量扫描基准 |
 | `src/main/__tests__/checkpoint.spec.ts` | 检查点 + delta 写路径：调度类操作零卡片写、move 墓碑往返幂等、压实前后一致、stats.json 增量重放、旧格式兼容 |
-| `src/main/__tests__/api-server.spec.ts` | HTTP API 安全链与 CRUD（真实监听临时端口） |
+| `src/main/__tests__/api-server.spec.ts` | HTTP API 安全链与 CRUD（真实监听临时端口）：鉴权/Origin/Host 校验、HEAD 镜像 GET、suspend 严格布尔、到期窗口两入口口径、分页 clamp |
+| `src/main/__tests__/card-dialog.spec.ts` | 独立卡片窗口管理器：open 载荷、位置尺寸持久化、主窗关闭联动 |
+| `src/main/__tests__/workspace-manager.spec.ts` | 多工作区注册表：指针文件升级、引导确认、切换/添加/移除 |
 | `src/renderer/src/__tests__/md.spec.ts` | Markdown 渲染 |
+| `src/renderer/src/__tests__/highlighter.spec.ts` | Shiki 代码高亮与 markdown 集成 |
+| `src/renderer/src/__tests__/backtick.spec.ts` | 编辑器反引号快捷包裹（单按行内代码、三连按围栏） |
+| `src/renderer/src/__tests__/bold.spec.ts` | 编辑器选区加粗开关 |
+| `src/renderer/src/__tests__/list.spec.ts` | 编辑器列表续行（有序递增、缩进沿用、空项退出） |
+| `src/renderer/src/__tests__/paginate.spec.ts` | 卡片库分页取数守卫 |
+| `src/renderer/src/__tests__/staleGuard.spec.ts` | 异步竞态防护：旧响应晚到不覆盖新数据 |
+| `src/renderer/src/__tests__/debouncedPersist.spec.ts` | 选中态防抖落盘 |
+| `src/renderer/src/__tests__/numericDraft.spec.tsx` | 设置页数值草稿：防抖/flush/卸载兜底、回声抑制多重集 |
 
 ### FSRS 基准向量再生成
 
