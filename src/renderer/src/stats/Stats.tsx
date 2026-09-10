@@ -13,6 +13,8 @@ const loadEcharts = () => (echartsModule ??= import('echarts'))
 function Chart(props: { option: EChartsOption }) {
   const ref = useRef<HTMLDivElement>(null)
   const [ready, setReady] = useState(false)
+  /** 已初始化的实例：init 与 setOption 解耦，option 变化只更新数据不再重建 canvas */
+  const chartRef = useRef<EChartsType | null>(null)
 
   // 模块到达前先占位（统计页首帧不闪空白：容器与 .chart 同高）
   useEffect(() => {
@@ -25,25 +27,34 @@ function Chart(props: { option: EChartsOption }) {
     }
   }, [])
 
+  // 初始化一次。原实现把 init/setOption 放在同一个 effect 里、依赖 props.option：
+  // option 每次渲染都是新对象（dataEpoch 的 60 秒轮询就会重建），于是每 60 秒把所有图表
+  // dispose 掉重新 init——6 个 canvas 反复销毁重建（实测 41ms/15ms），还会闪一下。
   useEffect(() => {
     if (!ready || !ref.current) return
-    let chart: EChartsType | null = null
     let ro: ResizeObserver | null = null
     let disposed = false
-    // ready 后 echarts 已就绪，同步即可（await 一次也为兼容缓存未命中）
     void loadEcharts().then((echarts) => {
       if (disposed || !ref.current) return
-      chart = echarts.init(ref.current)
-      chart.setOption(props.option)
-      ro = new ResizeObserver(() => chart?.resize())
+      chartRef.current = echarts.init(ref.current)
+      chartRef.current.setOption(props.option)
+      ro = new ResizeObserver(() => chartRef.current?.resize())
       ro.observe(ref.current)
     })
     return () => {
       disposed = true
       ro?.disconnect()
-      chart?.dispose()
+      chartRef.current?.dispose()
+      chartRef.current = null
     }
-  }, [props.option, ready])
+    // 只在 echarts 就绪时初始化一次；option 变化走下面那个 effect
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready])
+
+  // 数据/主题变化：就地换 option（echarts 自己 diff，不重建 canvas）
+  useEffect(() => {
+    chartRef.current?.setOption(props.option)
+  }, [props.option])
 
   return <div ref={ref} className="chart" />
 }

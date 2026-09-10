@@ -74,9 +74,9 @@ function installApi() {
 }
 
 /** 挂载并等首屏取数完成 */
-async function mountBrowser() {
+async function mountBrowser(debounceMs = DEBOUNCE_MS) {
   await act(async () => {
-    root.render(<Browser saveDebounceMs={DEBOUNCE_MS} />)
+    root.render(<Browser saveDebounceMs={debounceMs} />)
   })
   await act(async () => {
     await Promise.resolve()
@@ -178,11 +178,15 @@ async function selectAndEdit(label: string, text: string) {
 
 describe('卡片库编辑自动保存', () => {
   it('停满防抖窗口才落盘，写的是当前选中卡', async () => {
-    await mountBrowser()
+    // 这条要断言「防抖期内还没有落盘」，而 mountBrowser/selectAndEdit 本身也是真计时器的异步
+    // 等待：全量并行跑（30+ 文件）时这些等待可能超过 60ms 的防抖窗口，保存提前触发 → 假失败。
+    // 所以这里单独放长防抖窗口，给「未触发」这个断言留足余量（其余用例不受影响）
+    const WINDOW = 300
+    await mountBrowser(WINDOW)
     await selectAndEdit('正面 A', 'A 改过')
     expect(miki.updateCard).not.toHaveBeenCalled() // 防抖期内不落盘
 
-    await wait(PAST_DEBOUNCE)
+    await wait(WINDOW + PAST_DEBOUNCE)
     expect(miki.updateCard).toHaveBeenCalledTimes(1)
     expect(miki.updateCard).toHaveBeenCalledWith('card-a', { front: 'A 改过', back: '反面 A' })
   })
