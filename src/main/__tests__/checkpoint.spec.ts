@@ -146,3 +146,77 @@ describe('检查点 + delta 写路径', () => {
     expect(w2.getCard(c.id)!.fsrs).not.toBeNull()
   })
 })
+
+// 启动压实：delta 行数阈值原先只按「本会话追加次数」计（热加载还清零），小牌组的 delta
+// 永远等不到阈值 → 「基文件 = 内容真理」长期不成立（真实数据 delta 停在 214 行不动，
+// 约 209 张卡的当前内容只存在于 delta）。改成启动时按 delta 现存行数结算。
+describe('启动压实积压的 delta', () => {
+  /** 往 delta 里灌 n 行同一张卡的内容变更（绕过服务直接追加，模拟长期积累） */
+  const pileDelta = (d: string, deck: string, cardId: string, n: number) => {
+    const f = path.join(d, 'cards', `${deck}.delta.ndjson`)
+    const rows = Array.from({ length: n }, (_, i) => JSON.stringify({ id: cardId, front: `积压 ${i}`, back: '' })).join(
+      '\n'
+    )
+    fs.appendFileSync(f, rows + '\n')
+    return f
+  }
+
+  it('delta 超过阈值：启动时压实，基文件含最新内容且 delta 被删除', () => {
+    const d = tmp()
+    const w = newWs(d)
+    const deck = w.addDeck('积压组').id
+    const c = w.addCard(deck, '原内容', '')
+    const deltaFile = pileDelta(d, deck, c.id, 250)
+    expect(fs.existsSync(deltaFile)).toBe(true)
+
+    const w2 = newWs(d)
+    // 压实后：delta 没了，基文件里是新内容
+    expect(fs.existsSync(deltaFile)).toBe(false)
+    expect(w2.getCard(c.id)!.front).toBe('积压 249') // 最后一行胜出
+  })
+
+  it('delta 未超阈值：不动文件（不无谓重写基文件）', () => {
+    const d = tmp()
+    const w = newWs(d)
+    const deck = w.addDeck('小积压组').id
+    const c = w.addCard(deck, '原内容', '')
+    const deltaFile = pileDelta(d, deck, c.id, 5)
+    const baseFile = path.join(d, 'cards', `${deck}.ndjson`)
+    const baseBefore = readBytes(baseFile)!
+
+    const w2 = newWs(d)
+    expect(fs.existsSync(deltaFile)).toBe(true) // delta 保留
+    expect(readBytes(baseFile)!.equals(baseBefore)).toBe(true) // 基文件一个字节没动
+    expect(w2.getCard(c.id)!.front).toBe('积压 4')
+  })
+
+  it('反复启动不重复压实（压过一次之后第二次启动无写入）', () => {
+    const d = tmp()
+    const w = newWs(d)
+    const deck = w.addDeck('只压一次').id
+    const c = w.addCard(deck, '原内容', '')
+    pileDelta(d, deck, c.id, 250)
+
+    newWs(d) // 第一次启动压实
+    const baseFile = path.join(d, 'cards', `${deck}.ndjson`)
+    const afterFirst = readBytes(baseFile)!
+    newWs(d) // 第二次启动：delta 已不存在，不该再重写基文件
+    expect(readBytes(baseFile)!.equals(afterFirst)).toBe(true)
+    expect(newWs(d).getCard(c.id)!.front).toBe('积压 249')
+  })
+
+  it('压实后内容与调度进度都不丢（delta 覆盖 + 事件重放）', () => {
+    const d = tmp()
+    const w = newWs(d)
+    const deck = w.addDeck('不丢内容').id
+    const c = w.addCard(deck, '原内容', '')
+    w.answer(c.id, 3)
+    const repsBefore = w.getCard(c.id)!.reps
+    pileDelta(d, deck, c.id, 250)
+
+    const w2 = newWs(d)
+    expect(w2.getCard(c.id)!.front).toBe('积压 249')
+    expect(w2.getCard(c.id)!.reps).toBe(repsBefore)
+    expect(w2.getCard(c.id)!.fsrs).not.toBeNull()
+  })
+})

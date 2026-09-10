@@ -37,6 +37,12 @@ import { StatsLedger } from './stats-ledger'
 import { WorkspacePaths, contentRow, iterateNdjson, snapshotRow, type CardCheckpointRow } from './workspace-io'
 import { WorkspaceWatcher } from './workspace-watcher'
 
+/** delta 压实阈值（行）：追加超过它、或启动时发现 delta 现存行数超过它，就把该牌组压实。
+ * 取 200 的理由：真实牌组的 delta 长期停在百行量级不动（没有阈值就永不压实），而一次压实
+ * 代价是单牌组基文件重写（真实数据最大 3668 行，实测 <20ms），200 行意味着最坏情况积压可控、
+ * 又不会频繁重写文件搅动 git 历史 */
+const DELTA_COMPACT_ROWS = 200
+
 export class WorkspaceService {
   root!: string
   config!: MikiConfig
@@ -75,6 +81,10 @@ export class WorkspaceService {
   private deckCheckpoints = new Map<string, number>()
   /** 各牌组 delta 行数（压实阈值触发） */
   private deltaCounts = new Map<string, number>()
+  /** 启动时数出的各牌组 delta 行数（loadCardsWithCheckpoint 顺带计数，零额外 IO）。
+   * 与 deltaCounts 不同：这个是「文件里现存的待压实行数」，跨重启累加——deltaCounts 是
+   * 本会话的追加次数、热加载时清零，所以小 delta 永远等不到 2000 的阈值 */
+  private deltaRowsOnLoad = new Map<string, number>()
   /** 软删牌组 id 集（调度索引/学习页/首页共用）：这些牌组下的卡不算学习计数、不进学习队列。
    * 缓存复用避免热路径每次重分配；deleteDeck/loadDecks 时失效 */
   private hiddenCache: Set<string> | null = null
@@ -108,6 +118,8 @@ export class WorkspaceService {
     this.streamEvents()
     this.ensureDay()
     this.ensureGitignore()
+    // 启动结算积压的 delta（幂等，无积压时一次 fs.existsSync 都不写盘）
+    this.compactOversizedDeltas()
     // 启动完成即建快照基线：后续轮询只认真外部变更，不把启动加载当变化
     this.watcher.initStamps()
   }
@@ -213,10 +225,12 @@ export class WorkspaceService {
     this.cards = new Map()
     this.deckCheckpoints = new Map()
     this.byDeck = new Map()
+    this.deltaRowsOnLoad = new Map()
     this.lowerCache = new Map() // 外部变更（git pull 等）可能改了卡面，小写缓存全清
     for (const deck of this.decks) {
       const rows = new Map<string, CardCheckpointRow>()
       let cp = 0
+      let deltaRows = 0 // delta 现存行数：启动时据此决定要不要压实（见 compactOversizedDeltas）
       for (const line of iterateNdjson(this.paths.deckCardsFile(deck.id))) {
         let row: CardCheckpointRow
         try {
@@ -241,6 +255,7 @@ export class WorkspaceService {
           continue
         }
         if (!row || typeof row.id !== 'string') continue
+        deltaRows++
         if (row.__mikiTombstone) {
           rows.delete(row.id)
           continue
@@ -260,6 +275,7 @@ export class WorkspaceService {
         rows.set(row.id, row)
       }
       this.deckCheckpoints.set(deck.id, cp)
+      this.deltaRowsOnLoad.set(deck.id, deltaRows)
       for (const row of rows.values()) {
         // 行对象直接升级为卡（避免每卡再分配 content 中间对象与 fsrs 拷贝）
         const card = row as unknown as Card
@@ -551,11 +567,16 @@ export class WorkspaceService {
   private touchDelta(deckId: string): void {
     const n = (this.deltaCounts.get(deckId) ?? 0) + 1
     this.deltaCounts.set(deckId, n)
-    if (n > 2000) this.compactDeck(deckId)
+    if (n > DELTA_COMPACT_ROWS) {
+      if (this.compactDeck(deckId)) this.writeStatsCheckpoint()
+    }
   }
 
-  /** 压实一个牌组：全量重写基文件（检查点 seq + 调度快照行）→ 清 delta → 落聚合检查点 */
-  private compactDeck(deckId: string): void {
+  /** 压实一个牌组：全量重写基文件（检查点 seq + 调度快照行）→ 清 delta。
+   * delta 不存在（没有待合并内容）→ 直接返回，连基文件都不重写：否则每次触发都要改写
+   * 全部基文件，git 里全是噪声。返回是否真的压实了（调用方据此决定要不要落聚合检查点） */
+  private compactDeck(deckId: string): boolean {
+    if (!fs.existsSync(this.paths.deckDeltaFile(deckId))) return false
     const lines: string[] = [JSON.stringify({ __mikiCheckpoint: this.session.seq })]
     // 行序 = 卡 id 序：装饰排序（比 id 不比整行 JSON 串，短键比较），读取端按 id 建 Map 不依赖行序
     const cards = (this.byDeck.get(deckId) ?? []).slice().sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
@@ -564,9 +585,21 @@ export class WorkspaceService {
     fs.rmSync(this.paths.deckDeltaFile(deckId), { force: true })
     this.deltaCounts.set(deckId, 0)
     this.deckCheckpoints.set(deckId, this.session.seq)
-    this.writeStatsCheckpoint()
     this.watcher.noteWrite(this.paths.deckCardsFile(deckId))
     this.watcher.noteWrite(this.paths.deckDeltaFile(deckId))
+    return true
+  }
+
+  /** 启动压实：delta 现存行数超过阈值的牌组做一次压实。
+   * 为什么需要：touchDelta 的计数是本会话追加次数、热加载还会清零，小牌组永远等不到阈值，
+   * 于是「基文件 = 内容真理」长期不成立——真实数据里 delta 停在 214 行不动、约 209 张卡的
+   * 当前内容只存在于 delta。启动时结算一次，模型与 git 里看到的内容就重新对齐 */
+  private compactOversizedDeltas(): void {
+    let any = false
+    for (const deck of this.decks) {
+      if ((this.deltaRowsOnLoad.get(deck.id) ?? 0) > DELTA_COMPACT_ROWS && this.compactDeck(deck.id)) any = true
+    }
+    if (any) this.writeStatsCheckpoint()
   }
 
   /** 统计聚合检查点落盘（压实时调用，运行期不写避免高频重写） */
@@ -576,9 +609,12 @@ export class WorkspaceService {
     this.watcher.noteWrite(this.paths.statsFile())
   }
 
-  /** 手动全量压实（运维入口；把所有牌组基文件、调度快照与聚合检查点对齐到当前 seq） */
+  /** 手动全量压实（运维入口；把所有牌组基文件、调度快照与聚合检查点对齐到当前 seq）。
+   * 即使所有 delta 都空、一个牌组都没重写，也照写聚合检查点——调用方的意图是「把检查点
+   * 落盘」，delta 是否为空是实现细节 */
   compact(): void {
     for (const d of this.decks) this.compactDeck(d.id)
+    this.writeStatsCheckpoint()
   }
 
   addCard(deckId: string, front: string, back: string): Card {
