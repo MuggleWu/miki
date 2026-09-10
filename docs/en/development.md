@@ -102,6 +102,12 @@ notified via `subscribeHighlighter` and adds the token colours. Two easy traps w
 - `Md` caches its render in `useMemo`, and the engine version (`useHighlighterVersion`) must be part of the
   dependency array; otherwise nothing re-renders when the engine arrives and code blocks stay plain forever.
 
+One path that looks like a performance problem but was checked and is fine, recorded here so it is not
+suspected again: `pickNext` in `core/queue.ts` is a linear O(cards-in-deck) scan, but it is only the test
+oracle — production picking goes through the heaps in `main/schedule-index.ts`. `deckInfos()` does one merged
+pass over the un-built decks per call (~48k iterations for 8 decks x 6000 cards), which is tunable rather
+than alarming. The 60s deep-scroll refetch in the card browser is deliberate and stays.
+
 ### Regenerating FSRS conformance vectors
 
 Requires Python 3 with `typing_extensions`, plus a py-fsrs v6.3.2 checkout under /tmp:
@@ -120,6 +126,10 @@ MIKI_BENCH=1 npx vitest run src/main/__tests__/perf.spec.ts
 MIKI_BENCH_N=1000000 MIKI_BENCH=1 npx vitest run src/main/__tests__/perf.spec.ts  # million-card stress
 MIKI_BENCH=1 NODE_OPTIONS=--expose-gc npx vitest run src/main/__tests__/minevents.spec.ts  # no-event-retention acceptance
 ```
+
+Optional monthly run: `MIKI_BENCH=1 npm run test` includes the bench group; the ordinary `npm test` runs
+only the regular cases. The memory comparison in `workspace-io.spec` (see the test table) only prints and
+never asserts, so it cannot turn the suite red either way.
 
 Skipped by default; `npm test` is unaffected. perf.spec prints a timing table for core operations (import / query / answer / replay / batch delete / undo); minevents.spec restarts with 1M historical events and asserts that `events` are not retained and heapUsed stays far below total event volume (needs `--expose-gc` to rule out parse garbage).
 

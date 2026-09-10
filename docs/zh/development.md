@@ -100,6 +100,9 @@ MIKI_BENCH_N=1000000 MIKI_BENCH=1 npx vitest run src/main/__tests__/perf.spec.ts
 MIKI_BENCH=1 NODE_OPTIONS=--expose-gc npx vitest run src/main/__tests__/minevents.spec.ts  # 事件不驻留验收
 ```
 
+建议每月跑一次（可选）：`MIKI_BENCH=1 npm run test` 会把 bench 组一起跑；日常 `npm test` 只跑常规用例。
+下面第 8 行那条 `workspace-io.spec` 的内存对照是「只输出不断言」的，跑不跑都不影响绿灯。
+
 默认跳过，不影响 `npm test`。perf.spec 输出各核心操作耗时表（导入 / 查询 / 答题 / 重放 / 批量删除 / 撤销）；minevents.spec 构造 100 万历史事件重启，断言 `events` 不驻留且 heapUsed 远低于事件总量（需 `--expose-gc` 排除 parse 垃圾干扰）。
 
 百万卡参考值（2026-09-06，M 系列笔记本）：答题 0.12ms/次、撤销 0.3ms、批量删 1000 张 6.1ms、冷启动 5.3s、百万历史事件重启 heapUsed 22MB。
@@ -123,6 +126,11 @@ MIKI_BENCH=1 NODE_OPTIONS=--expose-gc npx vitest run src/main/__tests__/minevent
   后者在模块顶层就完成了静态 import，语言包照样进主 chunk，懒加载形同虚设。
 - `Md` 用 `useMemo` 缓存渲染结果，依赖里必须带上引擎版本号（`useHighlighterVersion`），
   否则引擎就绪后不重渲染，代码块会永久停在纯文本。
+
+有一条容易误判成性能问题、但复查后确认没问题的路径，记在这里免得反复怀疑：
+`core/queue.ts` 的 `pickNext` 是 O(牌组卡数) 线性扫，但它只是测试对照 oracle，生产出卡走
+`main/schedule-index.ts` 的堆；`deckInfos()` 每次调用对未建堆的牌组做一次合并单趟扫描
+（8 牌组 × 6000 卡约 4.8 万次迭代），属可调不可怕；卡片库的 60s 深滚动重取是有意保留的。
 
 ### NDJSON 行读
 
