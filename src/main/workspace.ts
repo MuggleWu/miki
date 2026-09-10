@@ -35,8 +35,6 @@ import { ScheduleIndex } from './schedule-index'
 import { WorkspacePaths, contentRow, readNdjson, snapshotRow, type CardCheckpointRow } from './workspace-io'
 import { WorkspaceWatcher } from './workspace-watcher'
 
-const MONTH_MS = 31 * 86_400_000
-
 export class WorkspaceService {
   root!: string
   config!: MikiConfig
@@ -1073,6 +1071,3 @@ export class WorkspaceService {
     return payload
   }
 }
-
-// 抑制未使用告警（MONTH_MS 预留给日志切月策略）
-void MONTH_MS
