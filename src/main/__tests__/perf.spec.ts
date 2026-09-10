@@ -1,6 +1,10 @@
 // NF2 性能基准：默认跳过，不拖慢常规测试；MIKI_BENCH=1 时在临时目录实测核心操作耗时。
 // 运行：MIKI_BENCH=1 npx vitest run src/main/__tests__/perf.spec.ts
 // 规模：MIKI_BENCH_N（默认 10000 张卡）。逐项耗时用 console.table 输出，仅供人工对比，不做断言阈值。
+// 50k 卡参考值（2026-09-10）：重放启动 141ms、全量查询 87.7ms、批量新增 5 万张 208ms、
+// 批量删 1000 张 8.4ms、答题 70.3ms/次（1000 次均值）。其中答题一项名义上超需求 NF2 的
+// 50ms，但用户已裁决"足够好、不再关注"——那是含调度重算的批量均值，不是单次交互延迟。
+// 详见 docs/zh/development.md 性能基准一节。
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
