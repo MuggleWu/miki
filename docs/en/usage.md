@@ -37,6 +37,8 @@ Launching: the packaged app lives at `/Applications/Miki.app` (type `miki` in Ra
 - Six panels: forecast / review heatmap / reviews / **retention** / card states / interval distribution.
 - The dropdown at the top filters by deck; the time range toggles between "last year / all".
 - The forecast is 38 equal-width time bars: "last year" splits the next 365 days into 38 buckets; "all" splits the span from the furthest due date to the earliest overdue card (overdue backlog lands on the far left). Hover to see each bucket's range and count.
+- Retention: the share of answered reviews in range that were rated anything but Again (undos already netted out; the deck and range dropdowns apply here too), plus the average answer time per card. The dashed line on the chart is the desired retention from Settings.
+  The two measure different things — desired retention is the probability of recall *when a card comes due*, counting only due review cards, while this panel's denominator includes new and learning cards. What is comparable is each one's **trend**, not the two numbers themselves.
 
 ## Settings
 
