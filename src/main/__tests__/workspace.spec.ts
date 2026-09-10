@@ -377,6 +377,80 @@ describe('saveConfig', () => {
   })
 })
 
+describe('loadConfig 写盘节流（内容未变不回写）', () => {
+  const cfgFile = (d: string) => path.join(d, 'config.json')
+  const readCfg = (d: string) => fs.readFileSync(cfgFile(d), 'utf-8')
+  /** mtime 拨回 2000 年：loadConfig 若回写，mtime 必然跳回当前时间；比同毫秒比较更可靠 */
+  const backdate = (d: string) => {
+    const past = new Date(2000, 0, 1)
+    fs.utimesSync(cfgFile(d), past, past)
+  }
+  const isBackdated = (d: string) => new Date(fs.statSync(cfgFile(d)).mtimeMs).getFullYear() === 2000
+
+  it('首启生成 config.json（含 token），二次 init 内容逐字节不变且不回写', () => {
+    const d = tmpKept()
+    newWs(d)
+    expect(JSON.parse(readCfg(d)).api.token).not.toBe('')
+    const first = readCfg(d)
+    backdate(d)
+    const w2 = newWs(d)
+    expect(readCfg(d)).toBe(first)
+    expect(isBackdated(d)).toBe(true) // 未回写：mtime 停在拨回的旧时刻
+    expect(w2.config.api.token).toBe(JSON.parse(first).api.token) // token 保留
+  })
+
+  it('热加载链同口径：reloadFromDisk 不动无变化的 config.json', () => {
+    const d = tmpKept()
+    const w = newWs(d)
+    backdate(d)
+    w.reloadFromDisk()
+    expect(isBackdated(d)).toBe(true)
+  })
+
+  it('盘上内容偏离序列化结果时重写（手改紧凑 JSON → 规范化 2 空格并补全默认键）', () => {
+    const d = tmpKept()
+    newWs(d)
+    fs.writeFileSync(cfgFile(d), '{"theme":"dark"}')
+    backdate(d)
+    newWs(d)
+    expect(isBackdated(d)).toBe(false) // 发生了回写
+    const onDisk = JSON.parse(readCfg(d))
+    expect(onDisk.theme).toBe('dark') // 手改内容保留（合并语义）
+    expect(onDisk.desiredRetention).toBe(DEFAULT_CONFIG.desiredRetention) // 默认键补全
+  })
+
+  it('损坏 config.json 仍被默认值重写为合法 JSON', () => {
+    const d = tmpKept()
+    newWs(d)
+    fs.writeFileSync(cfgFile(d), '{broken')
+    const w2 = newWs(d)
+    expect(() => JSON.parse(readCfg(d))).not.toThrow()
+    expect(w2.config.theme).toBe(DEFAULT_CONFIG.theme)
+  })
+
+  it('跳过回写路径上权限收敛 0600 仍执行', () => {
+    const d = tmpKept()
+    newWs(d)
+    const file = cfgFile(d)
+    fs.chmodSync(file, 0o644)
+    backdate(d)
+    newWs(d) // 内容未变 → 走跳过回写路径
+    expect(isBackdated(d)).toBe(true)
+    expect(fs.statSync(file).mode & 0o777).toBe(0o600)
+  })
+
+  it('overrides 传入即偏离盘上内容，触发回写', () => {
+    const d = tmpKept()
+    newWs(d)
+    backdate(d)
+    const w = new WorkspaceService()
+    w.init(d, { theme: 'dark' })
+    expect(isBackdated(d)).toBe(false)
+    expect(JSON.parse(readCfg(d)).theme).toBe('dark')
+    expect(w.config.theme).toBe('dark')
+  })
+})
+
 describe('计数与统计入口', () => {
   it('统计缓存在非事件写路径（加卡/移卡/删牌组）后失效：新卡数与牌组归属即时可见', () => {
     const w = newWs(tmpKept())

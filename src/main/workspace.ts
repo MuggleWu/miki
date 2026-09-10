@@ -115,11 +115,14 @@ export class WorkspaceService {
   private loadConfig(overrides?: Partial<MikiConfig>): MikiConfig {
     const file = this.paths.configJson()
     let stored: Partial<MikiConfig> = {}
+    let raw: string | null = null
     if (fs.existsSync(file)) {
       try {
-        stored = JSON.parse(fs.readFileSync(file, 'utf-8'))
+        raw = fs.readFileSync(file, 'utf-8')
+        stored = JSON.parse(raw)
       } catch {
         stored = {}
+        // raw 保留原样：损坏内容也要参与下方「是否需要重写」判定
       }
     }
     // study 嵌套字段单独合并，避免旧 config 整体覆盖默认值
@@ -135,8 +138,10 @@ export class WorkspaceService {
     }
     // HTTP API 鉴权 token：首次启动生成一次，长期使用
     if (!config.api.token) config.api.token = randomUUID()
-    atomicWrite(file, JSON.stringify(config, null, 2))
-    // 老版本可能以默认 0644 落盘过（含 token），收敛到仅当前用户可读写
+    // 序列化结果与盘上逐字节一致才跳过回写：init/热加载是读路径，不该无谓翻动 config.json 的 mtime
+    const serialized = JSON.stringify(config, null, 2)
+    if (raw !== serialized) atomicWrite(file, serialized)
+    // 跳过回写时也要收敛老版本的宽松权限（0600 含 token）；chmod 不改 mtime，不惊动变更检测
     try {
       fs.chmodSync(file, 0o600)
     } catch {
