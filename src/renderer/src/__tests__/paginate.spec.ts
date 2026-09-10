@@ -212,3 +212,63 @@ describe('createPaginator（卡片库分页取数）', () => {
     await p.loadMore()
   })
 })
+
+describe('过滤条件（state / dueBefore / dueAfter）', () => {
+  const FILTERED: PageQuery = { ...VIEW, state: 'review', dueBefore: 1_000, dueAfter: 500 }
+
+  it('首屏与追加页都把过滤条件原样带给 fetcher', async () => {
+    const f = vi.fn()
+    f.mockResolvedValueOnce({ rows: Array.from({ length: 400 }, (_, i) => mkRow(`r${i}`)), total: 900 })
+    f.mockResolvedValueOnce({ rows: Array.from({ length: 400 }, (_, i) => mkRow(`n${i}`)), total: 900 })
+    const p = createPaginator(f)
+    await p.refresh(FILTERED)
+    expect(f).toHaveBeenCalledWith(expect.objectContaining({ state: 'review', dueBefore: 1_000, dueAfter: 500 }))
+    await p.loadMore()
+    expect(f).toHaveBeenLastCalledWith(expect.objectContaining({ state: 'review', dueBefore: 1_000, dueAfter: 500 }))
+  })
+
+  it('未给过滤条件时归一为 null（后端按「不限制」处理）', async () => {
+    const f = vi.fn().mockResolvedValue({ rows: [], total: 0 })
+    const p = createPaginator(f)
+    await p.refresh(VIEW)
+    expect(f).toHaveBeenCalledWith(expect.objectContaining({ state: null, dueBefore: null, dueAfter: null }))
+  })
+
+  it('只换过滤条件（deckId/keywords/sort 不变）→ 视图签名变，按新条件只取首页', async () => {
+    const f = vi.fn()
+    f.mockResolvedValueOnce({ rows: [mkRow('a')], total: 1 })
+    f.mockResolvedValueOnce({ rows: [mkRow('b')], total: 1 })
+    const p = createPaginator(f)
+    await p.refresh(VIEW)
+    await p.refresh({ ...VIEW, state: 'suspended' })
+    expect(f).toHaveBeenLastCalledWith(expect.objectContaining({ state: 'suspended', offset: 0, limit: 400 }))
+    expect(p.rows.map((r) => r.id)).toEqual(['b'])
+  })
+
+  it('过滤条件在追加响应期间变化 → 旧追加页被丢弃（不拼出跨条件错乱表格）', async () => {
+    let release!: (v: QueryResult) => void
+    const f = vi.fn()
+    // 第 1 次：首屏。第 2 次：追加页（挂起待放行）。第 3 次：改条件后的首屏。
+    f.mockResolvedValueOnce({ rows: [mkRow('a')], total: 2 })
+    f.mockImplementationOnce(() => new Promise<QueryResult>((r) => (release = r)))
+    f.mockResolvedValue({ rows: [mkRow('filtered')], total: 1 })
+    const p = createPaginator(f)
+
+    await p.refresh(VIEW)
+    const pending = p.loadMore() // 追加在途
+    await p.refresh({ ...VIEW, state: 'review', dueBefore: 777, dueAfter: null }) // 期间改了过滤条件
+    expect(p.rows.map((r) => r.id)).toEqual(['filtered'])
+
+    release({ rows: [mkRow('late')], total: 2 }) // 旧条件的追加响应晚到
+    await pending
+    expect(p.rows.map((r) => r.id)).toEqual(['filtered']) // 未被旧响应污染
+  })
+
+  it('同视图刷新（过滤条件也不变）仍取已加载前缀，保住滚动位置', async () => {
+    const f = vi.fn().mockResolvedValue({ rows: Array.from({ length: 400 }, (_, i) => mkRow(`r${i}`)), total: 800 })
+    const p = createPaginator(f)
+    await p.refresh(FILTERED)
+    await p.refresh(FILTERED)
+    expect(f).toHaveBeenLastCalledWith(expect.objectContaining({ limit: 400, offset: 0 }))
+  })
+})

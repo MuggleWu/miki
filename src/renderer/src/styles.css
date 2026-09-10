@@ -619,8 +619,20 @@ input {
   align-items: center;
 }
 .browser-toolbar input {
-  flex: 1;
+  flex: 1 1 200px;
+  min-width: 120px;
   max-width: 420px;
+}
+/* 状态/到期过滤下拉：窄、不参与搜索框的伸缩 */
+.browser-toolbar select {
+  flex: 0 0 auto;
+  max-width: 130px;
+}
+.browser-toolbar .filter-clear {
+  flex: 0 0 auto;
+  font-size: 12px;
+  padding: 3px 8px;
+  color: var(--text-dim);
 }
 .browser-body {
   flex: 1;

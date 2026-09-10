@@ -148,6 +148,9 @@ export interface CardRow {
 /** 查询状态过滤：'suspended' 按暂停标记，其余按调度状态 */
 export type QueryState = CardState | 'suspended'
 
+/** 卡片库「到期」过滤档（查询时按 now 换算成毫秒窗口） */
+export type DueFilter = 'any' | 'due' | 'today' | 'overdue' | 'days3' | 'days7' | 'days30' | 'scheduled'
+
 export interface QueryParams {
   deckId: string | null // null = 全部牌组
   keywords: string[]
@@ -225,6 +228,10 @@ export interface MikiConfig {
     /** 卡片库离开时的选中态：左树牌组 + 内容区主选中卡（跨启动恢复） */
     selectedDeckId?: string | null
     selectedCardId?: string | null
+    /** 状态过滤（缺省 null = 全部）；'suspended' 为暂停卡池，leech 卡集中在这 */
+    stateFilter?: QueryState | null
+    /** 到期窗口过滤（缺省 'any' = 不限） */
+    dueFilter?: DueFilter
   }
   /** 主窗口尺寸/位置/最大化（resize/move 防抖落盘，下次启动恢复） */
   window: WindowState

@@ -9,7 +9,16 @@ import { atomicWrite } from './atomic-write'
 import { IPC, pickRendererWritableConfig } from '../shared/ipc'
 import { withCardDialogHash } from '../shared/card-dialog'
 import { defaultWorkspaceSuggestion } from '../shared/workspace'
-import type { MikiConfig, QueryParams, Rating, SortKey, StatsParams, WindowState } from '../shared/types'
+import type {
+  DueFilter,
+  MikiConfig,
+  QueryParams,
+  QueryState,
+  Rating,
+  SortKey,
+  StatsParams,
+  WindowState
+} from '../shared/types'
 
 let ws: WorkspaceService
 let win: BrowserWindow | null = null
@@ -317,10 +326,15 @@ app.whenReady().then(() => {
   ipcMain.handle(IPC.deleteCard, (_e, cardId: string) => ws.deleteCard(cardId))
   ipcMain.handle(IPC.queryCards, (_e, params: QueryParams) => ws.queryCards(params))
   ipcMain.handle(IPC.getStats, (_e, params: StatsParams) => ws.getStats(params))
-  ipcMain.handle(IPC.saveBrowserConfig, (_e, columns: string[], sort: SortKey[]) => {
-    // 统一走 saveConfig（原子写 + 自写豁免快照）；config.json 含 API token 由 atomicWrite 保持 0600
-    ws.saveConfig({ browser: { columns: columns as MikiConfig['browser']['columns'], sort } })
-  })
+  ipcMain.handle(
+    IPC.saveBrowserConfig,
+    (_e, columns: string[], sort: SortKey[], filters?: { stateFilter?: QueryState | null; dueFilter?: DueFilter }) => {
+      // 统一走 saveConfig（原子写 + 自写豁免快照）；config.json 含 API token 由 atomicWrite 保持 0600
+      ws.saveConfig({
+        browser: { columns: columns as MikiConfig['browser']['columns'], sort, ...(filters ?? {}) }
+      })
+    }
+  )
   ipcMain.handle(IPC.saveTheme, (_e, theme: 'light' | 'dark') => {
     ws.saveConfig({ theme })
     applyNativeTheme(theme) // 头行随应用内主题即时切换

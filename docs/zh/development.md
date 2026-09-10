@@ -69,10 +69,15 @@ docs/                # 本目录
 | `src/renderer/src/__tests__/backtick.spec.ts` | 编辑器反引号快捷包裹（单按行内代码、三连按围栏） |
 | `src/renderer/src/__tests__/bold.spec.ts` | 编辑器选区加粗开关 |
 | `src/renderer/src/__tests__/list.spec.ts` | 编辑器列表续行（有序递增、缩进沿用、空项退出） |
-| `src/renderer/src/__tests__/paginate.spec.ts` | 卡片库分页取数守卫 |
+| `src/renderer/src/__tests__/paginate.spec.ts` | 卡片库分页取数守卫（含状态/到期过滤参与视图签名与追加页丢弃） |
 | `src/renderer/src/__tests__/staleGuard.spec.ts` | 异步竞态防护：旧响应晚到不覆盖新数据 |
 | `src/renderer/src/__tests__/debouncedPersist.spec.ts` | 选中态防抖落盘 |
 | `src/renderer/src/__tests__/numericDraft.spec.tsx` | 设置页数值草稿：防抖/flush/卸载兜底、回声抑制多重集 |
+| `src/renderer/src/__tests__/studyAnswerGuard.spec.tsx` | 学习页评级在途闸门：连按/混按只发一次 answer（jsdom + React 真行为） |
+| `src/renderer/src/__tests__/browserAutosave.spec.tsx` | 卡片库编辑自动保存：切卡/卸载/卡被删除时都先落盘在途编辑（jsdom + React 真行为） |
+| `src/renderer/src/__tests__/browserFilters.spec.ts` | 卡片库过滤档：状态档定义、到期窗口换算与互补边界、非法档位归一 |
+| `src/renderer/src/__tests__/browserFilterUi.spec.tsx` | 卡片库过滤 UI 到 IPC 链路：选档后 queryCards 入参、落 config、清除过滤（jsdom + React 真行为） |
+| `src/shared/__tests__/config-boundary.spec.ts` | 渲染层可写配置白名单：api.token/调度参数/workspacePath 不得被渲染层整份覆盖 |
 
 ### FSRS 基准向量再生成
 

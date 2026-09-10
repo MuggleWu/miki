@@ -4,13 +4,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Md } from '../md'
 import { rotateSort } from '../../../core/query'
+import { localDateKey } from '../../../core/stats'
 import { isTypingTarget, sortedDecks, useApp } from '../store'
 import { ColResizer, VResizer, isDragResizing } from '../components/drag'
 import { applyWrap, enterContinueList, tickSelection } from '../components/AddEditDialog'
 import { createPaginator } from './paginate'
 import { createDebouncedPersist } from './debouncedPersist'
+import { DUE_FILTERS, STATE_FILTERS, dueWindow, normalizeDueFilter, normalizeStateFilter } from './filters'
 import type { DebouncedPersist } from './debouncedPersist'
-import type { BrowserColumn, CardRow, SortKey } from '../../../shared/types'
+import type { BrowserColumn, CardRow, DueFilter, QueryState, SortKey } from '../../../shared/types'
 
 const COLUMN_LABEL: Record<BrowserColumn, string> = {
   front: '正面',
@@ -111,6 +113,10 @@ export function Browser({ saveDebounceMs = 800 }: { saveDebounceMs?: number } = 
     return saved
   })
   const [sort, setSort] = useState<SortKey[]>(config?.browser.sort ?? [{ col: 'updatedAt', asc: false }])
+  const [stateFilter, setStateFilter] = useState<QueryState | ''>(() =>
+    normalizeStateFilter(config?.browser.stateFilter)
+  )
+  const [dueFilter, setDueFilter] = useState<DueFilter>(() => normalizeDueFilter(config?.browser.dueFilter))
   const [colMenu, setColMenu] = useState<{ x: number; y: number } | null>(null)
   /** 行右键菜单：ids = 操作对象集合（单卡或多选），mode='move' 时列出目标牌组 */
   const [rowMenu, setRowMenu] = useState<{ x: number; y: number; ids: string[]; mode: 'root' | 'move' } | null>(null)
@@ -157,25 +163,38 @@ export function Browser({ saveDebounceMs = 800 }: { saveDebounceMs?: number } = 
   // 异步竞态防护：条件变化/定时刷新并发时，旧响应晚到不得覆盖新条件的表格
   const query = useCallback(async () => {
     const kws = debouncedKw.split(/\s+/).filter(Boolean)
-    await paginator.refresh({ deckId: browserDeckId, keywords: kws, sort })
+    const win = dueWindow(dueFilter, Date.now())
+    await paginator.refresh({
+      deckId: browserDeckId,
+      keywords: kws,
+      sort,
+      state: stateFilter || null,
+      dueBefore: win.dueBefore,
+      dueAfter: win.dueAfter
+    })
     syncFromPaginator()
-  }, [browserDeckId, debouncedKw, sort, paginator, syncFromPaginator])
+  }, [browserDeckId, debouncedKw, sort, stateFilter, dueFilter, paginator, syncFromPaginator])
 
   useEffect(() => {
     void query()
   }, [query, config, dataEpoch])
 
-  // 60 秒重取当前视图：相对到期（「距现在」）随时间推移自动更新
+  // 60 秒重取当前视图：相对到期（「距现在」）随时间推移自动更新。
+  // 到期过滤档还会跨天（今天到期 / N 天内 / 已逾期），窗口是按 now 现算的，跨天要重取：
+  // dayKey 进依赖 → 跨天时本 effect 重建 + 立即重查一次。dayKey 不在上一个 effect 的
+  // 依赖里（那里只在查询条件变化时触发），所以这一句 `void query()` 不能省。
+  const dayKey = localDateKey(Date.now())
   useEffect(() => {
+    void query()
     const t = setInterval(() => void query(), 60_000)
     return () => clearInterval(t)
-  }, [query])
+  }, [query, dayKey])
 
   // 查询条件变化回到顶部；60 秒定时刷新不在依赖里，不打断当前位置
   useEffect(() => {
     gridWrapRef.current?.scrollTo({ top: 0 })
     setScrollTop(0)
-  }, [browserDeckId, debouncedKw, sort])
+  }, [browserDeckId, debouncedKw, sort, stateFilter, dueFilter])
 
   // 容器高度（窗口缩放 / 拖动分栏）决定可视行数
   useEffect(() => {
@@ -319,7 +338,8 @@ export function Browser({ saveDebounceMs = 800 }: { saveDebounceMs?: number } = 
 
   // 切卡或离开卡片库前，先把上一张卡未落盘的编辑写掉。缺了这步：选中 A 打字 → 800ms 内
   // 切到 B，B 的 onChange 会 clearTimeout 掉 A 的计时，A 的编辑静默丢失（无提示）。
-  useEffect(() => () => flushPendingSave(), [selected?.id, flushPendingSave]) // eslint-disable-line react-hooks/exhaustive-deps
+  // 依赖用 selected?.id 而非 selected 对象：行对象每次重查都是新引用，否则每查一次就误 flush。
+  useEffect(() => () => flushPendingSave(), [selected?.id, flushPendingSave])
 
   const onHeaderClick = (col: BrowserColumn) => {
     // 列宽拖动结束时浏览器在 th 上派发的 click 不算排序点击
@@ -339,6 +359,19 @@ export function Browser({ saveDebounceMs = 800 }: { saveDebounceMs?: number } = 
     }
     setColumns(next)
     void window.miki.saveBrowserConfig(next, sort)
+  }
+
+  /** 过滤档改动：立即生效，并落 config.browser 跨启动保留 */
+  const onStateFilterChange = (raw: string) => {
+    const v = normalizeStateFilter(raw)
+    setStateFilter(v)
+    void window.miki.saveConfig({ browser: { stateFilter: v || null } })
+  }
+
+  const onDueFilterChange = (raw: string) => {
+    const v = normalizeDueFilter(raw)
+    setDueFilter(v)
+    void window.miki.saveConfig({ browser: { dueFilter: v } })
   }
 
   const cell = (row: CardRow, col: BrowserColumn) => {
@@ -422,6 +455,40 @@ export function Browser({ saveDebounceMs = 800 }: { saveDebounceMs?: number } = 
             onChange={(e) => setBrowserKeywords(e.target.value)}
             placeholder="搜索：多个关键词空格分隔（AND）"
           />
+          <select
+            value={stateFilter}
+            onChange={(e) => onStateFilterChange(e.target.value)}
+            title="按调度状态过滤（「已暂停」= leech 难卡池）"
+          >
+            {STATE_FILTERS.map((f) => (
+              <option key={f.value} value={f.value}>
+                {f.label}
+              </option>
+            ))}
+          </select>
+          <select
+            value={dueFilter}
+            onChange={(e) => onDueFilterChange(e.target.value)}
+            title="按到期窗口过滤（新卡无到期时间，选中已排期类档位时不出现）"
+          >
+            {DUE_FILTERS.map((f) => (
+              <option key={f.value} value={f.value}>
+                {f.label}
+              </option>
+            ))}
+          </select>
+          {(stateFilter !== '' || dueFilter !== 'any') && (
+            <button
+              className="filter-clear"
+              title="清除状态与到期过滤"
+              onClick={() => {
+                onStateFilterChange('')
+                onDueFilterChange('any')
+              }}
+            >
+              清除过滤
+            </button>
+          )}
           <span style={{ color: 'var(--text-dim)', fontSize: 12 }}>
             {total} 张{total > rows.length ? `（显示前 ${rows.length}）` : ''}
           </span>

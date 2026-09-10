@@ -5,12 +5,16 @@
 // - loaded 基点：追加基点被别的取数动过即弃（防双页重叠/缺口）
 // 同视图刷新（60s 定时/操作后重查）取已加载前缀，保住滚动位置；条件变化只取首页。
 import { createSeqGuard } from '../staleGuard'
-import type { CardRow, QueryParams, QueryResult, SortKey } from '../../../shared/types'
+import type { CardRow, QueryParams, QueryResult, QueryState, SortKey } from '../../../shared/types'
 
 export interface PageQuery {
   deckId: string | null
   keywords: string[]
   sort: SortKey[]
+  /** 以下过滤条件参与视图签名：变了就必须弃掉旧追加页（否则拼接出跨条件的错乱表格） */
+  state?: QueryState | null
+  dueBefore?: number | null
+  dueAfter?: number | null
 }
 
 /** 取数函数由调用方注入（window.miki.queryCards），模块自身不碰 IPC */
@@ -42,7 +46,20 @@ export function createPaginator(fetcher: Fetcher, pageSize = 400, aheadPx = 600)
   let loadingMore = false
   let loaded = 0
 
-  const sigOf = (v: PageQuery) => `${v.deckId ?? ''}|${v.keywords.join('\u0001')}|${JSON.stringify(v.sort)}`
+  const sigOf = (v: PageQuery) =>
+    `${v.deckId ?? ''}|${v.keywords.join('\u0001')}|${JSON.stringify(v.sort)}|${v.state ?? ''}|${v.dueBefore ?? ''}|${v.dueAfter ?? ''}`
+
+  /** 视图条件 → 取数入参（首屏与追加页共用，避免两处漏字段） */
+  const paramsOf = (v: PageQuery, offset: number, limit: number): QueryParams => ({
+    deckId: v.deckId,
+    keywords: v.keywords,
+    sort: v.sort,
+    state: v.state ?? null,
+    dueBefore: v.dueBefore ?? null,
+    dueAfter: v.dueAfter ?? null,
+    offset,
+    limit
+  })
 
   const refresh = async (view: PageQuery) => {
     const s = seq.next()
@@ -51,7 +68,7 @@ export function createPaginator(fetcher: Fetcher, pageSize = 400, aheadPx = 600)
     lastView = view
     dataVer++
     const want = sameView ? Math.max(pageSize, loaded) : pageSize
-    const r = await fetcher({ deckId: view.deckId, keywords: view.keywords, sort: view.sort, offset: 0, limit: want })
+    const r = await fetcher(paramsOf(view, 0, want))
     if (!seq.isLatest(s)) return
     loaded = r.rows.length
     rows = r.rows
@@ -62,16 +79,11 @@ export function createPaginator(fetcher: Fetcher, pageSize = 400, aheadPx = 600)
     if (loadingMore || lastView === null || loaded >= total) return
     loadingMore = true
     try {
+      const view = lastView
       const ver = dataVer
-      const sig = sigOf(lastView)
+      const sig = sigOf(view)
       const offsetBase = loaded
-      const r = await fetcher({
-        deckId: lastView.deckId,
-        keywords: lastView.keywords,
-        sort: lastView.sort,
-        offset: offsetBase,
-        limit: pageSize
-      })
+      const r = await fetcher(paramsOf(view, offsetBase, pageSize))
       // 三守卫：响应期间发生过新查询 / 参数变化 / 基点移动 → 丢弃（不拼接、不覆盖）
       if (dataVer !== ver || sigOf(lastView) !== sig || loaded !== offsetBase) return
       loaded += r.rows.length

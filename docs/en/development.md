@@ -69,10 +69,15 @@ Key constraints:
 | `src/renderer/src/__tests__/backtick.spec.ts` | Editor backtick wrapping (single press → inline code, triple press → fenced block) |
 | `src/renderer/src/__tests__/bold.spec.ts` | Editor selection bold toggle |
 | `src/renderer/src/__tests__/list.spec.ts` | Editor list continuation (ordered increment, indent carry-over, empty-item exit) |
-| `src/renderer/src/__tests__/paginate.spec.ts` | Browser pagination fetch guards |
+| `src/renderer/src/__tests__/paginate.spec.ts` | Browser pagination fetch guards (filters participate in the view signature and stale-page discard) |
 | `src/renderer/src/__tests__/staleGuard.spec.ts` | Async race guard: late responses never overwrite newer data |
 | `src/renderer/src/__tests__/debouncedPersist.spec.ts` | Debounced persistence for selection state |
 | `src/renderer/src/__tests__/numericDraft.spec.tsx` | Settings numeric drafts: debounce/flush/unmount flush, echo suppression via pending-value multiset |
+| `src/renderer/src/__tests__/studyAnswerGuard.spec.tsx` | Study rating in-flight gate: repeated/mixed key presses issue exactly one answer (jsdom + real React behaviour) |
+| `src/renderer/src/__tests__/browserAutosave.spec.tsx` | Browser editor autosave: in-flight edits are flushed when switching cards, unmounting, or when the card was deleted (jsdom + real React behaviour) |
+| `src/renderer/src/__tests__/browserFilters.spec.ts` | Browser filter options: state options, due-window conversion and complementary boundaries, invalid-option normalization |
+| `src/renderer/src/__tests__/browserFilterUi.spec.tsx` | Browser filter UI down to IPC: queryCards params after choosing an option, config persistence, clearing filters (jsdom + real React behaviour) |
+| `src/shared/__tests__/config-boundary.spec.ts` | Renderer-writable config allowlist: api.token / scheduling params / workspacePath cannot be overwritten wholesale from the renderer |
 
 ### Regenerating FSRS conformance vectors
 
