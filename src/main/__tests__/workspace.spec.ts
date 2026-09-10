@@ -875,6 +875,75 @@ describe('删除要及时落进卡片文件（只读文件的程序不该看到�
   })
 })
 
+describe('删除落盘积压的启动结算（历史遗留的删除要自愈）', () => {
+  // 真实形态：删除只写在 review-log 里，基文件那行仍是 deletedAt=null（旧代码的压实前提是
+  // 「delta 存在」，而删卡不产生 delta，所以这条路径走不到）。用 25 张卡、20 条删除事件复现：
+  // 装置里前 5 张走 deleteCard（计数 5，未达压实阈值 20），其余 20 条的 delete 事件手工写进
+  // review-log 且对应卡仍在基文件里活着 —— 基文件检查点为 0，故事件不会被重放守卫跳过。
+  const aliveRows = (d: string, deckId: string): number => {
+    const f = path.join(d, 'cards', `${deckId}.ndjson`)
+    if (!fs.existsSync(f)) return 0
+    let n = 0
+    for (const l of fs.readFileSync(f, 'utf-8').split('\n')) {
+      if (l.trim() === '' || l.includes('__mikiCheckpoint')) continue
+      try {
+        if (JSON.parse(l).deletedAt === null) n++
+      } catch {
+        // 坏行不计
+      }
+    }
+    return n
+  }
+
+  it('30 张删 23 张（其中 1 张只落在 delta）、基文件只标了 2 张 → 结算到与内存态一致（存活 7 张）', () => {
+    const d = tmpKept()
+    const w0 = newWs(d)
+    const deck = w0.addDeck('历史积压组').id
+    const cards = Array.from({ length: 30 }, (_, i) => w0.addCard(deck, `正面${i}`, `反面${i}`))
+    for (const c of cards.slice(0, 2)) w0.deleteCard(c.id) // 2 < 20：未触发压实
+    // 余下 20 条删除事件手工写进 review-log（模拟修复之前累积的删除）
+    const logDir = path.join(d, 'review-log')
+    const logFile = path.join(
+      logDir,
+      fs.readdirSync(logDir).find((f) => f.endsWith('.ndjson'))!
+    )
+    let seq = 1000
+    const evs = cards.slice(2, 22).map((c) => {
+      seq++
+      return JSON.stringify({ seq, t: Date.now(), action: 'delete', cardId: c.id, deckId: deck, before: null })
+    })
+    fs.appendFileSync(logFile, evs.join('\n') + '\n')
+    // 再把第 23 张的删除写成 delta 覆盖行（真实数据里就有这种：删除可能只落在 delta 里）。
+    // 基文件那行仍是 deletedAt=null，所以它同样算「已删但基文件没落盘」——这正是判据必须在
+    // delta 合并前采样基文件的原因，按合并后的状态看会漏掉这一张
+    const covered = cards[22]
+    fs.writeFileSync(
+      path.join(d, 'cards', `${deck}.delta.ndjson`),
+      JSON.stringify({ id: covered.id, front: covered.front, back: covered.back, deletedAt: Date.now() }) + '\n'
+    )
+    // 此刻：基文件 30 张全显示存活，其中 23 张其实已删（历史遗留状态）
+    expect(aliveRows(d, deck)).toBe(30)
+
+    const w = newWs(d)
+    // 23 ≥ 阈值 → 启动结算把 deletedAt 落盘：只读读者看到的存活数与内存态一致
+    expect(aliveRows(d, deck)).toBe(7)
+    expect(w.deckInfos()[0].counts.total).toBe(7)
+  })
+
+  it('积压不足阈值时不重写基文件（免得每次启动都搅动 git）', () => {
+    const d = tmpKept()
+    const w0 = newWs(d)
+    const deck = w0.addDeck('少量积压组').id
+    const cards = Array.from({ length: 3 }, (_, i) => w0.addCard(deck, `正面${i}`, `反面${i}`)) // 不足 20 条删除事件
+    for (const c of cards) w0.deleteCard(c.id)
+    const f = path.join(d, 'cards', `${deck}.ndjson`)
+    const stamped = fs.statSync(f).mtimeMs
+    const w = newWs(d)
+    expect(w.deckInfos()[0].counts.total).toBe(0)
+    expect(fs.statSync(f).mtimeMs).toBe(stamped)
+  })
+})
+
 describe('乐观锁改卡（编辑弹窗的 lost update 防护）', () => {
   it('未被动过时正常写入，并返回新的 updatedAt', () => {
     const d = tmpKept()

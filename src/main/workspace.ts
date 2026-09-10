@@ -112,6 +112,12 @@ export class WorkspaceService {
   private loadIssues: LoadIssues = newLoadIssues()
   /** 热加载作废撤销栈时的通知回调（丢掉的步数） */
   private undoDiscardedCbs: ((dropped: number) => void)[] = []
+  /** 加载时基文件的删除标记快照（id → deletedAt 是否非空）。
+   * 判据：内存态认为已删 ⇒ 基文件必须已标删除。必须**在 delta 合并前**采样基文件——
+   * delta 的内容覆盖行会改写 deletedAt，合完就看不出基文件本身有没有落盘了 */
+  private baseDeletedOnLoad = new Map<string, boolean>()
+  /** 启动时数出的「已删但基文件仍显示存活」的卡数（按牌组） */
+  private staleDeletesOnLoad = new Map<string, number>()
   /** 各牌组「改了卡片文件之外的东西」的待落盘计数（删卡 / 跨牌组移出的墓碑）。
    * 这些操作不写卡片文件，只有压实才会把内存态写回去；计数到 PENDING_DELETE_COMPACT 就压实，
    * 免得文件长期把已删除的卡显示成还在 */
@@ -149,6 +155,8 @@ export class WorkspaceService {
     this.ensureGitignore()
     // 启动结算积压的 delta（幂等，无积压时一次 fs.existsSync 都不写盘）
     this.compactOversizedDeltas()
+    // 启动结算「删除尚未落盘」的历史积压（幂等：没有积压时一次写盘都不发生）
+    this.compactStaleDeletions()
     // 启动完成即建快照基线：后续轮询只认真外部变更，不把启动加载当变化
     this.watcher.initStamps()
   }
@@ -255,6 +263,7 @@ export class WorkspaceService {
     this.deckCheckpoints = new Map()
     this.byDeck = new Map()
     this.deltaRowsOnLoad = new Map()
+    this.baseDeletedOnLoad = new Map()
     this.lowerCache = new Map() // 外部变更（git pull 等）可能改了卡面，小写缓存全清
     for (const deck of this.decks) {
       const rows = new Map<string, CardCheckpointRow>()
@@ -277,6 +286,8 @@ export class WorkspaceService {
           rows.set(row.id, row)
         }
       }
+      // delta 合并前记下基文件的删除标记（合完会被覆盖行改写）
+      for (const row of rows.values()) this.baseDeletedOnLoad.set(row.id, row.deletedAt !== null)
       for (const line of iterateNdjson(this.paths.deckDeltaFile(deck.id), issues)) {
         let row: (CardCheckpointRow & { __mikiTombstone?: boolean }) | null
         try {
@@ -386,6 +397,8 @@ export class WorkspaceService {
         }
       }
     }
+    // 重放已把删除事件应用进内存态，此刻比对基文件快照即可数出「已删但没落盘」的量
+    this.collectStaleDeletions()
   }
 
   private ensureGitignore(): void {
@@ -675,6 +688,42 @@ export class WorkspaceService {
     for (const deck of this.decks) {
       if ((this.deltaRowsOnLoad.get(deck.id) ?? 0) > DELTA_COMPACT_ROWS && this.compactDeck(deck.id)) any = true
     }
+    if (any) this.writeStatsCheckpoint()
+  }
+
+  /** 统计「内存态认为已删、基文件却仍显示存活」的卡（按牌组）。
+   *
+   * 为什么不变量成立不了：删除只写 review-log 与内存态，卡片文件那行仍是 deletedAt=null，
+   * 且旧代码的压实前提是「delta 存在」，而删卡不产生 delta —— 于是这条路径根本走不到，
+   * 删除可以永远不落盘。真实工作区里 6716 行基文件中只有 7 张标了删除，而应用认为已删的有 56 张。
+   * 按最终结果比对（基文件快照 vs 重放后的内存态），比逐个去猜磁盘来源可靠 */
+  private collectStaleDeletions(): void {
+    this.staleDeletesOnLoad = new Map()
+    for (const [id, cards] of this.byDeck) {
+      let stale = 0
+      for (const c of cards) {
+        if (c.deletedAt !== null && this.baseDeletedOnLoad.get(c.id) === false) stale++
+      }
+      if (stale > 0) this.staleDeletesOnLoad.set(id, stale)
+    }
+    this.baseDeletedOnLoad = new Map() // 统计完即释放
+  }
+
+  /** 启动结算历史遗留的删除落盘积压：够阈值就压实，把 deletedAt 写进基文件。
+   *
+   * 为什么要单独一步：pendingDeletes 只对新产生的删除生效，而修复之前累积的删除没有计数可用，
+   * 它们在基文件里只表现为 deletedAt=null —— 唯一来源是「基文件快照 vs 内存态」的比对。
+   * 只结算一次（读加载期快照后清空），免得每次热加载都重写基文件搅动 git */
+  private compactStaleDeletions(): void {
+    let any = false
+    for (const [deckId, stale] of this.staleDeletesOnLoad) {
+      if (stale >= PENDING_DELETE_COMPACT) {
+        // 先记进计数再压实：compactDeck 靠它决定「没有 delta」时是否也要重写
+        this.pendingDeletes.set(deckId, stale)
+        if (this.compactDeck(deckId)) any = true
+      }
+    }
+    this.staleDeletesOnLoad = new Map()
     if (any) this.writeStatsCheckpoint()
   }
 
