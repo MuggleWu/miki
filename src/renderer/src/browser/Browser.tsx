@@ -9,6 +9,7 @@ import { isTypingTarget, sortedDecks, useApp } from '../store'
 import { ColResizer, VResizer, isDragResizing } from '../components/drag'
 import { applyWrap, enterContinueList, tickSelection } from '../components/AddEditDialog'
 import { createPaginator } from './paginate'
+import { useCardEditor } from './useCardEditor'
 import { createDebouncedPersist } from './debouncedPersist'
 import { DUE_FILTERS, STATE_FILTERS, dueWindow, normalizeDueFilter, normalizeStateFilter } from './filters'
 import type { DebouncedPersist } from './debouncedPersist'
@@ -122,11 +123,6 @@ export function Browser({ saveDebounceMs = 800 }: { saveDebounceMs?: number } = 
   const [rowMenu, setRowMenu] = useState<{ x: number; y: number; ids: string[]; mode: 'root' | 'move' } | null>(null)
   /** 多选集合（cmd/ctrl+点击、shift 范围、⌘A）；主选中始终是 selectedId */
   const [selection, setSelection] = useState<string[]>([])
-  const [editFront, setEditFront] = useState<string | null>(null)
-  const [editBack, setEditBack] = useState<string | null>(null)
-  /** 在途未落盘的编辑（含目标卡 id）：切卡/离开页面前必须先落这张卡的这份内容 */
-  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const pendingSave = useRef<{ cardId: string; front: string; back: string } | null>(null)
   const searchRef = useRef<HTMLInputElement>(null)
   const gridWrapRef = useRef<HTMLDivElement>(null)
   const [scrollTop, setScrollTop] = useState(0)
@@ -297,49 +293,9 @@ export function Browser({ saveDebounceMs = 800 }: { saveDebounceMs?: number } = 
   const selectionSet = useMemo(() => new Set(selection), [selection])
 
   // 选中卡内容进编辑区
-  useEffect(() => {
-    if (selected) {
-      setEditFront(selected.front)
-      setEditBack(selected.back)
-    } else {
-      setEditFront(null)
-      setEditBack(null)
-    }
-  }, [selected?.id]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // 编辑自动保存（B5：debounce 800ms）。目标卡在排计时时就固定进 pendingSave，
-  // 不依赖闭包里的 selected——切卡时那份内容仍要落回原卡。
-  const scheduleSave = useCallback(
-    (front: string, back: string) => {
-      if (!selected) return
-      const cardId = selected.id
-      pendingSave.current = { cardId, front, back }
-      if (saveTimer.current) clearTimeout(saveTimer.current)
-      saveTimer.current = setTimeout(() => {
-        saveTimer.current = null
-        const p = pendingSave.current
-        pendingSave.current = null
-        if (!p) return
-        void window.miki.updateCard(p.cardId, { front: p.front, back: p.back }).then(() => query())
-      }, saveDebounceMs)
-    },
-    [selected, query, saveDebounceMs]
-  )
-
-  /** 在途编辑立即落盘（切卡/离开页面前调用）：无在途计时是 no-op */
-  const flushPendingSave = useCallback(() => {
-    if (saveTimer.current) clearTimeout(saveTimer.current)
-    saveTimer.current = null
-    const p = pendingSave.current
-    pendingSave.current = null
-    if (!p) return
-    void window.miki.updateCard(p.cardId, { front: p.front, back: p.back }).then(() => query())
-  }, [query])
-
-  // 切卡或离开卡片库前，先把上一张卡未落盘的编辑写掉。缺了这步：选中 A 打字 → 800ms 内
-  // 切到 B，B 的 onChange 会 clearTimeout 掉 A 的计时，A 的编辑静默丢失（无提示）。
-  // 依赖用 selected?.id 而非 selected 对象：行对象每次重查都是新引用，否则每查一次就误 flush。
-  useEffect(() => () => flushPendingSave(), [selected?.id, flushPendingSave])
+  // 编辑缓冲 + 防抖落盘（含「切卡前先落盘」的清理与依赖陷阱说明）：见 useCardEditor.ts
+  const editor = useCardEditor(selected, saveDebounceMs, query)
+  const { front: editFront, back: editBack, setFront: setEditFront, setBack: setEditBack, scheduleSave } = editor
 
   const onHeaderClick = (col: BrowserColumn) => {
     // 列宽拖动结束时浏览器在 th 上派发的 click 不算排序点击
