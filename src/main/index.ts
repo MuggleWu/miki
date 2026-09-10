@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, nativeTheme, screen, shell } from 
 import * as path from 'node:path'
 import * as fs from 'node:fs'
 import { WorkspaceService } from './workspace'
-import { startApiServer } from './api-server'
+import { startApiServer, drainApiServer } from './api-server'
 import { CardDialogManager, type CardDialogWindowLike } from './card-dialog'
 import { WorkspaceManager } from './workspace-manager'
 import { atomicWrite } from './atomic-write'
@@ -26,6 +26,8 @@ let dialogManager: CardDialogManager | null = null
 let workspaceManager: WorkspaceManager
 /** 工作区是否已完成初始化（首次启动引导确认前为 false，期间渲染层显示引导页） */
 let workspaceReady = false
+/** 工作区切换已开始（写入口已排空，进程即将重启）：拒绝并发的第二次切换请求 */
+let workspaceSwitching = false
 let apiServer: ReturnType<typeof startApiServer> | null = null
 
 /** 与 styles.css [data-theme] 一致的窗口启动底色，避免加载闪烁 */
@@ -277,9 +279,17 @@ app.whenReady().then(() => {
     return { ...r, status: workspaceManager.getStatus(!workspaceReady) }
   })
   ipcMain.handle(IPC.workspaceSwitch, (_e, p: unknown) => {
+    if (workspaceSwitching) return { ok: false, error: '正在切换工作区，请稍候' }
     const r = typeof p === 'string' ? workspaceManager.switchTo(p) : { ok: false, error: '非法路径' }
     if (r.ok) {
-      // 先回包再重启：渲染层有机会显示「正在重启」提示
+      // 指针已指向新工作区，而本进程还持有旧工作区的服务：必须立刻停掉它的写入口。
+      // 否则「先回包再重启」的那 200ms 里，外部工具（固定连 127.0.0.1:8727 + 旧 token）
+      // 的请求仍会被执行并写进旧工作区——用户看到的是「切过去了，数据却落到上一个工作区」。
+      // 先停服务再回包：apiServer 同步停止受理，stopWatching 同步停掉热加载轮询
+      workspaceSwitching = true
+      drainApiServer(apiServer)
+      ws.stopWatching()
+      // 回包之后才重启：渲染层需要拿到结果才能显示「正在重启」提示
       setTimeout(() => {
         app.relaunch()
         app.exit(0)

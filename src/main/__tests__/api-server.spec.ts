@@ -5,7 +5,7 @@ import * as http from 'node:http'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import { WorkspaceService } from '../workspace'
-import { startApiServer } from '../api-server'
+import { startApiServer, drainApiServer } from '../api-server'
 
 const PORT = 18477
 let ws: WorkspaceService
@@ -14,14 +14,23 @@ let token = ''
 function request(
   method: string,
   urlPath: string,
-  opts: { body?: unknown; token?: string | null; origin?: string; host?: string } = {}
+  opts: {
+    body?: unknown
+    token?: string | null
+    origin?: string
+    host?: string
+    port?: number
+    /** 复用连接的 agent（测「已建立连接在排空后的行为」用） */
+    agent?: http.Agent
+  } = {}
 ): Promise<{ status: number; json: unknown }> {
   return new Promise((resolve, reject) => {
     const payload = opts.body === undefined ? null : JSON.stringify(opts.body)
     const req = http.request(
       {
         host: '127.0.0.1',
-        port: PORT,
+        port: opts.port ?? PORT,
+        ...(opts.agent ? { agent: opts.agent } : {}),
         path: urlPath,
         method,
         headers: {
@@ -381,5 +390,76 @@ describe('端口被占用顺延后，Host 校验跟随实际监听端口', () =>
 
     expect(await probe(OCCUPIED + 1, `127.0.0.1:${OCCUPIED}`)).toBe(403) // 配置端口（已被占）不是合法 Host
     expect(await probe(OCCUPIED + 1, `127.0.0.1:${OCCUPIED + 1}`)).toBe(200) // 实际监听端口放行
+  })
+})
+
+describe('切换工作区时排空 HTTP API', () => {
+  // 切换工作区后指针已指向新目录，而本进程还持有旧工作区的服务。若不排空，「先回包再重启」
+  // 的 200ms 里外部工具（固定连 127.0.0.1:8727 + 旧 token）的写请求会被执行并落进旧工作区，
+  // 用户看到的是「切过去了，数据却落到了上一个工作区」。
+  //
+  // 实测（node 探针）server.close() 对已建立连接的行为取决于调用时机：
+  //   · 在处理请求中途调用 → keep-alive 连接存活，复用连接仍被服务（这就是必须排空的原因）
+  //   · 在响应完成之后调用 → 空闲连接被销毁，复用即失败
+  // 切换发生在响应完成之后，因此外部工具拿到的是「复用连接被重置 + 新连接被拒」，
+  // 两条路都写不进去；draining 标志另覆盖「关服务器那一刻正好有请求在飞」的窄窗口。
+  it('排空后写请求落不到工作区（连接层被拒或明确 503）', async () => {
+    const drainPort = PORT + 1
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'miki-api-drain-'))
+    const ws2 = new WorkspaceService()
+    ws2.init(dir)
+    ws2.config.api.port = drainPort
+    const tok = ws2.config.api.token
+    const deck = ws2.addDeck('排空组')
+    const s2 = startApiServer(ws2)
+    // 保持连接：先建立 socket，排空后复用同一 socket（外部工具的 MCP 连接就是这样长期存在的）
+    const agent = new http.Agent({ keepAlive: true })
+    try {
+      const call = (method: string, urlPath: string, body?: unknown) =>
+        request(method, urlPath, { body, token: tok, host: `127.0.0.1:${drainPort}`, port: drainPort, agent }).catch(
+          (e: NodeJS.ErrnoException) => ({ status: -1, json: { code: e.code } })
+        )
+
+      // 排空前正常工作（写路由是 /api/cards/add）
+      const before = await call('POST', '/api/cards/add', { deckId: deck.id, front: '排空前', back: 'x' })
+      expect(before.status).toBe(200)
+      expect(ws2.deckInfos()[0].counts.total).toBe(1)
+
+      drainApiServer(s2)
+
+      const after = await call('POST', '/api/cards/add', { deckId: deck.id, front: '排空后', back: 'x' })
+      // 要么被明确拒绝（503），要么连接层直接失败——都不能是「静默成功」
+      expect([503, -1]).toContain(after.status)
+      if (after.status === -1) {
+        expect(['ECONNRESET', 'ECONNREFUSED']).toContain((after.json as { code?: string }).code)
+      }
+      // 关键断言：这张卡绝不能落进工作区（计数仍是排空前那 1 张）
+      expect(ws2.deckInfos()[0].counts.total).toBe(1)
+      // 读接口与 health 同样不再应答
+      for (const p of [`/api/cards?deckId=${deck.id}`, '/api/health']) {
+        const r = await call('GET', p)
+        expect([503, -1]).toContain(r.status)
+      }
+    } finally {
+      agent.destroy()
+      await new Promise<void>((resolve) => s2?.close(() => resolve()))
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('排空是幂等的（重复调用 / 未启用 API 时传 null 都不抛错）', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'miki-api-drain2-'))
+    const ws3 = new WorkspaceService()
+    ws3.init(dir)
+    ws3.config.api.port = PORT + 2
+    const s3 = startApiServer(ws3)
+    try {
+      drainApiServer(s3)
+      expect(() => drainApiServer(s3)).not.toThrow()
+      expect(() => drainApiServer(null)).not.toThrow() // 未启用 API 时 server 为 null
+    } finally {
+      s3?.close()
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
   })
 })

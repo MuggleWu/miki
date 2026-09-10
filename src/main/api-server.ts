@@ -337,6 +337,9 @@ export function startApiServer(ws: WorkspaceService, opts: { runtimeInfoPath?: s
   // 撞上同一 pid）时 kill(pid,0) 甄别不了身份，外部工具靠比对 nonce 判断文件是否过期
   const serverNonce = randomUUID()
   const routes = buildRoutes(ws, serverNonce)
+  // 工作区切换后本服务已指向旧工作区，必须停止接受写入：见 drainApiServer。
+  // 判定在「任何 await 之前」的同步段内完成，所以不存在「检查通过后又溜进一条写」的窗口
+  let draining = false
 
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1')
@@ -345,6 +348,11 @@ export function startApiServer(ws: WorkspaceService, opts: { runtimeInfoPath?: s
       res.end(JSON.stringify(payload))
     }
     try {
+      // 工作区切换已在途：本进程马上重启并指向新工作区，继续受理就等于把写入落到旧工作区。
+      // 明确拒绝而不是静默丢弃，调用方才能知道该重试（而不是以为写成功了）
+      if (draining) {
+        return send(503, { error: '工作区正在切换，本进程即将重启；请稍后重试' })
+      }
       // 防 DNS rebinding：Host 只允许本机回环两种写法；端口跟随实际监听端口（被占用顺延后 ≠ 配置端口）
       const host = (req.headers.host ?? '').toLowerCase()
       const expectedPort = port + attempt
@@ -422,7 +430,31 @@ export function startApiServer(ws: WorkspaceService, opts: { runtimeInfoPath?: s
     }
   })
   tryListen()
+  // 排空入口挂在 server 上（而不是新开一个导出类型）：切换工作区时调用它，立即停止受理请求
+  ;(server as ApiServerWithDrain)[drainSymbol] = () => {
+    draining = true
+    // 摘掉 listening socket：此后再来的连接直接被拒。实测（node 探针）对**已建立连接**的效果
+    // 取决于调用时机：在处理请求中途 close，keep-alive 连接存活且仍被服务；在响应完成之后
+    // close，空闲连接被销毁。切换发生在响应完成之后，所以外部工具两条路都走不通
+    // （新连接 ECONNREFUSED、复用连接 ECONNRESET），写不进旧工作区。draining 标志另覆盖
+    // 「关服务器那一刻正好有请求在飞行中、该连接因此存活」的窄窗口。
+    // 刻意不调 closeAllConnections：它会把连接直接掐断，调用方分不清「写失败」与
+    // 「写成功但响应丢了」，反而可能带旧 token 重试
+    server.close()
+  }
   return server
+}
+
+/** 运行时附加的排空入口（见 drainApiServer） */
+export const drainSymbol = Symbol.for('miki.apiServer.drain')
+
+export interface ApiServerWithDrain extends http.Server {
+  [drainSymbol]?: () => void
+}
+
+/** 排空 HTTP API：切换工作区后立刻调用。此后任何请求返回 503，不再写旧工作区 */
+export function drainApiServer(server: http.Server | null): void {
+  ;(server as ApiServerWithDrain | null)?.[drainSymbol]?.()
 }
 
 function matchRoute(
