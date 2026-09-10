@@ -6,7 +6,7 @@ import { startApiServer } from './api-server'
 import { CardDialogManager, type CardDialogWindowLike } from './card-dialog'
 import { WorkspaceManager } from './workspace-manager'
 import { atomicWrite } from './atomic-write'
-import { IPC } from '../shared/ipc'
+import { IPC, pickRendererWritableConfig } from '../shared/ipc'
 import { withCardDialogHash } from '../shared/card-dialog'
 import { defaultWorkspaceSuggestion } from '../shared/workspace'
 import type { MikiConfig, QueryParams, Rating, SortKey, StatsParams, WindowState } from '../shared/types'
@@ -325,7 +325,10 @@ app.whenReady().then(() => {
     ws.saveConfig({ theme })
     applyNativeTheme(theme) // 头行随应用内主题即时切换
   })
-  ipcMain.handle(IPC.saveConfig, (_e, patch: Partial<MikiConfig>) => ws.saveConfig(patch))
+  // 渲染层补丁先过白名单再落盘：挡住陈旧 config 快照回写覆盖 api.token/调度参数
+  ipcMain.handle(IPC.saveConfig, (_e, patch: Record<string, unknown>) =>
+    ws.saveConfig(pickRendererWritableConfig(patch ?? {}))
+  )
   ipcMain.handle(IPC.setCardSuspended, (_e, cardId: string, suspended: boolean) =>
     ws.setCardSuspended(cardId, suspended)
   )

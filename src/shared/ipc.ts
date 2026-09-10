@@ -19,6 +19,33 @@ export type MikiConfigPatch = Partial<Omit<MikiConfig, 'browser' | 'study'>> & {
   study?: Partial<MikiConfig['study']>
 }
 
+/**
+ * 渲染层可写的配置键（IPC.saveConfig 的边界白名单）。
+ * 类型层面 MikiConfigPatch 是宽的（描述服务层能存什么），边界另用本表收口：
+ * 不含 api（token/端口/开关）、parameters 与其余调度参数、workspacePath——
+ * 这些只由主进程或直接改 config.json 决定。否则 renderer 手里一份陈旧
+ * config 快照回写就能整份覆盖它们（loadWorkspace 会把含 api.token 的 config
+ * 交给渲染层，令牌会因此被旧值复活或抹掉）。
+ */
+export const RENDERER_WRITABLE_CONFIG_KEYS = [
+  'theme',
+  'study',
+  'browser',
+  'window',
+  'cardDialogWindow',
+  'leechThreshold'
+] as const
+
+/** 过滤出渲染层可写的键（其余静默丢弃：陈旧 renderer 不该把 UI 卡死） */
+export function pickRendererWritableConfig(patch: Record<string, unknown>): MikiConfigPatch {
+  const allowed = new Set<string>(RENDERER_WRITABLE_CONFIG_KEYS)
+  const out: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(patch)) {
+    if (allowed.has(k)) out[k] = v
+  }
+  return out as MikiConfigPatch
+}
+
 export interface MikiApi {
   /** 全量加载（decks + counts + today + 累计 + config） */
   loadWorkspace(): Promise<{ decks: DeckInfo[]; todayCount: number; totalCount: number; config: MikiConfig }>
