@@ -242,6 +242,15 @@ export function CardForm(props: CardFormProps) {
     if (first) setDeck(first)
   }, [mode, deck, decks])
 
+  /** 打开时读到的 updatedAt（乐观锁基准）：提交时若已变化说明这张卡被别处改过 */
+  const loadedUpdatedAt = useRef<number | null>(null)
+  // 设基准收进函数：effect 里内联写 ref 会被 react-hooks 的 set-state-in-effect 规则判为
+  // 「改了 effect 用到的值」。该 ref 只被事件处理器读（不参与渲染），故用 ref 不用 state，
+  // 免得每次设基准都触发一次重渲染
+  const rememberBaseline = (updatedAt: number): void => {
+    loadedUpdatedAt.current = updatedAt
+  }
+
   useEffect(() => {
     if (mode !== 'edit' || !cardId) return
     let alive = true
@@ -252,7 +261,7 @@ export function CardForm(props: CardFormProps) {
         setFront(card.front)
         setBack(card.back)
         setEditDeckId(card.deckId) // 牌组名从 decks 派生（decks 异步到达后自动补显）
-        loadedUpdatedAt.current = card.updatedAt // 乐观锁基准：提交时校验期间有没有被别处改过
+        rememberBaseline(card.updatedAt) // 乐观锁基准：提交时校验期间有没有被别处改过
       }
       setLoaded(true)
     })
@@ -276,8 +285,6 @@ export function CardForm(props: CardFormProps) {
   // 判定必须发生在同一次事件循环内（setState 要等下一帧生效，挡不住第二次点击）
   const submitting = useRef(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
-  /** 打开时读到的 updatedAt（乐观锁基准）：提交时若已变化说明这张卡被别处改过 */
-  const loadedUpdatedAt = useRef<number | null>(null)
   /** 冲突时对方的最新正面内容（非 null = 显示冲突选择条） */
   const [conflict, setConflict] = useState<string | null>(null)
   const submit = async () => {
@@ -313,7 +320,7 @@ export function CardForm(props: CardFormProps) {
           setSubmitError('这张卡已被删除，改动无法保存')
           return
         }
-        loadedUpdatedAt.current = r.card.updatedAt
+        rememberBaseline(r.card.updatedAt)
         bumpContent() // 学习页当前卡就地重取内容（同卡保留提问/答案相位）
       }
       onSubmitted?.(mode)
@@ -406,7 +413,7 @@ export function CardForm(props: CardFormProps) {
               setConflict(null)
               setSubmitError(null)
               void window.miki.getCard(cardId!).then((c) => {
-                if (c) loadedUpdatedAt.current = c.updatedAt
+                if (c) rememberBaseline(c.updatedAt)
               })
             }}
             title="丢弃你的改动，载入这张卡当前的最新内容"
