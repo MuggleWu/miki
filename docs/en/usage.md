@@ -30,6 +30,8 @@ Launching: the packaged app lives at `/Applications/Miki.app` (type `miki` in Ra
 - **Columns**: click a header to sort (click again to flip; multi-level sorts follow click order), right-click a header to choose visible columns; drag a header's right edge to resize. All three widths (left panel / table / right panel) are draggable and remembered across launches.
 - **Selection**: click a row to select it (the right panel loads front/back; edits auto-save after 800ms); `⌘`-click toggles multi-select, `Shift`-click selects a range, `⌘A` selects all in the current view.
 - **Row context menu**: change deck (scheduling progress is kept) / reset progress (back to new, irreversible) / delete (soft, undoable) — with multi-select these apply to the whole group and the menu shows the count.
+- **Filters**: two dropdowns in the toolbar — "state" filters by scheduling state (new / learning / review / suspended, where suspended is the leech pool), and "due" filters by due window (due / due today / overdue / next 3 days / next 7 days / next 30 days / scheduled). Both combine with the search terms and the deck selection, the choices are remembered across launches, and "clear filters" resets them in one click.
+  "Overdue" and "due today" are strictly complementary (overdue = due before 00:00 today), so nothing is double-counted or missed. Every due option except "any" only shows cards that have a scheduled due date; new cards have none and therefore do not appear (use the state filter for those).
 - The "due in" column refreshes every 60 seconds; the selection is restored across launches.
 
 ## Stats
