@@ -457,8 +457,12 @@ export function Browser({ saveDebounceMs = 800 }: { saveDebounceMs?: number } = 
             onScroll={(e) => {
               const el = e.currentTarget
               setScrollTop(el.scrollTop)
-              // 近底部预取下一页（B6 取数侧分页）：距已取尾部 AHEAD_PX 内增量追加
-              void paginator.onScroll(el.scrollTop, el.clientHeight, rowH)
+              // 近底部预取下一页（B6 取数侧分页）：距已取尾部 AHEAD_PX 内增量追加。
+              // 追加结果落在 paginator 内部，必须回写 state 才可见——否则滚过首屏是一整片空白，
+              // 要等 60 秒定时刷新（走 refresh 取已加载前缀）才补上。
+              void paginator.loadMoreIfNearBottom(el.scrollTop, el.clientHeight, rowH).then((appended) => {
+                if (appended) syncFromPaginator()
+              })
             }}
             style={gridWidth != null ? { width: gridWidth, flex: '0 0 auto' } : undefined}
           >

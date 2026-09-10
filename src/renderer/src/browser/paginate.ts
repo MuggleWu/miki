@@ -27,10 +27,14 @@ export interface Paginator {
   total: number
   /** 首屏 / 条件变化 / 定时刷新统一入口 */
   refresh(view: PageQuery): Promise<void>
-  /** 增量追加下一页；并发中或已取完时 no-op。视图参数 = 最近一次 refresh 的参数 */
-  loadMore(): Promise<void>
+  /** 增量追加下一页；返回是否真的追加了行（并发中/已取完/被守卫拦下 → false）。
+   * 视图参数 = 最近一次 refresh 的参数 */
+  loadMore(): Promise<boolean>
   /** 滚动近底部预取回调：返回 true 表示触发了预取 */
   onScroll(scrollTop: number, clientHeight: number, rowH: number): boolean
+  /** 滚动近底部预取（给 UI 用）：返回「是否真的追加了行」，调用方据此把结果回写自己的视图状态。
+   * 未越线/已取完/被守卫拦下都 resolve false，UI 不必区分 */
+  loadMoreIfNearBottom(scrollTop: number, clientHeight: number, rowH: number): Promise<boolean>
   /** 测试与组件同步内部游标 */
   loaded(): number
   /** 未决追加进行中 */
@@ -75,8 +79,8 @@ export function createPaginator(fetcher: Fetcher, pageSize = 400, aheadPx = 600)
     total = r.total
   }
 
-  const loadMore = async () => {
-    if (loadingMore || lastView === null || loaded >= total) return
+  const loadMore = async (): Promise<boolean> => {
+    if (loadingMore || lastView === null || loaded >= total) return false
     loadingMore = true
     try {
       const view = lastView
@@ -85,10 +89,11 @@ export function createPaginator(fetcher: Fetcher, pageSize = 400, aheadPx = 600)
       const offsetBase = loaded
       const r = await fetcher(paramsOf(view, offsetBase, pageSize))
       // 三守卫：响应期间发生过新查询 / 参数变化 / 基点移动 → 丢弃（不拼接、不覆盖）
-      if (dataVer !== ver || sigOf(lastView) !== sig || loaded !== offsetBase) return
+      if (dataVer !== ver || sigOf(lastView) !== sig || loaded !== offsetBase) return false
       loaded += r.rows.length
       rows = [...rows, ...r.rows]
       total = r.total
+      return r.rows.length > 0
     } finally {
       loadingMore = false
     }
@@ -110,6 +115,11 @@ export function createPaginator(fetcher: Fetcher, pageSize = 400, aheadPx = 600)
         return true
       }
       return false
+    },
+    loadMoreIfNearBottom(scrollTop, clientHeight, rowH) {
+      const nearBottom = scrollTop + clientHeight >= loaded * rowH - aheadPx
+      if (loaded < total && nearBottom) return loadMore()
+      return Promise.resolve(false)
     },
     loaded() {
       return loaded
