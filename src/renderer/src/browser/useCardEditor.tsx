@@ -26,6 +26,10 @@ export interface CardEditor {
   scheduleSave: (front: string, back: string) => void
   /** 立即落盘在途编辑（切卡/离开页面前调用）；无在途计时是 no-op */
   flush: () => void
+  /** 落盘失败的原因（卡已被删/不存在时给用户看）；null = 没有失败。
+   * 以前这里无条件调 onSaved 刷视图，卡已删时用户看到的是「刚打的字自己弹回去」，
+   * 既不知道没保存、也不知道为什么 */
+  saveError: string | null
 }
 
 /**
@@ -40,6 +44,7 @@ export function useCardEditor(
 ): CardEditor {
   const [front, setFront] = useState<string | null>(null)
   const [back, setBack] = useState<string | null>(null)
+  const [saveError, setSaveError] = useState<string | null>(null)
   /** 在途未落盘的编辑（含目标卡 id）：切卡/离开页面前必须先落这张卡的这份内容 */
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pending = useRef<{ cardId: string; front: string; back: string } | null>(null)
@@ -57,10 +62,23 @@ export function useCardEditor(
   useEffect(() => {
     setFront(selected ? selected.front : null)
     setBack(selected ? selected.back : null)
+    setSaveError(null) // 上一张卡的失败提示不跟着换到新卡
   }, [selected?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const write = useCallback((p: { cardId: string; front: string; back: string }) => {
-    void window.miki.updateCard(p.cardId, { front: p.front, back: p.back }).then(() => savedRef.current())
+    void window.miki.updateCard(p.cardId, { front: p.front, back: p.back }).then(
+      (saved) => {
+        if (saved) {
+          setSaveError(null)
+          savedRef.current()
+        } else {
+          // updateCard 返回 null = 卡不存在或已被软删：这份内容根本没落盘，
+          // 不能刷视图假装成功，也不能清掉错误提示
+          setSaveError('改动未保存：这张卡已被删除')
+        }
+      },
+      () => setSaveError('改动未保存：写入失败')
+    )
   }, [])
 
   const scheduleSave = useCallback(
@@ -105,5 +123,5 @@ export function useCardEditor(
     return () => window.removeEventListener('beforeunload', onUnload)
   }, [])
 
-  return { front, back, setFront, setBack, scheduleSave, flush }
+  return { front, back, setFront, setBack, scheduleSave, flush, saveError }
 }

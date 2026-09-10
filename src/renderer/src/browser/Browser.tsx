@@ -539,6 +539,7 @@ export function Browser({ saveDebounceMs = 800 }: { saveDebounceMs?: number } = 
 
           <div className="editor">
             {!selected && <div className="editor-empty">选中一张卡查看 / 编辑</div>}
+            {editor.saveError && <div className="editor-error">{editor.saveError}</div>}
             {selected && editFront != null && editBack != null && (
               <>
                 <div>

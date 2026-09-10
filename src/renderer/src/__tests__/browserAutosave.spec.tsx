@@ -299,3 +299,45 @@ describe('卡片库编辑自动保存', () => {
     expect(miki.updateCard).not.toHaveBeenCalled()
   })
 })
+
+// 落盘失败必须可见：updateCard 返回 null = 卡已被删/不存在，那份内容根本没写进去。
+// 原实现忽略返回值、无条件刷视图，用户看到的是「刚打的字自己弹回旧内容」——既不知道
+// 没保存、也不知道为什么。默认桩就是返回 null，正好是这条失败路径。
+describe('编辑落盘失败要报出来', () => {
+  const errorText = () => host.querySelector('.editor-error')?.textContent ?? null
+
+  it('卡已被删（updateCard 返回 null）：显示提示且不假装保存成功', async () => {
+    await mountBrowser()
+    await selectAndEdit('正面 A', '写不进去的内容')
+    expect(errorText()).toBeNull() // 防抖期内还没有结果
+    await wait(PAST_DEBOUNCE)
+    expect(miki.updateCard).toHaveBeenCalledTimes(1)
+    expect(errorText()).toContain('已被删除')
+  })
+
+  it('写成功时不显示提示', async () => {
+    await mountBrowser()
+    miki.updateCard.mockResolvedValue({ ...row('card-a', '写进去了', '反面 A') })
+    await selectAndEdit('正面 A', '写进去了')
+    await wait(PAST_DEBOUNCE)
+    expect(miki.updateCard).toHaveBeenCalledTimes(1)
+    expect(errorText()).toBeNull()
+  })
+
+  it('换一张卡后，上一张卡的失败提示不跟过来', async () => {
+    await mountBrowser()
+    await selectAndEdit('正面 A', '写不进去的内容')
+    await wait(PAST_DEBOUNCE)
+    expect(errorText()).toContain('已被删除')
+    await click(rowFor('正面 B'))
+    expect(errorText()).toBeNull()
+  })
+
+  it('IPC 抛错时也报出来（不静默）', async () => {
+    await mountBrowser()
+    miki.updateCard.mockRejectedValue(new Error('boom'))
+    await selectAndEdit('正面 A', '写不进去的内容')
+    await wait(PAST_DEBOUNCE)
+    expect(errorText()).toContain('写入失败')
+  })
+})

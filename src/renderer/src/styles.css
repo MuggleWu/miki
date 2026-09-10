@@ -812,6 +812,18 @@ input {
   color: var(--text-dim);
 }
 
+/* 编辑落盘失败提示（卡已被删等）：贴在编辑区顶部，不遮挡内容 */
+.editor-error {
+  flex: 0 0 auto;
+  padding: 6px 10px;
+  margin-bottom: 8px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--danger) 12%, var(--panel));
+  border: 1px solid color-mix(in srgb, var(--danger) 40%, var(--border));
+  color: var(--danger);
+  font-size: 12px;
+}
+
 /* ---------- 统计 ---------- */
 .stats {
   flex: 1;
