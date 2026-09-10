@@ -28,6 +28,9 @@ export function Study() {
   const [payload, setPayload] = useState<StudyPayload | null>(null)
   const [phase, setPhase] = useState<'question' | 'answer'>('question')
   const [previewDue, setPreviewDue] = useState<number[]>([])
+  /** 评级在途：闸门（ref 同 tick 生效）+ 按钮禁用反馈 */
+  const [answering, setAnswering] = useState(false)
+  const answeringRef = useRef(false)
   const questionShownAt = useRef<number>(Date.now())
   // 最近一次装载进界面的卡（编辑弹窗确认后的重取用它判断「同卡」→ 保留当前相位）
   const loadedCardIdRef = useRef<string | null>(null)
@@ -73,14 +76,26 @@ export function Study() {
 
   const answer = useCallback(
     async (rating: Rating) => {
+      // 重入闸门：评级键（空格/1-4）可在 IPC 往返期间连按。payload 是闭包快照、
+      // setPayload 要等回包后的重渲染才更新，两次调用会读到同一张卡 → 同卡追两条
+      // answer 事件，污染 reps/lapses 与 FSRS 的 shortTerm 分支，且撤销只能退一步。
+      // 用 ref 而非 state：state 更新要等重渲染，挡不住同一 tick 的第二次按键。
+      if (answeringRef.current) return
       if (!payload?.card || !studyDeckId) return
-      const durationMs = Date.now() - questionShownAt.current
-      const p = await window.miki.answer(payload.card.id, rating, durationMs)
-      setPayload(p)
-      loadedCardIdRef.current = p.card?.id ?? null
-      setPhase('question')
-      questionShownAt.current = Date.now()
-      setStudyCurrentCardId(p.card?.id ?? null)
+      answeringRef.current = true
+      setAnswering(true)
+      try {
+        const durationMs = Date.now() - questionShownAt.current
+        const p = await window.miki.answer(payload.card.id, rating, durationMs)
+        setPayload(p)
+        loadedCardIdRef.current = p.card?.id ?? null
+        setPhase('question')
+        questionShownAt.current = Date.now()
+        setStudyCurrentCardId(p.card?.id ?? null)
+      } finally {
+        answeringRef.current = false
+        setAnswering(false)
+      }
     },
     [payload, studyDeckId, setStudyCurrentCardId]
   )
@@ -194,7 +209,7 @@ export function Study() {
           {phase === 'answer' && (
             <div className="ratebar">
               {([1, 2, 3, 4] as Rating[]).map((r) => (
-                <button key={r} className={`rate-card rate-${r}`} onClick={() => void answer(r)}>
+                <button key={r} className={`rate-card rate-${r}`} disabled={answering} onClick={() => void answer(r)}>
                   <span className="rate-top">
                     {RATING_LABEL[r]}
                     <kbd className="kbd">{r}</kbd>
