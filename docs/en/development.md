@@ -52,6 +52,40 @@ Key constraints:
 - **The scheduling index's semantics are benchmarked against full scans**: `schedule-index.spec.ts` runs 200 steps of random operations and cross-checks index-based picks/counts against a full-scan baseline, keeping the incremental structure from drifting.
 - Code and user data are physically separated: no real card content or workspace paths ever appear in the repo.
 
+### Why the window-close flush uses synchronous IPC
+
+`IPC.flushPendingEdit` is this repo's only synchronous channel (the preload uses
+`ipcRenderer.sendSync`, the main process pairs it with `ipcMain.on` + `event.returnValue`).
+It exists not for speed but because it is the only way to **guarantee the write finishes
+before the window goes away**:
+
+- Card-library edits are persisted behind an 800ms debounce, normally triggered by one of
+  three things: the debounce elapsing, switching cards, or component-unmount cleanup;
+- On window close and quit, React does **not** run unmount cleanup (the process just ends),
+  and the jsdom `root.unmount()` tests cannot cover that path — so the renderer has to
+  listen for `beforeunload`;
+- An ordinary asynchronous `ipcRenderer.invoke` inside `beforeunload` is not enough: the
+  process may be destroyed right after the message is sent, the write is not guaranteed to
+  complete, and the user's last edit is lost anyway. `sendSync` blocks the renderer until
+  the main process has written, so this one call site is deliberately synchronous.
+
+Verified on a real machine (Electron 33, real `out/main` + real preload + real renderer
+output, workspace pointed at a copy of real data): `beforeunload` fires on all three paths
+(`win.close()`, `app.quit()`, page `window.close()`), the renderer does call the sync
+channel, and the write lands in `cards/<deck>.delta.ndjson`. Removing the renderer's
+`beforeunload` registration turns the same test into "sync channel called 0 times and the
+old content reads back" — i.e. the edit is lost.
+
+Two traps worth knowing before touching this code:
+
+- **Do not turn it into an async invoke.** On a dev machine it will usually still pass (the
+  process has not died yet), but a real window close then loses the final edit — which is
+  exactly the case this exists to fix.
+- **The base file is not updated immediately.** The close-time write lands in
+  `.delta.ndjson`; `<deck>.ndjson` is only merged at compaction, so reading the base file
+  right after closing and seeing the old content is expected. To judge whether the write
+  landed, look at the delta or read back through `WorkspaceService.getCard`.
+
 ## Tests
 
 | Suite | Content |

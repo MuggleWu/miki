@@ -52,6 +52,32 @@ docs/                # 本目录
 - **调度索引语义以全量扫描为基准**：`schedule-index.spec.ts` 用 200 步随机操作对拍索引取卡/计数与全量扫描，保证增量结构不漂移。
 - 代码与用户数据物理分离：仓库里不出现任何真实卡片内容与工作区路径。
 
+### 关窗落盘为什么用同步 IPC
+
+`IPC.flushPendingEdit` 是本仓库唯一一条同步通道（preload 用 `ipcRenderer.sendSync`，
+主进程用 `ipcMain.on` + `event.returnValue` 配对）。它存在的理由不是性能，是**唯一能
+保证写完再返回**的做法：
+
+- 卡片库的编辑落盘有 800ms 防抖，正常路径靠「防抖计满 / 切卡 / 组件卸载清理」三处触发；
+- 关窗与退出这条路径上 React 不会执行卸载清理（进程直接结束），jsdom 里的
+  `root.unmount()` 用例覆盖不到它，必须靠渲染层监听 `beforeunload`；
+- 而 `beforeunload` 里**不能**用普通的异步 `ipcRenderer.invoke`：消息发出去后进程可能
+  先被销毁，写盘不保证完成，用户最后那次编辑照样丢。`sendSync` 会阻塞渲染进程直到主
+  进程写完，所以这一处刻意保持同步。
+
+真机验证结论（Electron 33，真实 out/main + 真实 preload + 真实渲染产物，工作区用真实
+数据副本）：`win.close()` / `app.quit()` / 页面 `window.close()` 三条路径上 `beforeunload`
+都会触发，渲染层确实调用同步通道，写入落在 `cards/<deck>.delta.ndjson`；摘掉渲染层的
+`beforeunload` 注册后同一条用例变成「同步通道 0 次调用 + 读回旧内容」，即编辑丢失。
+
+两个容易踩的坑，改这块代码前先看一眼：
+
+- **别把它改成异步 invoke**：改了在开发机上大概率仍能通过（进程还没死），但真实关窗
+  时就会丢最后一次编辑，而这恰恰是它要解决的场景。
+- **基文件不是立即更新的**：关窗写入落在 `.delta.ndjson`，`<deck>.ndjson` 只在压实时
+  合并，所以「关窗后直接读基文件发现是旧内容」是正常现象，判断落盘要看 delta 或用
+  `WorkspaceService.getCard` 读回。
+
 ## 测试
 
 | 套件 | 内容 |
