@@ -64,8 +64,8 @@ docs/                # 本目录
 | `src/main/__tests__/api-server.spec.ts` | HTTP API 安全链与 CRUD（真实监听临时端口）：鉴权/Origin/Host 校验、HEAD 镜像 GET、suspend 严格布尔、到期窗口两入口口径、分页 clamp |
 | `src/main/__tests__/card-dialog.spec.ts` | 独立卡片窗口管理器：open 载荷、位置尺寸持久化、主窗关闭联动 |
 | `src/main/__tests__/workspace-manager.spec.ts` | 多工作区注册表：指针文件升级、引导确认、切换/添加/移除 |
-| `src/renderer/src/__tests__/md.spec.ts` | Markdown 渲染 |
-| `src/renderer/src/__tests__/highlighter.spec.ts` | Shiki 代码高亮与 markdown 集成 |
+| `src/renderer/src/__tests__/highlighter.spec.ts` | Shiki 代码高亮、懒加载契约（就绪前返回 null、按语言加载、别名解析）与 markdown 集成 |
+| `src/renderer/src/__tests__/md.spec.tsx` | Markdown 渲染（KaTeX）与 Md 的引擎就绪重渲染补色 |
 | `src/renderer/src/__tests__/backtick.spec.ts` | 编辑器反引号快捷包裹（单按行内代码、三连按围栏） |
 | `src/renderer/src/__tests__/bold.spec.ts` | 编辑器选区加粗开关 |
 | `src/renderer/src/__tests__/list.spec.ts` | 编辑器列表续行（有序递增、缩进沿用、空项退出） |
@@ -102,8 +102,27 @@ MIKI_BENCH=1 NODE_OPTIONS=--expose-gc npx vitest run src/main/__tests__/minevent
 
 百万卡参考值（2026-09-06，M 系列笔记本）：答题 0.12ms/次、撤销 0.3ms、批量删 1000 张 6.1ms、冷启动 5.3s、百万历史事件重启 heapUsed 22MB。
 
-## FSRS 升级路径
+### 渲染层包体与懒加载
 
+首帧只加载入口 chunk（React + markdown-it + KaTeX + 应用代码，约 0.96 MB raw / 230 kB gzip）。
+三块重依赖走动态 import，各自独立 chunk，首帧不下载：
+
+| 内容 | gzip 量级 | 何时加载 |
+| --- | --- | --- |
+| echarts | 约 500 kB | 切到统计页时 |
+| Shiki 引擎（`shiki/core` + 正则引擎） | 约 80 kB | 首帧之后（`requestAnimationFrame` 预热） |
+| 18 个语言包 | 合计约 300 kB | 引擎就绪后并行加载（每个语言一个 chunk） |
+
+代码高亮因此不再挡在首帧前面：引擎就绪前的代码块先渲染成转义纯文本（`highlightSync`
+返回 null 的既有语义），就绪后 `Md` 收到 `subscribeHighlighter` 通知重渲染一次补上 token 色。
+改这块有两个容易踩的点：
+
+- 语言包必须写成「键 → `() => import(...)`」的 thunk 表，不能写成「键 → 已 import 的模块」——
+  后者在模块顶层就完成了静态 import，语言包照样进主 chunk，懒加载形同虚设。
+- `Md` 用 `useMemo` 缓存渲染结果，依赖里必须带上引擎版本号（`useHighlighterVersion`），
+  否则引擎就绪后不重渲染，代码块会永久停在纯文本。
+
+## FSRS 升级路径
 `core/fsrs.ts` 是 py-fsrs scheduler 的逐行移植（含 Python banker's rounding 与 timedelta floor 语义的复刻）。py-fsrs 发布新版本后：diff 官方 `scheduler.py`，同步改动，再用基准向量脚本对固定输入重新生成期望输出——向量不一致即移植有误或语义变化。
 
 ## 打包

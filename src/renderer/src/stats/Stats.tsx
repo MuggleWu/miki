@@ -1,23 +1,50 @@
-// 统计（T 域）：全部/某牌组 × 近一年/全部，五板块
+// 统计（T 域）：全部/某牌组 × 近一年/全部，六板块
 import { useEffect, useRef, useState } from 'react'
-import * as echarts from 'echarts'
 import { sortedDecks, useApp } from '../store'
 import { createSeqGuard } from '../staleGuard'
+import type { EChartsOption, EChartsType } from 'echarts'
 import type { StatsPayload } from '../../../shared/types'
 
-function Chart(props: { option: echarts.EChartsOption }) {
+// echarts 走动态 import（约 1MB）：它只被统计页用，静态 import 会让每个启动都背上这份解析成本。
+// 类型仍从 'echarts' 静态引入——type-only import 编译后不留任何运行时代码。
+let echartsModule: Promise<typeof import('echarts')> | null = null
+const loadEcharts = () => (echartsModule ??= import('echarts'))
+
+function Chart(props: { option: EChartsOption }) {
   const ref = useRef<HTMLDivElement>(null)
+  const [ready, setReady] = useState(false)
+
+  // 模块到达前先占位（统计页首帧不闪空白：容器与 .chart 同高）
   useEffect(() => {
-    if (!ref.current) return
-    const chart = echarts.init(ref.current)
-    chart.setOption(props.option)
-    const ro = new ResizeObserver(() => chart.resize())
-    ro.observe(ref.current)
+    let alive = true
+    void loadEcharts().then(() => {
+      if (alive) setReady(true)
+    })
     return () => {
-      ro.disconnect()
-      chart.dispose()
+      alive = false
     }
-  }, [props.option])
+  }, [])
+
+  useEffect(() => {
+    if (!ready || !ref.current) return
+    let chart: EChartsType | null = null
+    let ro: ResizeObserver | null = null
+    let disposed = false
+    // ready 后 echarts 已就绪，同步即可（await 一次也为兼容缓存未命中）
+    void loadEcharts().then((echarts) => {
+      if (disposed || !ref.current) return
+      chart = echarts.init(ref.current)
+      chart.setOption(props.option)
+      ro = new ResizeObserver(() => chart?.resize())
+      ro.observe(ref.current)
+    })
+    return () => {
+      disposed = true
+      ro?.disconnect()
+      chart?.dispose()
+    }
+  }, [props.option, ready])
+
   return <div ref={ref} className="chart" />
 }
 
@@ -51,7 +78,7 @@ export function Stats() {
   const AXIS = { axisLabel: { color: dim }, splitLine: { lineStyle: { color: split } } }
   const TOOLTIP = { backgroundColor: dark ? '#3c3f41' : '#ffffff', borderColor: split, textStyle: { color: fg } }
 
-  const forecastOption: echarts.EChartsOption | null = stats && {
+  const forecastOption: EChartsOption | null = stats && {
     ...chartBg,
     grid: { left: 40, right: 16, top: 20, bottom: 28 },
     xAxis: { type: 'category', data: stats.forecast.map((f) => f.label), ...AXIS },
@@ -70,7 +97,7 @@ export function Stats() {
     }
   }
 
-  const heatmapOption: echarts.EChartsOption | null =
+  const heatmapOption: EChartsOption | null =
     stats && range === 'year'
       ? {
           ...chartBg,
@@ -108,7 +135,7 @@ export function Stats() {
         }
       : null
 
-  const reviewsOption: echarts.EChartsOption | null = stats && {
+  const reviewsOption: EChartsOption | null = stats && {
     ...chartBg,
     grid: { left: 40, right: 16, top: 20, bottom: 28 },
     xAxis: { type: 'category', data: stats.reviews.map((r) => r.label.slice(5)), ...AXIS },
@@ -132,7 +159,7 @@ export function Stats() {
     tooltip: { trigger: 'axis', ...TOOLTIP }
   }
 
-  const stateOption: echarts.EChartsOption | null = stats && {
+  const stateOption: EChartsOption | null = stats && {
     ...chartBg,
     tooltip: { ...TOOLTIP },
     series: [
@@ -150,7 +177,7 @@ export function Stats() {
   }
 
   // 留存率趋势：只画有答题的分档，避免空档把折线拉到 0
-  const retentionOption: echarts.EChartsOption | null =
+  const retentionOption: EChartsOption | null =
     stats && stats.retention.trend.length > 0
       ? {
           ...chartBg,
@@ -195,7 +222,7 @@ export function Stats() {
         }
       : null
 
-  const intervalOption: echarts.EChartsOption | null = stats && {
+  const intervalOption: EChartsOption | null = stats && {
     ...chartBg,
     grid: { left: 40, right: 16, top: 20, bottom: 28 },
     xAxis: { type: 'category', data: stats.intervals.map((i) => i.bucket), ...AXIS },

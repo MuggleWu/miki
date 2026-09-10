@@ -64,8 +64,8 @@ Key constraints:
 | `src/main/__tests__/api-server.spec.ts` | HTTP API security chain & CRUD (real listener on a temp port): auth/Origin/Host checks, HEAD mirrors GET, suspend strict boolean, due-window parity between entries, pagination clamp |
 | `src/main/__tests__/card-dialog.spec.ts` | Standalone card dialog manager: open payload, position/size persistence, close on main-window close |
 | `src/main/__tests__/workspace-manager.spec.ts` | Multi-workspace registry: pointer file upgrade, onboarding confirm, switch/add/remove |
-| `src/renderer/src/__tests__/md.spec.ts` | Markdown rendering |
-| `src/renderer/src/__tests__/highlighter.spec.ts` | Shiki syntax highlighting and its markdown integration |
+| `src/renderer/src/__tests__/highlighter.spec.ts` | Shiki syntax highlighting, lazy-loading contract (null before ready, per-language loading, alias resolution), and markdown integration |
+| `src/renderer/src/__tests__/md.spec.tsx` | Markdown rendering (KaTeX) plus the `Md` re-render that colours code blocks once the highlight engine lands |
 | `src/renderer/src/__tests__/backtick.spec.ts` | Editor backtick wrapping (single press → inline code, triple press → fenced block) |
 | `src/renderer/src/__tests__/bold.spec.ts` | Editor selection bold toggle |
 | `src/renderer/src/__tests__/list.spec.ts` | Editor list continuation (ordered increment, indent carry-over, empty-item exit) |
@@ -78,6 +78,27 @@ Key constraints:
 | `src/renderer/src/__tests__/browserFilters.spec.ts` | Browser filter options: state options, due-window conversion and complementary boundaries, invalid-option normalization |
 | `src/renderer/src/__tests__/browserFilterUi.spec.tsx` | Browser filter UI down to IPC: queryCards params after choosing an option, config persistence, clearing filters (jsdom + real React behaviour) |
 | `src/shared/__tests__/config-boundary.spec.ts` | Renderer-writable config allowlist: api.token / scheduling params / workspacePath cannot be overwritten wholesale from the renderer |
+
+### Renderer bundle and lazy loading
+
+The first frame only loads the entry chunk (React + markdown-it + KaTeX + app code, ~0.96 MB raw / 230 kB gzip).
+Three heavy dependencies are dynamic imports in their own chunks and are not downloaded for the first frame:
+
+| Content | gzip size | Loaded when |
+| --- | --- | --- |
+| echarts | ~500 kB | switching to the Stats view |
+| Shiki engine (`shiki/core` + regex engine) | ~80 kB | after the first frame (warmed in `requestAnimationFrame`) |
+| 18 language packs | ~300 kB total | in parallel once the engine is ready (one chunk per language) |
+
+Syntax highlighting therefore no longer sits in front of the first frame: code blocks render as escaped
+plain text until the engine is ready (`highlightSync` returning null), then `Md` re-renders once it is
+notified via `subscribeHighlighter` and adds the token colours. Two easy traps when touching this:
+
+- Language packs must be a "key → `() => import(...)`" thunk table, never "key → already-imported module" —
+  the latter completes the static import at module top level, so the packs land in the main chunk anyway
+  and the lazy loading is fake.
+- `Md` caches its render in `useMemo`, and the engine version (`useHighlighterVersion`) must be part of the
+  dependency array; otherwise nothing re-renders when the engine arrives and code blocks stay plain forever.
 
 ### Regenerating FSRS conformance vectors
 

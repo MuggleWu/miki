@@ -1,10 +1,23 @@
-// Shiki 细粒度高亮回归：token 粒度（方法调用/类型独立着色）、CSS 变量引用、未知语言降级
-import { beforeAll, describe, expect, it } from 'vitest'
-import { highlightSync, preloadHighlighter } from '../highlighter'
+// Shiki 细粒度高亮回归：token 粒度（方法调用/类型独立着色）、CSS 变量引用、未知语言降级。
+// 懒加载改造后这里还多盯三件事：就绪前 highlightSync 必须返回 null（渲染层据此走纯文本）、
+// 按需 ensureLang 后同一语言立即可同步高亮、引擎就绪信号只通知一次。
+import { beforeAll, describe, expect, it, vi } from 'vitest'
+import {
+  __resetHighlighterForTest,
+  ensureLang,
+  highlightSync,
+  isHighlighterReady,
+  isSupportedLang,
+  preloadAllLangs,
+  preloadHighlighter,
+  subscribeHighlighter,
+  supportedLangs
+} from '../highlighter'
 import { renderMd } from '../md'
 
 beforeAll(async () => {
   await preloadHighlighter()
+  await preloadAllLangs()
 })
 
 describe('highlightSync', () => {
@@ -28,15 +41,103 @@ describe('highlightSync', () => {
     expect(highlightSync('public class A {}', 'JAVA')).toContain('<pre class="shiki')
   })
 
-  it('未预载语言降级纯文本，不抛错', () => {
-    const html = highlightSync('MOVE A TO B.', 'cobol')
-    expect(html).toContain('<pre class="shiki')
-    expect(html).not.toContain('color:var(--code-')
+  it('未知语言在引擎就绪后仍返回 null（与「受支持但未加载」表现一致）', () => {
+    expect(isHighlighterReady()).toBe(true)
+    // 懒加载表外的语言一律 null：调用方渲染成 <pre class="hljs">，不尝试未注册语法
+    expect(highlightSync('MOVE A TO B.', 'cobol')).toBeNull()
+    expect(renderMd('```cobol\nMOVE A TO B.\n```')).toContain('class="hljs"')
   })
 
-  it('空串与空语言安全', () => {
+  it('空串与空语言走内建 text 语法，不返回 null（围栏块渲染契约不变）', () => {
     expect(highlightSync('', 'java')).toContain('<pre class="shiki')
     expect(highlightSync('x', '')).toContain('<pre class="shiki')
+    expect(highlightSync('x', 'text')).toContain('<pre class="shiki')
+  })
+})
+
+describe('懒加载（首帧不阻塞）', () => {
+  it('受支持语言清单与 18 个语言包一致（懒加载表不许漏项）', () => {
+    expect(supportedLangs().sort()).toEqual(
+      [
+        'bash',
+        'c',
+        'cpp',
+        'csharp',
+        'css',
+        'go',
+        'html',
+        'java',
+        'javascript',
+        'json',
+        'kotlin',
+        'markdown',
+        'python',
+        'rust',
+        'sql',
+        'typescript',
+        'xml',
+        'yaml'
+      ].sort()
+    )
+  })
+
+  it('isSupportedLang：受支持语言为真，纯文本/未知语言为假', () => {
+    expect(isSupportedLang('java')).toBe(true)
+    expect(isSupportedLang('  Python ')).toBe(true)
+    expect(isSupportedLang('text')).toBe(false)
+    expect(isSupportedLang('')).toBe(false)
+    expect(isSupportedLang('cobol')).toBe(false)
+  })
+
+  it('引擎就绪前 highlightSync 返回 null（渲染层据此走转义纯文本，不是空白）', async () => {
+    __resetHighlighterForTest()
+    expect(isHighlighterReady()).toBe(false)
+    expect(highlightSync('System.out.println(1);', 'java')).toBeNull()
+  })
+
+  it('引擎就绪、语言未加载时仍返回 null，而不是错误地按纯文本着色', async () => {
+    __resetHighlighterForTest()
+    await preloadHighlighter()
+    expect(isHighlighterReady()).toBe(true)
+    expect(highlightSync('System.out.println(1);', 'java')).toBeNull() // java 包还没到
+
+    await ensureLang('java')
+    expect(highlightSync('System.out.println(1);', 'java')).not.toBeNull() // 一到就能同步高亮
+    await preloadAllLangs() // 恢复全局状态，避免影响后续用例
+  })
+
+  it('ensureLang 同一语言并发调用合并为一次加载（不重复 import）', async () => {
+    __resetHighlighterForTest()
+    await preloadHighlighter()
+    const [a, b] = await Promise.all([ensureLang('python'), ensureLang('python')])
+    expect(a).toBeUndefined()
+    expect(b).toBeUndefined()
+    expect(highlightSync('def f(): pass', 'python')).toContain('color:var(--code-keyword)')
+    await preloadAllLangs()
+  })
+
+  it('不受支持的语言 ensureLang 立即 resolve，不产生加载', async () => {
+    __resetHighlighterForTest()
+    await preloadHighlighter()
+    await expect(ensureLang('cobol')).resolves.toBeUndefined()
+    await expect(ensureLang('')).resolves.toBeUndefined()
+    await preloadAllLangs()
+  })
+
+  it('subscribeHighlighter：就绪后订阅立即回调，退订后不再回调', async () => {
+    __resetHighlighterForTest()
+    const before = vi.fn()
+    const off = subscribeHighlighter(before)
+    expect(before).not.toHaveBeenCalled() // 尚未就绪
+    await preloadHighlighter()
+    await Promise.resolve() // 让 .then 回调跑完
+    expect(before).toHaveBeenCalledTimes(1)
+
+    off()
+    const late = vi.fn()
+    subscribeHighlighter(late)
+    expect(late).toHaveBeenCalledTimes(1) // 已就绪：同步补发一次
+    await preloadAllLangs()
   })
 })
 
@@ -57,5 +158,19 @@ describe('renderMd 代码块集成', () => {
     const html = renderMd('```java\nString s = "<b>&amp;</b>";\n```')
     expect(html).toContain('&#x3C;b>')
     expect(html).not.toContain('<b>')
+  })
+
+  it('引擎未就绪时围栏块退化为 hljs 纯文本（不空白、不抛错），渲染层随后重渲染补色', async () => {
+    __resetHighlighterForTest()
+    const plain = renderMd('```java\nSystem.out.println(1);\n```')
+    expect(plain).toContain('class="hljs"')
+    expect(plain).toContain('println') // 内容在，只是没上色
+    expect(plain).not.toContain('color:var(--code-')
+
+    await preloadHighlighter()
+    await preloadAllLangs()
+    const colored = renderMd('```java\nSystem.out.println(1);\n```')
+    expect(colored).not.toContain('class="hljs"')
+    expect(colored).toContain('color:var(--code-func)')
   })
 })

@@ -31,9 +31,12 @@ function MainApp() {
   const openDialog = useApp((s) => s.openDialog)
 
   // 窗口标题携带当前工作区名（Miki - 工作区名），多工作区时便于区分窗口；
-  // 引导页（config 未就绪）保持默认 Miki
+  // 引导页（config 未就绪）或工作区路径缺失时保持默认 Miki。
+  // workspaceName 会对入参调 split——workspacePath 缺失时不给它 undefined，否则这个
+  // 纯展示用的 effect 抛出未捕获异常会打掉整个首屏。
   useEffect(() => {
-    document.title = config ? `Miki - ${workspaceName(config.workspacePath)}` : 'Miki'
+    const p = config?.workspacePath
+    document.title = typeof p === 'string' && p ? `Miki - ${workspaceName(p)}` : 'Miki'
   }, [config])
 
   // 卡片弹窗子窗口状态同步：主窗口 store.dialog 只是标志镜像（快捷键屏蔽 + Esc 判断）。
