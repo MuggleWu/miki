@@ -32,6 +32,11 @@ export class SessionLog {
     return this.events.length
   }
 
+  /** 撤销栈深度（热加载会作废它，UI 据此提示用户「丢掉了几步」） */
+  get undoableCount(): number {
+    return this.ops.length
+  }
+
   /** 清零（启动加载 / 热加载重放前调用）：水位归零，撤销栈作废 */
   reset(): void {
     this.events = []

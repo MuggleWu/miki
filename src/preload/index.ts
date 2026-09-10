@@ -38,6 +38,11 @@ const api: MikiApi = {
     ipcRenderer.on(IPC.workspaceChanged, h)
     return () => ipcRenderer.removeListener(IPC.workspaceChanged, h)
   },
+  onUndoDiscarded: (cb) => {
+    const h = (_e: Electron.IpcRendererEvent, dropped: number) => cb(dropped)
+    ipcRenderer.on(IPC.undoDiscarded, h)
+    return () => ipcRenderer.removeListener(IPC.undoDiscarded, h)
+  },
   openCardDialog: (payload: unknown) => ipcRenderer.invoke(IPC.openCardDialog, payload),
   closeCardDialog: () => ipcRenderer.invoke(IPC.closeCardDialog),
   notifyCardsChanged: (kind: 'add' | 'edit') => ipcRenderer.invoke(IPC.notifyCardsChanged, kind),

@@ -100,6 +100,8 @@ export class WorkspaceService {
   /** 最近一次全量加载发现的文件级损坏（无法解析的行 / 末尾缺换行）。UI 据此提示用户，
    * 否则坏行只会被静默 continue 掉，用户看到的是「数字对不上」而不是「有数据坏了」 */
   private loadIssues: LoadIssues = newLoadIssues()
+  /** 热加载作废撤销栈时的通知回调（丢掉的步数） */
+  private undoDiscardedCbs: ((dropped: number) => void)[] = []
 
   // ---------- 加载 ----------
 
@@ -389,6 +391,11 @@ export class WorkspaceService {
     this.watcher.onExternalChange(cb)
   }
 
+  /** 注册「热加载作废了撤销栈」回调（参数为丢掉的步数），主进程转发给渲染层提示 */
+  onUndoDiscarded(cb: (dropped: number) => void): void {
+    this.undoDiscardedCbs.push(cb)
+  }
+
   startWatching(intervalMs = 2000): void {
     this.watcher.startWatching(intervalMs)
   }
@@ -405,6 +412,9 @@ export class WorkspaceService {
   /** 全量重载内存态——与启动加载链逐段同语义（「文件是唯一真理，内存态是运行时缓存」）。
    * 调用方保证 done 后 UI 会被通知刷新。 */
   reloadFromDisk(): void {
+    // 必须在 streamEvents 之前取：撤销栈是「本会话事件」的一部分，而 streamEvents 开头
+    // 就会 session.reset()，到那时再读一律是 0（这正是本通知第一次实现时的 bug）
+    const droppedUndo = this.session.undoableCount
     this.config = this.loadConfig()
     this.scheduler = this.buildScheduler(this.config)
     this.previewScheduler = this.buildScheduler(this.config, true)
@@ -416,8 +426,9 @@ export class WorkspaceService {
     // 卡对象/调度状态全换新：索引含 due key 与 tie 分配，必须全量重建（不走跨天清零语义，
     // todayAnswers 已由 loadStatsCheckpoint 从聚合重导；与跨天/启动同路径）
     this.sched.forceRebuild(localDateKey(Date.now()), Date.now())
-    // 外部变更后旧撤销目标可能已失效（卡被改/删、事件行序变化），作废会话撤销栈（D2：仅本会话）
-    this.session.reset()
+    // 撤销栈已在 streamEvents 的 reset 里作废（外部变更后旧撤销目标可能已失效）。
+    // 静默作废在键盘上表现为「⌘Z 没反应」，所以把丢掉的步数显式交给 UI 提示一次
+    if (droppedUndo > 0) this.undoDiscardedCbs.forEach((cb) => cb(droppedUndo))
     // 与重启一致：压实阈值从零重新计数；不主动压实——避免热加载改写他人刚同步的文件
     this.deltaCounts = new Map()
     // 重载完成即重建基线（含本链自身的 config 写入），后续轮询只认真外部变化，并通知 UI 刷新

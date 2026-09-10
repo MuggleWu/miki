@@ -33,6 +33,8 @@ function MainApp() {
   // 加载期数据损坏提示：坏行会被静默跳过（内容与统计悄悄少算），给用户一个可见出口。
   // 只在启动查一次；用户关掉后本会话不再出现（热加载会重新结算，但循环弹出比漏报更烦人）
   const [damage, setDamage] = useState<DamageReport | null>(null)
+  /** 热加载作废撤销栈的步数（null = 无提示） */
+  const [undoLost, setUndoLost] = useState<number | null>(null)
 
   useEffect(() => {
     void window.miki
@@ -89,6 +91,11 @@ function MainApp() {
     })
     return off
   }, [reload])
+
+  // 热加载作废了本会话撤销栈：静默作废在键盘上表现为「⌘Z 没反应」，这里显式提示一次
+  useEffect(() => {
+    return window.miki.onUndoDiscarded((dropped) => setUndoLost(dropped))
+  }, [])
 
   // 主题：浅色默认（用户习惯），深色经 data-theme 覆盖
   useEffect(() => {
@@ -188,6 +195,17 @@ function MainApp() {
               {damage.files.length > 0 && `。涉及：${damage.files.join('、')}`}
             </span>
             <button className="damage-dismiss" onClick={() => setDamage(null)} title="关闭提示（数据不会因此恢复）">
+              知道了
+            </button>
+          </div>
+        )}
+        {undoLost !== null && (
+          <div className="damage-banner">
+            <span>
+              撤销历史已清空（之前 {undoLost} 步操作无法再撤销）。工作区被外部修改（git pull / 他机写入 /
+              直接编辑文件）后，旧的撤销目标可能已失效，所以作废了本会话的撤销栈。复习数据本身没有受影响。
+            </span>
+            <button className="damage-dismiss" onClick={() => setUndoLost(null)} title="关闭提示">
               知道了
             </button>
           </div>

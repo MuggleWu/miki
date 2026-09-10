@@ -86,6 +86,10 @@ export interface MikiApi {
   previewIntervals(cardId: string): Promise<number[]>
   /** 订阅工作区外部变更（git pull / 他机写入）后主进程热加载完成事件；返回退订函数 */
   onWorkspaceChanged(cb: () => void): () => void
+  /** 订阅「热加载作废撤销栈」事件（参数为丢掉的步数）；返回退订函数。
+   * 撤销栈只存活于本会话，外部变更后旧撤销目标可能已失效，主进程直接作废；
+   * 没有这个通知，用户在键盘上看到的是「按 ⌘Z 没反应」 */
+  onUndoDiscarded(cb: (dropped: number) => void): () => void
   /** 请求打开卡片添加/编辑弹窗子窗口（已开着则聚焦并切换到新载荷） */
   openCardDialog(payload: unknown): Promise<void>
   /** 请求关闭卡片弹窗子窗口（未开着时 no-op） */
@@ -145,6 +149,8 @@ export const IPC = {
   previewIntervals: 'miki:preview-intervals',
   /** main → renderer 事件：工作区外部变更已热加载，UI 应刷新当前视图 */
   workspaceChanged: 'miki:workspace-changed',
+  /** main → renderer 事件：热加载作废了本会话撤销栈（载荷=丢掉的步数），UI 提示一次 */
+  undoDiscarded: 'miki:undo-discarded',
   /** renderer（主窗口/弹窗窗口）→ main：打开/关闭卡片弹窗子窗口 */
   openCardDialog: 'miki:open-card-dialog',
   closeCardDialog: 'miki:close-card-dialog',

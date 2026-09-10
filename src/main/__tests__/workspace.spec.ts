@@ -773,6 +773,51 @@ describe('previewIntervals（评级预览）', () => {
   })
 })
 
+describe('热加载作废撤销栈的通知', () => {
+  it('有可撤销操作时，外部变更触发的重载会通知丢掉的步数', () => {
+    const d = tmpKept()
+    const w = newWs(d)
+    const deck = w.addDeck('撤销通知组')
+    const card = w.addCard(deck.id, '正面', '反面')
+    const lost: number[] = []
+    w.onUndoDiscarded((n) => lost.push(n))
+    // 答两张 → 撤销栈里 2 步
+    const c2 = w.addCard(deck.id, '正面2', '反面2')
+    w.answer(card.id, 3)
+    w.answer(c2.id, 3)
+    // 模拟 git pull：外部改动受管文件
+    fs.appendFileSync(
+      path.join(d, 'cards', `${deck.id}.ndjson`),
+      JSON.stringify({
+        id: 'ext-x',
+        front: '外部新增',
+        back: 'x',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        deletedAt: null,
+        suspended: false
+      }) + '\n',
+      'utf-8'
+    )
+    w.pollOnce()
+    // 撤销栈只存活于本会话，重载后作废：UI 需要知道丢了几步（否则表现为「⌘Z 没反应」）
+    expect(lost).toEqual([2])
+    expect(w.undo().restoredCardId).toBeNull() // 栈确已作废
+  })
+
+  it('撤销栈为空时重载不通知（不打扰用户）', () => {
+    const d = tmpKept()
+    const w = newWs(d)
+    const deck = w.addDeck('空栈组')
+    const lost: number[] = []
+    w.onUndoDiscarded((n) => lost.push(n))
+    fs.appendFileSync(path.join(d, 'cards', `${deck.id}.ndjson`), '', 'utf-8')
+    fs.writeFileSync(path.join(d, 'decks.json'), fs.readFileSync(path.join(d, 'decks.json'), 'utf-8'))
+    w.pollOnce()
+    expect(lost).toEqual([])
+  })
+})
+
 describe('工作区热加载（外部变更，git pull / 他机写入）', () => {
   it('外部追加新卡行 → pollOnce 后内存态同步，且只通知一次', () => {
     const d = tmpKept()

@@ -60,6 +60,11 @@ function startServices(root: string): void {
     if (win && !win.isDestroyed()) win.webContents.send(IPC.workspaceChanged)
     dialogManager?.relayWorkspaceChanged() // 弹窗窗口的牌组下拉同步刷新
   })
+  // 热加载会作废本会话撤销栈（外部变更后旧撤销目标可能已失效）。静默作废在键盘上表现为
+  // 「⌘Z 没反应」，所以把丢掉的步数显式告诉 UI 提示一次
+  ws.onUndoDiscarded((dropped) => {
+    if (win && !win.isDestroyed()) win.webContents.send(IPC.undoDiscarded, dropped)
+  })
   ws.startWatching()
 
   // 运行时端口文件放 userData（非工作区）：记录实际监听端口，供 MCP wrapper 等外部工具自动发现
