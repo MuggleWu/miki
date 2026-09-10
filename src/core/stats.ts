@@ -80,6 +80,20 @@ export interface StatsInput {
   desiredRetention: number
 }
 
+/**
+ * 统计结果缓存键。刻意放在 StatsInput 定义旁边、并且显式列出每个进结果的输入：
+ * 缓存键漏字段是「结果悄悄过期」这类 bug 的固定来源（本次审计撞到过 desiredRetention
+ * 漏进键、改设置后统计页一直显示旧目标值）。写在这里的另一个好处是——往 StatsInput
+ * 加字段时，类型检查会把这个函数标红，逼着人决定新输入要不要进键；若只想加一个
+ * 「不影响结果」的字段，在下面补一行说明为什么它不进键。
+ *
+ * seq 是调度事件水位（调用方状态，非 StatsInput 成员）：同 seq 同日内结果确定。
+ */
+export function statsCacheKey(input: StatsInput, seq: number): string {
+  // 日期键用 input.now 而非 Date.now()：固定 now 的调用（测试）与真实调用同样是纯函数
+  return `${input.deckId ?? ''}|${input.range}|${localDateKey(input.now)}|${seq}|${input.desiredRetention}`
+}
+
 export function computeStats(input: StatsInput): StatsPayload {
   const { deckId, range, now } = input
   const rangeStart = range === 'year' ? now - 365 * 86_400_000 : 0

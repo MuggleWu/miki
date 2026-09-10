@@ -1,9 +1,9 @@
 // replay / queue / query / stats 回归
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { replayCard } from '../replay'
 import { deckCounts, pickNext, remainingCount } from '../queue'
 import { compareByKeys, filterCards, rotateSort, sortByKeys, toRow } from '../query'
-import { bumpDailyAgg, computeStats, normalizeBucket, type DailyAgg } from '../stats'
+import { bumpDailyAgg, computeStats, normalizeBucket, statsCacheKey, type DailyAgg, type StatsInput } from '../stats'
 import { FsrScheduler, DEFAULT_FSRS_PARAMS } from '../fsrs'
 import type { Card, CardContent, QueryParams, Rating, ReviewEvent, SortKey } from '../../shared/types'
 import { FSRS_STATE } from '../../shared/types'
@@ -761,5 +761,48 @@ describe('normalizeBucket（旧 stats.json 兼容）', () => {
     const agg: DailyAgg = new Map([['d1', new Map([['1970-01-02', normalizeBucket({ total: 4, again: 1 })]])]])
     const s = computeStats({ desiredRetention: 0.9, cards, dailyAgg: agg, deckId: null, range: 'all', now: T0 + DAY })
     expect(s.retention.rate).toBeCloseTo(0.75, 6)
+  })
+})
+
+describe('statsCacheKey：键与 computeStats 入参同源', () => {
+  const base = (): StatsInput => ({
+    cards: [],
+    dailyAgg: new Map(),
+    deckId: null,
+    range: 'year',
+    now: T0,
+    desiredRetention: 0.9
+  })
+
+  it('每个被 computeStats 消费的输入都有一个进入键的维度', () => {
+    const k = statsCacheKey(base(), 7)
+    // deckId / range / 日期 / seq / desiredRetention —— 逐一改动都必须换键，
+    // 否则「改了输入但命中旧缓存」就会退回成静默的过期结果
+    expect(statsCacheKey({ ...base(), deckId: 'd1' }, 7)).not.toBe(k)
+    expect(statsCacheKey({ ...base(), range: 'all' }, 7)).not.toBe(k)
+    expect(statsCacheKey({ ...base(), now: T0 + DAY }, 7)).not.toBe(k)
+    expect(statsCacheKey(base(), 8)).not.toBe(k)
+    expect(statsCacheKey({ ...base(), desiredRetention: 0.8 }, 7)).not.toBe(k)
+  })
+
+  it('相同输入 → 相同键（缓存命中是有效的）', () => {
+    expect(statsCacheKey(base(), 7)).toBe(statsCacheKey(base(), 7))
+  })
+
+  it('纯函数：不受调用时刻影响（now 由入参决定，不读 Date.now）', () => {
+    const input = base()
+    vi.useFakeTimers()
+    try {
+      const a = statsCacheKey(input, 7)
+      vi.advanceTimersByTime(3 * DAY)
+      expect(statsCacheKey(input, 7)).toBe(a)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('cards / dailyAgg 刻意不进键（键只记身份，不遍历内容）', () => {
+    const k = statsCacheKey(base(), 7)
+    expect(statsCacheKey({ ...base(), cards: [cardOf('c1')] }, 7)).toBe(k)
   })
 })

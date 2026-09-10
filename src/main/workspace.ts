@@ -30,16 +30,9 @@ import { FsrScheduler } from '../core/fsrs'
 import { applyEvent } from '../core/replay'
 import { filterCards, sortByKeys, toRow } from '../core/query'
 import type { MikiConfigPatch } from '../shared/ipc'
-import {
-  bumpDailyAgg,
-  computeStats,
-  endOfLocalDay,
-  localDateKey,
-  normalizeBucket,
-  type DailyAgg,
-  type DailyBucket
-} from '../core/stats'
+import { endOfLocalDay, localDateKey } from '../core/stats'
 import { ScheduleIndex } from './schedule-index'
+import { StatsLedger } from './stats-ledger'
 import { WorkspacePaths, contentRow, iterateNdjson, snapshotRow, type CardCheckpointRow } from './workspace-io'
 import { WorkspaceWatcher } from './workspace-watcher'
 
@@ -58,17 +51,8 @@ export class WorkspaceService {
   private previewScheduler!: FsrScheduler
   /** 会话 undo 栈（D2：不跨会话） */
   private sessionOps: { seq: number; cardId: string }[] = []
-  /** 热力图聚合（undo 已抵消）：deckId → 日期键 → 计数 */
-  private dailyAgg: DailyAgg = new Map()
-  /** 聚合检查点 seq（stats.json 已含该 seq 及之前的贡献） */
-  private statsCheckpoint = 0
-  /** 今日已答净计数（answer ++ / undo 抵消 -- / 跨天清零） */
-  private todayAnswers = 0
-  /** 历史累计净答题数：dailyAgg total 总和的运行镜像（启动算一次，answer ++ / undo --），免去每次 loadWorkspace 全遍历聚合 */
-  private totalAnsweredCache = 0
-  /** 统计结果缓存：键 = `deckId|range|日期键|seq`。computeStats 全库扫 O(卡数)，统计页每开一次/切一次条件都重付；
-   * seq 单调递增且调度/删除/答题全走事件，同 seq 同日内结果确定，键不命中即失效。上限 8 组（全部牌组×两档之外还容纳单牌组切换） */
-  private statsCache = new Map<string, StatsPayload>()
+  /** 统计账本（聚合 + 今日/累计计数 + 结果缓存）：见 stats-ledger.ts */
+  private ledger!: StatsLedger
   /** 受管文件路径规则（init 时按工作区根目录创建） */
   private paths!: WorkspacePaths
   /** 牌组调度索引（due 最小堆 + 增量计数器）：卡库/卡桶/软删牌组经 host 回调每次取当前值——
@@ -96,12 +80,16 @@ export class WorkspaceService {
   init(root: string, overrides?: Partial<MikiConfig>): void {
     this.root = root
     this.paths = new WorkspacePaths(root)
+    this.ledger = new StatsLedger(this.paths, {
+      dayKeyOf: (t) => localDateKey(t),
+      todayStartMs: () => this.todayStartMs()
+    })
     this.sched = new ScheduleIndex({
       cards: () => this.cards,
       bucket: (deckId) => this.byDeck.get(deckId),
       hiddenDeckIds: () => this.hiddenDeckIds(),
       onDayRollover: () => {
-        this.todayAnswers = 0
+        this.ledger.clearToday()
       }
     })
     this.watcher = new WorkspaceWatcher(this.paths, () => this.reloadFromDisk())
@@ -212,38 +200,7 @@ export class WorkspaceService {
 
   /** 读统计聚合检查点（stats.json）；缺失/损坏 → 从头聚合（多读一遍事件，语义无损） */
   private loadStatsCheckpoint(): void {
-    this.dailyAgg = new Map()
-    this.statsCheckpoint = 0
-    this.todayAnswers = 0
-    this.totalAnsweredCache = 0
-    this.statsCache = new Map() // 冷启动/热加载共用此链：聚合与 seq 全部重建，旧统计缓存一律作废
-    const file = this.paths.statsFile()
-    if (!fs.existsSync(file)) return
-    try {
-      const raw = JSON.parse(fs.readFileSync(file, 'utf-8')) as {
-        checkpointSeq?: number
-        /** 新格式含 correct/timed/durationSumMs；旧格式只有 total/again（缺项按 0 补，语义无损） */
-        dailyAgg?: [string, [string, Partial<DailyBucket>][]][]
-      }
-      this.statsCheckpoint = Number(raw.checkpointSeq) || 0
-      for (const [deckId, days] of raw.dailyAgg ?? []) {
-        this.dailyAgg.set(deckId, new Map(days.map(([k, c]) => [k, normalizeBucket(c)])))
-      }
-      // 今日净计数与累计总数直接从聚合恢复（今日跨天由 ensureDay 清零）
-      const tk = localDateKey(Date.now())
-      let n = 0
-      let total = 0
-      for (const m of this.dailyAgg.values()) {
-        for (const c of m.values()) total += c.total
-        n += m.get(tk)?.total ?? 0
-      }
-      this.todayAnswers = n
-      this.totalAnsweredCache = total
-    } catch {
-      this.dailyAgg = new Map()
-      this.statsCheckpoint = 0
-      this.totalAnsweredCache = 0
-    }
+    this.ledger.loadCheckpoint()
   }
 
   /** 读全部卡片：基文件（含检查点快照行）→ delta 覆盖/墓碑（行序=时序）→ 卡片内存态。
@@ -332,19 +289,10 @@ export class WorkspaceService {
     this.events = []
     this.eventBySeq = new Map()
     this.seq = 0
-    const todayKey = localDateKey(Date.now())
-    // 事件时间近似单调：单条目 memo 当日日期键，省每事件的 Date 构造+格式化。
-    // 23h 窗口 <= 最短日长（DST 春拨日），窗口内日期键恒同，跨天必 miss 重算
-    let dayStart = -1
-    let dayKeyCache = ''
-    const dayKeyOf = (t: number): string => {
-      if (t >= dayStart && t < dayStart + 82_800_000) return dayKeyCache
-      const d = new Date(t)
-      d.setHours(0, 0, 0, 0)
-      dayStart = d.getTime()
-      dayKeyCache = localDateKey(t)
-      return dayKeyCache
-    }
+    // 注：这里原先有一份「当日日期键」的单条目 memo（省每事件的 Date 构造+格式化），
+    // 随统计计数一起并入 StatsLedger 后成了死代码，已删。账本那边每个事件调一次
+    // localDateKey（实测 0.10µs/次，百万事件约 100ms，相对 JSON.parse 可忽略），
+    // 换来的是「同一套计数逻辑只有一份」，不再有重放路径与运行期路径各写一遍的偏差。
     const win = new Map<
       number,
       { action: ReviewEvent['action']; rating?: Rating; t: number; deckId: string; durationMs?: number }
@@ -369,15 +317,11 @@ export class WorkspaceService {
           applyEvent(card, ev, tgt)
           card.seqApplied = ev.seq
         }
-        if (ev.seq > this.statsCheckpoint) {
+        if (ev.seq > this.ledger.checkpointSeq) {
           if (ev.action === 'answer') {
-            bumpDailyAgg(this.dailyAgg, ev.deckId, ev.t, ev.rating, 1, ev.durationMs)
-            if (dayKeyOf(ev.t) === todayKey) this.todayAnswers++
-            this.totalAnsweredCache++
+            this.ledger.recordAnswer(ev.deckId, ev.t, ev.rating, ev.durationMs)
           } else if (ev.action === 'undo' && wEntry?.action === 'answer') {
-            bumpDailyAgg(this.dailyAgg, wEntry.deckId, wEntry.t, wEntry.rating, -1, wEntry.durationMs)
-            if (dayKeyOf(wEntry.t) === todayKey) this.todayAnswers--
-            this.totalAnsweredCache--
+            this.ledger.undoAnswer(wEntry.deckId, wEntry.t, wEntry.rating, wEntry.durationMs)
           }
         }
         win.set(ev.seq, { action: ev.action, rating: ev.rating, t: ev.t, deckId: ev.deckId, durationMs: ev.durationMs })
@@ -527,12 +471,12 @@ export class WorkspaceService {
 
   todayCount(): number {
     this.ensureDay()
-    return this.todayAnswers
+    return this.ledger.todayCount()
   }
 
   /** 历史累计净答题数（undo 已抵消；启动时算一次，之后答题/撤销增量维护，O(1)） */
   totalAnswered(): number {
-    return this.totalAnsweredCache
+    return this.ledger.totalAnsweredCount()
   }
 
   // ---------- 牌组 ----------
@@ -636,8 +580,8 @@ export class WorkspaceService {
 
   /** 统计聚合检查点落盘（压实时调用，运行期不写避免高频重写） */
   private writeStatsCheckpoint(): void {
-    const daily: [string, [string, DailyBucket][]][] = [...this.dailyAgg].map(([d, m]) => [d, [...m]])
-    atomicWrite(this.paths.statsFile(), JSON.stringify({ checkpointSeq: this.seq, dailyAgg: daily }))
+    this.ledger.saveCheckpoint(this.seq)
+    this.ledger.advanceCheckpoint(this.seq)
     this.watcher.noteWrite(this.paths.statsFile())
   }
 
@@ -663,7 +607,7 @@ export class WorkspaceService {
     this.appendCardRows(deckId, [card])
     this.sched.reindexCard(card, null)
     // 加卡不走事件（不推 seq），统计缓存键感知不到新卡：状态分布的新卡数会 stale
-    this.statsCache.clear()
+    this.ledger.invalidate()
     return card
   }
 
@@ -692,7 +636,7 @@ export class WorkspaceService {
     // 批量路径：reindexCard 的公共量（跨天检测/当日界/隐藏牌组/堆索引）hoist 出来，逐卡只做计数+入堆；
     // 新卡 deletedAt=null 且未暂停，走 addCardsNew 与逐卡调 reindexCard 完全同口径
     this.sched.addCardsNew(deckId, cards, now)
-    this.statsCache.clear() // 加卡不走事件（不推 seq），统计缓存键感知不到新卡
+    this.ledger.invalidate() // 加卡不走事件（不推 seq），统计缓存键感知不到新卡
     return cards
   }
 
@@ -832,7 +776,7 @@ export class WorkspaceService {
       for (const t of touched) targetBucket.push(t.card)
       for (const [deckId, ids] of bySource) this.appendCardTombstones(deckId, ids)
       this.sched.reindexBatch(touched)
-      this.statsCache.clear() // 移卡不走事件（不推 seq），deckId 变化对统计缓存不可见
+      this.ledger.invalidate() // 移卡不走事件（不推 seq），deckId 变化对统计缓存不可见
     }
     return moved
   }
@@ -965,9 +909,7 @@ export class WorkspaceService {
       evs.push({ seq: ++this.seq, t: now, action: 'suspend', cardId: card.id, deckId: card.deckId, suspended: true })
     }
     this.appendEvents(evs)
-    bumpDailyAgg(this.dailyAgg, card.deckId, ev.t, rating, 1, durationMs)
-    this.todayAnswers++
-    this.totalAnsweredCache++
+    this.ledger.recordAnswer(card.deckId, ev.t, rating, durationMs)
     this.sched.reindexCard(card, before)
     this.sessionOps.push({ seq: ev.seq, cardId })
     return { answeredCardId: cardId, ...this.getStudy(card.deckId) }
@@ -1012,9 +954,7 @@ export class WorkspaceService {
       if (target.rating === 1) card.lapses = Math.max(0, card.lapses - 1)
       // durationMs 必须一并抵消：bumpDailyAgg 用「有耗时才动 timed」判断，
       // 只传 rating 会让 timed 减 1 而 durationSumMs 不减，均耗时被凭空抬高。
-      bumpDailyAgg(this.dailyAgg, target.deckId, target.t, target.rating, -1, target.durationMs)
-      if (target.t >= this.todayStartMs()) this.todayAnswers--
-      this.totalAnsweredCache--
+      this.ledger.undoAnswer(target.deckId, target.t, target.rating, target.durationMs)
     }
     // leech 还原：该 answer 触发的自动暂停事件紧跟其后（同一批次 seq+1），随撤销一并解除；
     // 之后再无 suspend 事件（最后一条就是它）才认领——手动暂停/解除过的不归这次撤销管。
@@ -1070,23 +1010,12 @@ export class WorkspaceService {
 
   // ---------- 统计 ----------
 
-  getStats(params: StatsParams) {
-    // 缓存键必须覆盖所有进 computeStats 的输入：desiredRetention 虽不改变答题聚合，
-    // 但它进 payload（留存率对比的目标值），改设置后旧键命中就会一直显示旧目标值。
-    const key = `${params.deckId ?? ''}|${params.range}|${localDateKey(Date.now())}|${this.seq}|${this.config.desiredRetention}`
-    const hit = this.statsCache.get(key)
-    if (hit) return hit
-    const payload = computeStats({
+  getStats(params: StatsParams): StatsPayload {
+    // 缓存键覆盖所有进 computeStats 的输入（含 desiredRetention，它进留存率的对比目标值）
+    return this.ledger.query(params, {
       cards: this.cards.values(), // 迭代器直传：computeStats 内部边遍历边过滤，免去整库展开拷贝
-      dailyAgg: this.dailyAgg,
-      deckId: params.deckId,
-      range: params.range,
-      now: Date.now(),
+      seq: this.seq,
       desiredRetention: this.config.desiredRetention
     })
-    // 上限 8 组：覆盖 全部/单牌组 × 年/全部 的常用组合，超出即全清（命中失效成本低且罕见）
-    if (this.statsCache.size >= 8) this.statsCache.clear()
-    this.statsCache.set(key, payload)
-    return payload
   }
 }
