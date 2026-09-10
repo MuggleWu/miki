@@ -161,11 +161,15 @@ export class StatsLedger {
    * 撞到过 desiredRetention 没进键、改设置后统计页一直显示旧目标值。键与入参同源后，
    * 以后往 computeStats 加输入，键自动跟上，不需要记得同步改两处。
    */
-  query(params: StatsParams, ctx: { cards: Iterable<Card>; seq: number; desiredRetention: number }): StatsPayload {
+  query(
+    params: StatsParams,
+    ctx: { cards: Iterable<Card>; seq: number; desiredRetention: number; hiddenDeckIds: readonly string[] }
+  ): StatsPayload {
     const input = {
       cards: ctx.cards,
       dailyAgg: this.dailyAgg,
       deckId: params.deckId,
+      hiddenDeckIds: ctx.hiddenDeckIds,
       range: params.range,
       now: Date.now(),
       desiredRetention: ctx.desiredRetention

@@ -499,7 +499,8 @@ export class WorkspaceService {
       deck.deletedAt = Date.now()
       this.hiddenCache = null
       this.saveDecks()
-      // 统计缓存无需失效：computeStats 只按 card.deckId 过滤，软删牌组的卡仍计在全库统计（既有口径）
+      // 统计缓存无需失效：hiddenDeckIds 进缓存键（getStats），软删后键变化自然重算，
+      // 旧键留在缓存里也只是不再被命中
     }
   }
 
@@ -1012,11 +1013,14 @@ export class WorkspaceService {
   // ---------- 统计 ----------
 
   getStats(params: StatsParams): StatsPayload {
-    // 缓存键覆盖所有进 computeStats 的输入（含 desiredRetention，它进留存率的对比目标值）
+    // 缓存键覆盖所有进 computeStats 的输入（含 desiredRetention、hiddenDeckIds——删牌组不推
+    // session.seq，后者不进键就会命中删之前的旧统计）
     return this.ledger.query(params, {
       cards: this.cards.values(), // 迭代器直传：computeStats 内部边遍历边过滤，免去整库展开拷贝
       seq: this.session.seq,
-      desiredRetention: this.config.desiredRetention
+      desiredRetention: this.config.desiredRetention,
+      // 升序固定顺序：缓存键用它，顺序不定会让同一状态算出多个键（缓存白做）
+      hiddenDeckIds: [...this.hiddenDeckIds()].sort()
     })
   }
 }

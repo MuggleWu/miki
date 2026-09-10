@@ -70,10 +70,14 @@ export function bumpDailyAgg(
 }
 
 export interface StatsInput {
-  /** 未过滤的全量卡（函数内部按 deckId 过滤）；接受 Iterable，调用方可直接传 Map.values() 免去整库拷贝 */
+  /** 未过滤的全量卡（函数内部按 deckId 与 hiddenDeckIds 过滤）；接受 Iterable，调用方可直接传 Map.values() 免去整库拷贝 */
   cards: Iterable<Card>
   dailyAgg: DailyAgg // 热力图聚合（undo 已抵消）
   deckId: string | null
+  /** 软删牌组的 id（升序，进缓存键）：其下卡片按「卡片库/首页」的同一口径排除。
+   * 只影响由卡片列表派生的统计——状态分布、间隔分布、预测。留存率/平均耗时/热力图/
+   * 复习次数都源自每日聚合（dayCounts），是「当天答过什么」的既成事实，不因删牌组而消失 */
+  hiddenDeckIds: readonly string[]
   range: 'year' | 'all'
   now: number
   /** 目标留存率（config.desiredRetention），用于与实测对比展示 */
@@ -91,7 +95,10 @@ export interface StatsInput {
  */
 export function statsCacheKey(input: StatsInput, seq: number): string {
   // 日期键用 input.now 而非 Date.now()：固定 now 的调用（测试）与真实调用同样是纯函数
-  return `${input.deckId ?? ''}|${input.range}|${localDateKey(input.now)}|${seq}|${input.desiredRetention}`
+  // hiddenDeckIds 进键：删/恢复牌组不推 session.seq，不进键就会命中「删之前的旧统计」。
+  // 键内排序：同一个软删集合无论传入顺序如何都算一个键，不靠调用方自觉（缓存白做的坑）
+  const hiddenKey = [...input.hiddenDeckIds].sort().join(',')
+  return `${input.deckId ?? ''}|${input.range}|${localDateKey(input.now)}|${seq}|${input.desiredRetention}|${hiddenKey}`
 }
 
 export function computeStats(input: StatsInput): StatsPayload {
@@ -100,9 +107,11 @@ export function computeStats(input: StatsInput): StatsPayload {
   const startKey = range === 'year' ? localDateKey(rangeStart) : ''
 
   const deckOf = (deck: string) => deckId == null || deck === deckId
+  // 软删牌组的卡片与卡片库/首页同口径排除（schedule-index 的 hiddenDeckIds 分支同理）
+  const hidden = new Set(input.hiddenDeckIds)
   const cards: Card[] = []
   for (const c of input.cards) {
-    if (!c.deletedAt && deckOf(c.deckId)) cards.push(c)
+    if (!c.deletedAt && !hidden.has(c.deckId) && deckOf(c.deckId)) cards.push(c)
   }
 
   // 热力图 & 复习曲线（聚合已是净计数，按牌组过滤后合并）

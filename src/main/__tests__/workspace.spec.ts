@@ -723,6 +723,38 @@ describe('计数与统计入口', () => {
     expect(queryAll(w, '将删卡').total).toBe(0)
     expect(newWs(d).queryCards({ deckId: null, keywords: ['将删卡'], sort: [] }).total).toBe(0)
   })
+
+  // 统计页「卡片数量」原先算进了软删牌组的卡，与首页「总数」列对不上（真实数据实测差 3 张，
+  // 来源是三个软删的冒烟临时牌组）。这里把「两处口径一致」钉住，并覆盖缓存键：
+  // deleteDeck 不推 session.seq，hiddenDeckIds 若漏进缓存键就会一直返回删之前的旧统计。
+  it('删除牌组后统计口径与首页、卡片库一致（且不吃到删之前的统计缓存）', () => {
+    const d = tmpKept()
+    const w = newWs(d)
+    const keep = w.addDeck('保留组').id
+    const gone = w.addDeck('将删组').id
+    w.addCard(keep, '保留一', '')
+    w.addCard(keep, '保留二', '')
+    w.addCard(gone, '将删一', '')
+
+    const total = (p: { stateCounts: { new: number; learning: number; review: number } }) =>
+      p.stateCounts.new + p.stateCounts.learning + p.stateCounts.review
+    const libraryCount = () => w.queryCards({ deckId: null, keywords: [], sort: [] }).total
+
+    const before = w.getStats({ deckId: null, range: 'year' })
+    expect(before.stateCounts.new).toBe(3)
+    expect(total(before)).toBe(libraryCount())
+
+    w.deleteDeck(gone)
+
+    // 旧结果还在缓存里时也必须按新口径重算
+    const after = w.getStats({ deckId: null, range: 'year' })
+    expect(after.stateCounts.new).toBe(2)
+    expect(total(after)).toBe(2)
+    expect(total(after)).toBe(libraryCount())
+    // 交错取多次同样稳定（缓存命中不能返回旧值）
+    expect(total(w.getStats({ deckId: null, range: 'all' }))).toBe(2)
+    expect(total(w.getStats({ deckId: null, range: 'year' }))).toBe(2)
+  })
 })
 
 describe('previewIntervals（评级预览）', () => {
