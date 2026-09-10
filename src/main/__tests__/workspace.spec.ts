@@ -570,6 +570,9 @@ describe('计数与统计入口', () => {
     expect(w.todayCount()).toBe(before + 1)
   })
 
+  // 两条路径算同一个数字（未建堆合并单趟扫描 vs 已建堆 DFS 剪枝），实现分别放在
+  // ScheduleIndex.deckCounts 与 dueNowOf 里，是「同一口径两处实现」的典型隐患点，
+  // 所以这里正面钉住两者相等。优化已从 deckInfos 移进 ScheduleIndex.deckCounts。
   it('deckInfos 未建堆单趟扫描与建堆逐组计算同口径：多牌组、暂停、软删、跨组混合', () => {
     vi.useFakeTimers()
     try {
@@ -597,7 +600,7 @@ describe('计数与统计入口', () => {
       const before = w.deckInfos().map((x) => [x.id, x.counts.due] as const)
 
       w.getStudy(d1)
-      w.getStudy(d2) // 两堆都建：deckInfos 转入 dueNowOf 逐组路径
+      w.getStudy(d2) // 两堆都建：deckInfos 转入已建堆逐组路径（dueNowOf）
       const after = w.deckInfos().map((x) => [x.id, x.counts.due] as const)
       expect(after).toEqual(before)
       expect(before).toContainEqual([d1, 1]) // 只 a1 到期

@@ -46,8 +46,8 @@ export class ScheduleIndex {
 
   constructor(private host: ScheduleIndexHost) {}
 
-  /** 取牌组索引条目，不存在则建空索引（只建计数器；首页读 built/counts 用） */
-  deckIdx(deckId: string): DeckIndex {
+  /** 取牌组索引条目，不存在则建空索引（只建计数器；堆本身推迟到首次取卡时才建） */
+  private deckIdx(deckId: string): DeckIndex {
     let x = this.idx.get(deckId)
     if (!x) {
       x = {
@@ -232,6 +232,41 @@ export class ScheduleIndex {
     }
   }
 
+  /**
+   * 首页牌组表用的计数（total/new/due 一次取齐）。
+   *
+   * 「到期」列读时计算。这里刻意把「未建堆的牌组合并成一次全库单趟扫描」的优化收在索引内部：
+   * 逐组调 dueNowOf 在堆未建时每组都要扫一遍牌组卡桶，首页有 N 个未建堆牌组就是
+   * O(牌组数 × 全库卡数)，而首页每次刷新都会走这条路。调用方（deckInfos）只需要结果，
+   * 本不该知道堆建没建——原先它得先读 deckIdx(deckId).built 再自己分流。
+   *
+   * 口径与 dueNowOf 未建堆分支一致（跳过软删卡/暂停卡/软删牌组），已建堆的仍走 DFS 剪枝。
+   */
+  deckCounts(deckIds: string[], now = Date.now()): Map<string, { total: number; new: number; due: number }> {
+    const hidden = this.host.hiddenDeckIds()
+    const due = new Map<string, number>()
+    for (const id of deckIds) {
+      const ix = this.deckIdx(id)
+      if (ix.built) continue
+      let n = 0
+      for (const c of this.host.bucket(id) ?? []) {
+        if (c.deletedAt || c.suspended || hidden.has(c.deckId)) continue
+        if (c.fsrs && c.fsrs.due <= now) n++
+      }
+      due.set(id, n)
+    }
+    const out = new Map<string, { total: number; new: number; due: number }>()
+    for (const id of deckIds) {
+      const ix = this.deckIdx(id)
+      out.set(id, {
+        total: ix.counts.total,
+        new: ix.counts.new,
+        due: due.has(id) ? (due.get(id) ?? 0) : this.dueNowOf(id, ix, now)
+      })
+    }
+    return out
+  }
+
   /** 取堆顶有效卡：跳过失效条目（已删/暂停/换牌组/due 已变），dueLimit 内未到期则返回 null。
    * 有效卡只 peek 不 pop——pickNext 是幂等读，条目在卡片状态变化后按 key 不匹配惰性失效。 */
   private heapNext(
@@ -285,8 +320,7 @@ export class ScheduleIndex {
   /** 「到期」列：此刻 due <= now 的学习/复习卡数（不含新卡/未到期/暂停卡）。到期随时间推进无法增量维护，读时计算——
    * 堆已构建时从根 DFS，key > now 剪枝（堆性质：子节点 key >= 父节点）；条目可能含失效/重复（惰性失效遗留），按卡 id 去重后以卡的真实 due 判定。
    * 未构建时走该牌组的卡桶单趟扫描。 */
-  dueNowOf(deckId: string, ix: DeckIndex): number {
-    const now = Date.now()
+  private dueNowOf(deckId: string, ix: DeckIndex, now = Date.now()): number {
     if (!ix.built) {
       const hidden = this.host.hiddenDeckIds()
       let n = 0

@@ -439,29 +439,17 @@ export class WorkspaceService {
   deckInfos(): DeckInfo[] {
     this.ensureDay()
     const active = this.decks.filter((d) => !d.deletedAt)
-    // 「到期」列读时计算（见 schedule-index 的 dueNowOf 注释）。堆未建的牌组若逐个调 dueNowOf，
-    // 会变成 O(牌组数 × 全库卡数)——首页每次刷新都重付。这里对未建堆的牌组
-    // 合并为一次全库单趟扫描（O(全库)），已建堆的仍走 DFS 剪枝。
-    const pending = active.filter((d) => !this.sched.deckIdx(d.id).built)
-    const bulk = new Map<string, number>()
-    if (pending.length > 0) {
-      const now = Date.now()
-      const hidden = this.hiddenDeckIds()
-      for (const d of pending) {
-        for (const c of this.byDeck.get(d.id) ?? []) {
-          if (c.deletedAt || c.suspended || hidden.has(c.deckId)) continue
-          if (c.fsrs && c.fsrs.due <= now) bulk.set(d.id, (bulk.get(d.id) ?? 0) + 1)
-        }
-      }
-    }
+    // 到期列的读时计算与「未建堆牌组单趟扫描」的合并优化都在 ScheduleIndex 内部
+    // （deckCounts 的注释），这里只负责组装展示结构。
+    const now = Date.now()
+    const counts = this.sched.deckCounts(
+      active.map((d) => d.id),
+      now
+    )
     return active.map((d) => {
-      const ix = this.sched.deckIdx(d.id)
-      const counts: DeckTableCounts = {
-        total: ix.counts.total,
-        new: ix.counts.new,
-        due: bulk.has(d.id) ? (bulk.get(d.id) ?? 0) : this.sched.dueNowOf(d.id, ix)
-      }
-      return { ...d, counts }
+      const c = counts.get(d.id) ?? { total: 0, new: 0, due: 0 }
+      const deckCounts: DeckTableCounts = { total: c.total, new: c.new, due: c.due }
+      return { ...d, counts: deckCounts }
     })
   }
 
