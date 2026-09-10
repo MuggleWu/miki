@@ -218,7 +218,7 @@ describe('重放一致性（重启恢复）', () => {
     expect(r2.suspended).toBe(true)
     expect(r2.reps).toBe(1)
     // 历史事件不驻留内存：重启后新会话事件为空（调度状态已重放进卡片）
-    expect(w2.events.length).toBe(0)
+    expect(w2.sessionEventCount()).toBe(0)
     expect(w2.decks.length).toBe(w.decks.length)
   })
 
@@ -247,7 +247,7 @@ describe('重放一致性（重启恢复）', () => {
       .getStats({ deckId: null, range: 'year' })
       .heatmap.find((x) => x.date === new Date().toLocaleDateString('sv-SE'))!
     expect(again.count).toBe(2) // undone 的 Again 不计（聚合已抵消）
-    expect(w2.events.length).toBe(0)
+    expect(w2.sessionEventCount()).toBe(0)
   })
 })
 
@@ -263,9 +263,9 @@ describe('suspend 事件化（暂停/解除走 review-log）', () => {
     expect(w.getCard(c.id)!.suspended).toBe(true)
     const w2 = newWs(d)
     expect(w2.getCard(c.id)!.suspended).toBe(true)
-    const evsBefore = w2.events.length
+    const evsBefore = w2.sessionEventCount()
     w2.setCardSuspended(c.id, true)
-    expect(w2.events.length).toBe(evsBefore)
+    expect(w2.sessionEventCount()).toBe(evsBefore)
   })
 
   it('leech 自动暂停走 suspend 事件，重启后保持暂停且不进队列', () => {

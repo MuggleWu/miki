@@ -32,6 +32,7 @@ import { filterCards, sortByKeys, toRow } from '../core/query'
 import type { MikiConfigPatch } from '../shared/ipc'
 import { endOfLocalDay, localDateKey } from '../core/stats'
 import { ScheduleIndex } from './schedule-index'
+import { SessionLog } from './session-log'
 import { StatsLedger } from './stats-ledger'
 import { WorkspacePaths, contentRow, iterateNdjson, snapshotRow, type CardCheckpointRow } from './workspace-io'
 import { WorkspaceWatcher } from './workspace-watcher'
@@ -42,10 +43,13 @@ export class WorkspaceService {
   decks: Deck[] = []
   cards = new Map<string, Card>()
   /** 仅本会话事件（undo 查找用）；历史事件流式重放后不驻留（需求 §19 L1） */
-  events: ReviewEvent[] = []
-  /** 会话事件按 seq 的索引（与 events 同生同灭）：undo 找目标事件 O(1)，免去 O(会话事件数) 线性扫 */
-  private eventBySeq = new Map<number, ReviewEvent>()
-  private seq = 0
+  /** 会话事件日志（事件 + seq 水位 + 撤销栈）：见 session-log.ts */
+  private session = new SessionLog()
+
+  /** 本会话事件数：验收「历史事件重放后不驻留内存」用（见 minevents.spec / 需求 §19 L1） */
+  sessionEventCount(): number {
+    return this.session.length
+  }
   private scheduler!: FsrScheduler
   /** 预览专用（无 fuzz），评级按钮的到期提示用它保证展示稳定 */
   private previewScheduler!: FsrScheduler
@@ -286,9 +290,7 @@ export class WorkspaceService {
           .filter((f) => f.endsWith('.ndjson'))
           .sort()
       : []
-    this.events = []
-    this.eventBySeq = new Map()
-    this.seq = 0
+    this.session.reset()
     // 注：这里原先有一份「当日日期键」的单条目 memo（省每事件的 Date 构造+格式化），
     // 随统计计数一起并入 StatsLedger 后成了死代码，已删。账本那边每个事件调一次
     // localDateKey（实测 0.10µs/次，百万事件约 100ms，相对 JSON.parse 可忽略），
@@ -305,7 +307,7 @@ export class WorkspaceService {
         } catch {
           continue
         }
-        ev.seq = ++this.seq
+        ev.seq = this.session.nextSeq()
         const card = this.cards.get(ev.cardId)
         const wEntry = ev.action === 'undo' && ev.targetSeq != null ? (win.get(ev.targetSeq) ?? null) : null
         if (card && ev.seq > (card.seqApplied ?? 0)) {
@@ -382,7 +384,7 @@ export class WorkspaceService {
     // todayAnswers 已由 loadStatsCheckpoint 从聚合重导；与跨天/启动同路径）
     this.sched.forceRebuild(localDateKey(Date.now()), Date.now())
     // 外部变更后旧撤销目标可能已失效（卡被改/删、事件行序变化），作废会话撤销栈（D2：仅本会话）
-    this.sessionOps = []
+    this.session.reset()
     // 与重启一致：压实阈值从零重新计数；不主动压实——避免热加载改写他人刚同步的文件
     this.deltaCounts = new Map()
     // 重载完成即重建基线（含本链自身的 config 写入），后续轮询只认真外部变化，并通知 UI 刷新
@@ -538,7 +540,7 @@ export class WorkspaceService {
     if (cards.length === 0) return
     const lines = cards.map((c) => {
       const { deckId: _d, tie: _t, seqApplied: _s, ...row } = c
-      return JSON.stringify({ __mikiSeq: this.seq, ...row })
+      return JSON.stringify({ __mikiSeq: this.session.seq, ...row })
     })
     fs.appendFileSync(this.paths.deckDeltaFile(deckId), lines.join('\n') + '\n', 'utf-8')
     this.touchDelta(deckId)
@@ -565,14 +567,14 @@ export class WorkspaceService {
 
   /** 压实一个牌组：全量重写基文件（检查点 seq + 调度快照行）→ 清 delta → 落聚合检查点 */
   private compactDeck(deckId: string): void {
-    const lines: string[] = [JSON.stringify({ __mikiCheckpoint: this.seq })]
+    const lines: string[] = [JSON.stringify({ __mikiCheckpoint: this.session.seq })]
     // 行序 = 卡 id 序：装饰排序（比 id 不比整行 JSON 串，短键比较），读取端按 id 建 Map 不依赖行序
     const cards = (this.byDeck.get(deckId) ?? []).slice().sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
     const rows = cards.map((c) => snapshotRow(c))
     atomicWrite(this.paths.deckCardsFile(deckId), lines.join('\n') + '\n' + (rows.length ? rows.join('\n') + '\n' : ''))
     fs.rmSync(this.paths.deckDeltaFile(deckId), { force: true })
     this.deltaCounts.set(deckId, 0)
-    this.deckCheckpoints.set(deckId, this.seq)
+    this.deckCheckpoints.set(deckId, this.session.seq)
     this.writeStatsCheckpoint()
     this.watcher.noteWrite(this.paths.deckCardsFile(deckId))
     this.watcher.noteWrite(this.paths.deckDeltaFile(deckId))
@@ -580,8 +582,8 @@ export class WorkspaceService {
 
   /** 统计聚合检查点落盘（压实时调用，运行期不写避免高频重写） */
   private writeStatsCheckpoint(): void {
-    this.ledger.saveCheckpoint(this.seq)
-    this.ledger.advanceCheckpoint(this.seq)
+    this.ledger.saveCheckpoint(this.session.seq)
+    this.ledger.advanceCheckpoint(this.session.seq)
     this.watcher.noteWrite(this.paths.statsFile())
   }
 
@@ -680,13 +682,20 @@ export class WorkspaceService {
         continue
       }
       const before = { ...card }
-      evs.push({ seq: ++this.seq, t: now, action: 'delete', cardId: id, deckId: card.deckId, before: card.fsrs })
+      evs.push({
+        seq: this.session.nextSeq(),
+        t: now,
+        action: 'delete',
+        cardId: id,
+        deckId: card.deckId,
+        before: card.fsrs
+      })
       card.deletedAt = now
       touched.push({ card, before })
     }
     if (evs.length === 0) return { deleted: 0, missing }
     this.appendEvents(evs)
-    for (const ev of evs) this.sessionOps.push({ seq: ev.seq, cardId: ev.cardId })
+    this.session.pushUndoable(evs)
     this.sched.reindexBatch(touched)
     return { deleted: evs.length, missing }
   }
@@ -722,7 +731,7 @@ export class WorkspaceService {
     if (card.suspended !== suspended) {
       const before = { ...card }
       const ev: ReviewEvent = {
-        seq: ++this.seq,
+        seq: this.session.nextSeq(),
         t: Date.now(),
         action: 'suspend',
         cardId: card.id,
@@ -791,7 +800,7 @@ export class WorkspaceService {
       if (!c || c.deletedAt) continue
       const before = { ...c }
       evs.push({
-        seq: ++this.seq,
+        seq: this.session.nextSeq(),
         t: now,
         action: 'reset',
         cardId: c.id,
@@ -808,8 +817,7 @@ export class WorkspaceService {
     if (evs.length === 0) return 0
     this.appendEvents(evs)
     // reset 不可撤销：把该卡的会话撤销栈一并作废
-    const resetIds = new Set(evs.map((e) => e.cardId))
-    this.sessionOps = this.sessionOps.filter((op) => !resetIds.has(op.cardId))
+    this.session.dropUndoable(evs.map((e) => e.cardId))
     this.sched.reindexBatch(touched)
     return evs.length
   }
@@ -827,8 +835,7 @@ export class WorkspaceService {
       fs.appendFileSync(f, lines.join('\n') + '\n', 'utf-8')
       this.watcher.noteWrite(f)
     }
-    this.events.push(...evs)
-    for (const ev of evs) this.eventBySeq.set(ev.seq, ev)
+    this.session.append(evs)
   }
 
   deleteCard(cardId: string): void {
@@ -837,7 +844,7 @@ export class WorkspaceService {
     const now = Date.now()
     const before = { ...card }
     const ev: ReviewEvent = {
-      seq: ++this.seq,
+      seq: this.session.nextSeq(),
       t: now,
       action: 'delete',
       cardId,
@@ -847,7 +854,7 @@ export class WorkspaceService {
     this.appendEvents([ev])
     card.deletedAt = now
     this.sched.reindexCard(card, before)
-    this.sessionOps.push({ seq: ev.seq, cardId })
+    this.session.pushUndoable([ev])
   }
 
   // ---------- 学习 ----------
@@ -889,7 +896,7 @@ export class WorkspaceService {
     const beforeFsrs = card.fsrs
     const after = this.scheduler.review(beforeFsrs, rating, now)
     const ev: ReviewEvent = {
-      seq: ++this.seq,
+      seq: this.session.nextSeq(),
       t: now,
       action: 'answer',
       cardId,
@@ -906,12 +913,19 @@ export class WorkspaceService {
     // leech：累计重来次数达到阈值（>0 时启用）自动暂停，不再进入调度；同样走 suspend 事件
     if (this.config.leechThreshold > 0 && !card.suspended && card.lapses >= this.config.leechThreshold) {
       card.suspended = true
-      evs.push({ seq: ++this.seq, t: now, action: 'suspend', cardId: card.id, deckId: card.deckId, suspended: true })
+      evs.push({
+        seq: this.session.nextSeq(),
+        t: now,
+        action: 'suspend',
+        cardId: card.id,
+        deckId: card.deckId,
+        suspended: true
+      })
     }
     this.appendEvents(evs)
     this.ledger.recordAnswer(card.deckId, ev.t, rating, durationMs)
     this.sched.reindexCard(card, before)
-    this.sessionOps.push({ seq: ev.seq, cardId })
+    this.session.pushUndoable([ev])
     return { answeredCardId: cardId, ...this.getStudy(card.deckId) }
   }
 
@@ -924,18 +938,18 @@ export class WorkspaceService {
   }
 
   undo(): UndoResult {
-    const op = this.sessionOps.pop()
+    const op = this.session.popUndoable()
     if (!op) {
       return { restoredCardId: null, card: null, remaining: 0, todayCount: this.todayCount() }
     }
-    const target = this.eventBySeq.get(op.seq)
+    const target = this.session.get(op.seq)
     if (!target) throw new Error(`session event missing: ${op.seq}`)
     const card = this.cards.get(op.cardId)
     if (!card) throw new Error(`card missing: ${op.cardId}`)
     const now = Date.now()
     const before = { ...card }
     const ev: ReviewEvent = {
-      seq: ++this.seq,
+      seq: this.session.nextSeq(),
       t: now,
       action: 'undo',
       cardId: card.id,
@@ -960,19 +974,18 @@ export class WorkspaceService {
     // 之后再无 suspend 事件（最后一条就是它）才认领——手动暂停/解除过的不归这次撤销管。
     // 补一条 suspend(false) 事件保证重放一致（重放不含内存恢复逻辑，只认事件流）。
     if (target.action === 'answer' && target.rating === 1 && card.suspended) {
-      const nxt = this.eventBySeq.get(target.seq + 1)
+      const nxt = this.session.get(target.seq + 1)
       const auto = nxt && nxt.cardId === card.id && nxt.action === 'suspend' && nxt.suspended === true ? nxt : undefined
-      let lastSuspend: ReviewEvent | undefined
-      for (let i = this.events.length - 1; i >= 0; i--) {
-        const e = this.events[i]
-        if (e.cardId === card.id && e.action === 'suspend') {
-          lastSuspend = e
-          break
-        }
-      }
-      if (auto && lastSuspend === auto) {
+      if (auto && this.session.lastSuspend(card.id) === auto) {
         this.appendEvents([
-          { seq: ++this.seq, t: now, action: 'suspend', cardId: card.id, deckId: card.deckId, suspended: false }
+          {
+            seq: this.session.nextSeq(),
+            t: now,
+            action: 'suspend',
+            cardId: card.id,
+            deckId: card.deckId,
+            suspended: false
+          }
         ])
         card.suspended = false
       }
@@ -1014,7 +1027,7 @@ export class WorkspaceService {
     // 缓存键覆盖所有进 computeStats 的输入（含 desiredRetention，它进留存率的对比目标值）
     return this.ledger.query(params, {
       cards: this.cards.values(), // 迭代器直传：computeStats 内部边遍历边过滤，免去整库展开拷贝
-      seq: this.seq,
+      seq: this.session.seq,
       desiredRetention: this.config.desiredRetention
     })
   }

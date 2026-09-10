@@ -64,6 +64,7 @@ docs/                # 本目录
 | `src/main/__tests__/api-server.spec.ts` | HTTP API 安全链与 CRUD（真实监听临时端口）：鉴权/Origin/Host 校验、HEAD 镜像 GET、suspend 严格布尔、到期窗口两入口口径、分页 clamp |
 | `src/main/__tests__/card-dialog.spec.ts` | 独立卡片窗口管理器：open 载荷、位置尺寸持久化、主窗关闭联动 |
 | `src/main/__tests__/workspace-manager.spec.ts` | 多工作区注册表：指针文件升级、引导确认、切换/添加/移除 |
+| `src/main/__tests__/session-log.spec.ts` | 会话事件日志：seq 与索引同生同灭、撤销栈、每卡最近 suspend 索引 |
 | `src/main/__tests__/workspace-io.spec.ts` | NDJSON 行读原语：语义与旧实现逐样本对拍（CRLF/空行/超长行）、惰性提前退出 |
 | `src/renderer/src/__tests__/highlighter.spec.ts` | Shiki 代码高亮、懒加载契约（就绪前返回 null、按语言加载、别名解析）与 markdown 集成 |
 | `src/renderer/src/__tests__/md.spec.tsx` | Markdown 渲染（KaTeX）与 Md 的引擎就绪重渲染补色 |

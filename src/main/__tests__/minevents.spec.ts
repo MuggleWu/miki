@@ -57,10 +57,10 @@ describe.skipIf(process.env.MIKI_BENCH !== '1')('历史事件地雷拆除（MIKI
     const rss = process.memoryUsage().rss / 1024 / 1024
     const card = ws2.getCard(cards[0].id)!
     console.log(`100 万事件重启：${(ms / 1000).toFixed(1)}s，heapUsed ${heap.toFixed(0)}MB，rss ${rss.toFixed(0)}MB`)
-    console.log(`events 驻留：${ws2.events.length} 条（期望 0）；抽查卡 reps=${card.reps}（期望 250）`)
+    console.log(`events 驻留：${ws2.sessionEventCount()} 条（期望 0）；抽查卡 reps=${card.reps}（期望 250）`)
     // 旧架构此场景事件驻留 ≈ 100 万 × 1.35KB ≈ 1.35GB；未驻留则 heapUsed 远低于此
     if (heap > 500) throw new Error(`事件疑似驻留内存：heapUsed ${heap.toFixed(0)}MB > 500MB`)
-    if (ws2.events.length !== 0) throw new Error(`events 应为 0，实际 ${ws2.events.length}`)
+    if (ws2.sessionEventCount() !== 0) throw new Error(`events 应为 0，实际 ${ws2.sessionEventCount()}`)
     fs.rmSync(dir, { recursive: true, force: true })
   }, 300_000)
 })
