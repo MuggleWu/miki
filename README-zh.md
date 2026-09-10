@@ -22,7 +22,7 @@ Anki 是非常优秀的软件，帮助了很多人；FSRS 算法同样非常优�
 
 ### 视图与卡片工作流
 
-- **五个视图** — 牌组（按名称排序的表格）、学习、卡片库、统计（预测 / 热力图 / 复习 / 卡片状态 / 复习间隔）、设置
+- **五个视图** — 牌组（按名称排序的表格）、学习、卡片库、统计、设置；统计页含六个板块：热力图、预测（未来到期）、复习、留存率、卡片数量、复习间隔
 - **卡片库** — 多关键词 AND 搜索、列可配置、可拖宽、rotate 排序，侧栏与面板分隔条可拖动，内嵌编辑器实时 Markdown 预览，虚拟滚动支撑万级卡片流畅浏览；到期以两列呈现——「距现在」（相对，如“5 分钟后”）与「到期时间」（绝对，如“2026-09-06 16:49”）
 - **独立卡片窗口** — 新增/编辑卡片在可拖出主窗口的独立子窗口进行（可拖到其他屏幕），位置与尺寸跨启动记忆；新增模式连续录卡
 - **富卡片内容** — Markdown + KaTeX + 代码高亮
@@ -48,15 +48,18 @@ Anki 是非常优秀的软件，帮助了很多人；FSRS 算法同样非常优�
 | --- | --- | --- |
 | 显示答案 / 评「良好」 | `Space` | `Space` |
 | 评「重来 / 困难 / 良好 / 轻松」 | `1` `2` `3` `4` | `1` `2` `3` `4` |
-| 学习 / 卡片库 / 统计 / 回首页 | `S` `B` `T` `D` | `S` `B` `T` `D` |
+| 学习（**仅首页**）/ 卡片库 / 统计 / 回首页 | `S` `B` `T` `D` | `S` `B` `T` `D` |
 | 新增卡片 / 编辑当前卡 | `A` `E` | `A` `E` |
 | 删除当前卡 | `⌘D` | `Ctrl+D` |
 | 撤销最近答题 / 删除 | `⌘Z` | `Ctrl+Z` |
+| 全选当前视图（卡片库） | `⌘A` | `Ctrl+A` |
 | 聚焦卡片库搜索框 | `⌘F` | `Ctrl+F` |
+| 编辑框加粗选中内容 | `⌘B` | `Ctrl+B` |
+| 编辑框切换源码 / 预览 | `` ` `` | `` ` `` |
 | 确认新增 / 编辑弹窗 | `⌘Enter` | `Ctrl+Enter` |
 | 关闭弹窗 | `Esc` | `Esc` |
 
-在文本框输入时单字母快捷键自动失效，`Ctrl+C/V` 等组合键在输入框内不受影响。
+在文本框输入时单字母快捷键自动失效，`Ctrl+C/V` 等组合键在输入框内不受影响。`S` 仅在首页生效（从首页进入牌组），其余跳转键在任何位置可用；编辑框里 `⌘B` 加粗、`` ` `` 在源码与预览间切换。
 
 ## 开发
 
@@ -94,7 +97,7 @@ node scripts/mcp-server.mjs
 
 也可显式指定 token 与端口（旧行为）：`MIKI_TOKEN=<config.json 中的 api.token> node scripts/mcp-server.mjs`。
 
-提供 `list_decks`、`add_cards`、`search_cards`、`update_cards`、`move_cards`、`set_suspended`、`delete_cards`、`reset_progress`、`get_stats` 等工具（批量工具单次最多 500 张卡；`search_cards` 日期参数接受 `YYYY-MM-DD`，按本地零点解析）。
+提供 14 个工具：`list_decks`、`create_decks`、`rename_deck`、`delete_deck`、`search_cards`、`get_cards`、`add_cards`、`update_cards`、`move_cards`、`set_suspended`、`delete_cards`、`reset_progress`、`get_stats`、`api_schema`（最后一个返回本机 HTTP API 的 OpenAPI 描述，供 AI 了解全部端点后直接用 HTTP 调用）。批量工具单次最多 500 张卡；`search_cards` 日期参数接受 `YYYY-MM-DD`，按本地零点解析。
 
 ## 文档
 

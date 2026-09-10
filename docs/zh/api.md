@@ -22,6 +22,7 @@ curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8727/api/decks
 5. **能力面收窄**：无答题、撤销、配置修改端点；写操作只覆盖牌组/卡片 CRUD。
 6. 请求体上限 5 MB；非白名单方法 405；未知路径 404；错误统一为 `{"error": "..."}` 加对应状态码。
 7. **HEAD 镜像 GET 语义**：同一套鉴权 + 同一路由匹配 + handler 执行（GET 全只读），状态码逐一对齐（未知卡 404、非法参数 400 如实返回），响应体由 HTTP 层省略。
+8. **切换工作区期间返回 503**：确认切换后立刻排空本进程的写入口（停监听 + 停止文件监视），已建立的连接复用即被重置，新连接被拒；切换窗口内仍在处理的那一个请求返回 `503 {"error":"工作区正在切换，...请稍后重试"}`。目的是让外部工具（MCP / 脚本）**不会把写操作落到旧工作区**。调用方把 503 与连接错误都当作「稍后重试」即可，进程随即重启到新工作区。
 
 ## 端点一览
 
@@ -35,14 +36,14 @@ curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8727/api/decks
 | DELETE | `/api/decks/:id` | 删牌组（其下卡片随之隐藏） |
 | GET | `/api/cards` | 查询（参数见下） |
 | GET | `/api/cards/:id` | 单张完整内容（含调度状态） |
-| POST | `/api/cards/get` | 按 ID 批量取：`{"cardIds": [...]}`
-| POST | `/api/cards/add` | 单张 `{"deckId", "front", "back"}`；批量 `{"deckId", "items": [{"front", "back"}, ...]}`
-| PATCH | `/api/cards/:id` | 改单张内容 `{"front", "back"}`
-| POST | `/api/cards/update` | 批量改：`{"items": [{"cardId", "front", "back"}, ...]}` → `{updated, missing}`
+| POST | `/api/cards/get` | 按 ID 批量取：`{"cardIds": [...]}` |
+| POST | `/api/cards/add` | 单张 `{"deckId", "front", "back"}`（正反不能都为空，与 UI 同口径；允许仅背面卡）；批量 `{"deckId", "items": [{"front", "back"}, ...]}`（每项至少一个内容字段） |
+| PATCH | `/api/cards/:id` | 改单张内容 `{"front", "back"}`——至少给一个字段，未给的字段保留原值 |
+| POST | `/api/cards/update` | 批量改：`{"items": [{"cardId", "front", "back"}, ...]}`（每项至少一个内容字段，未给的字段保留原值）→ `{updated, missing}` |
 | POST | `/api/cards/move` | 批量移动：`{"cardIds", "deckId"}` → `{moved}`（保留调度进度）
 | POST | `/api/cards/reset` | 批量重置进度：`{"cardIds"}` → `{reset}`（变回新卡，不可撤销）
 | POST | `/api/cards/suspend` | 暂停/解除：`{"cardId", "suspended"}`——`suspended` 必须是严格布尔（传 `"false"` 等非布尔值返回 400，不做真值强转） |
-| POST | `/api/cards/delete` | 批量软删：`{"cardIds"}` → `{deleted, missing}`（可撤销）
+| POST | `/api/cards/delete` | 批量软删：`{"cardIds"}` → `{deleted, missing}`（可撤销） |
 | GET | `/api/stats?range=year\|all&deckId=` | 统计（预测/热力图/状态计数等） |
 
 ### GET /api/cards 查询参数

@@ -92,7 +92,7 @@ docs/                # 本目录
 | `src/core/__tests__/fsrs.spec.ts` | FSRS-6 基准向量比对：552 组固定输入的期望输出由 py-fsrs v6.3.2 官方实现生成（tools/ 下脚本），TS 实现逐例比对 state/step/stability/difficulty/due |
 | `src/core/__tests__/core.spec.ts` | replay / queue / query / stats 口径 |
 | `src/main/__tests__/workspace.spec.ts` | 服务层不变量：undo 语义、leech、suspend 事件化、重放一致性、事件不驻留、损坏容错、配置持久化 |
-| `src/main/__tests__/schedule-index.spec.ts` | 调度索引对拍：200 步随机操作（答题/撤销/删除/暂停/重置/跨天）后，索引取卡与计数逐牌组比对全量扫描基准 |
+| `src/main/__tests__/schedule-index.spec.ts` | 调度索引对拍：200 步随机操作（新增/答题/撤销/删除/暂停/重置/跨牌组移动）后，索引取卡与计数逐牌组比对全量扫描基准 |
 | `src/main/__tests__/checkpoint.spec.ts` | 检查点 + delta 写路径：调度类操作零卡片写、move 墓碑往返幂等、压实前后一致、stats.json 增量重放、旧格式兼容 |
 | `src/main/__tests__/api-server.spec.ts` | HTTP API 安全链与 CRUD（真实监听临时端口）：鉴权/Origin/Host 校验、HEAD 镜像 GET、suspend 严格布尔、到期窗口两入口口径、分页 clamp |
 | `src/main/__tests__/card-dialog.spec.ts` | 独立卡片窗口管理器：open 载荷、位置尺寸持久化、主窗关闭联动 |
@@ -113,6 +113,13 @@ docs/                # 本目录
 | `src/renderer/src/__tests__/browserFilters.spec.ts` | 卡片库过滤档：状态档定义、到期窗口换算与互补边界、非法档位归一 |
 | `src/renderer/src/__tests__/browserFilterUi.spec.tsx` | 卡片库过滤 UI 到 IPC 链路：选档后 queryCards 入参、落 config、清除过滤（jsdom + React 真行为） |
 | `src/shared/__tests__/config-boundary.spec.ts` | 渲染层可写配置白名单：api.token/调度参数/workspacePath 不得被渲染层整份覆盖 |
+| `src/main/__tests__/workspace-registry.spec.ts` | 多工作区注册表纯函数：normalizeRegistry 信任边界、upsert/remove、旧指针格式兼容 |
+| `src/renderer/src/__tests__/browserPaginationWiring.spec.tsx` | 卡片库分页「接线」：滚到底预取的追加页必须真的进 React 状态（曾经只落在 paginator 闭包里，滚过首屏后表格空白）；外部焦点定位（B 键）翻到目标卡所在页 |
+| `src/renderer/src/__tests__/cardSubmitGuard.spec.tsx` | 卡片表单提交重入防护：await 期间双击 / ⌘Enter 连按只产生一次写入 |
+| `src/renderer/src/__tests__/dialogOptimisticLock.spec.tsx` | 编辑弹窗乐观锁：检测到别处改动时不写盘、明确提示、不关窗丢内容 |
+| `src/renderer/src/__tests__/undoDiscardedNotice.spec.tsx` | 热加载作废撤销栈时给出可见提示（否则用户看到的是「按 ⌘Z 没反应」） |
+| `src/renderer/src/__tests__/dragState.spec.ts` | 拖动计数自愈：mouseup 丢失（拖出窗口松手）后计数不残留，后续拖动仍生效 |
+| `src/renderer/src/__tests__/errorBoundary.spec.tsx` | 渲染错误边界：抛错时不白屏、提示可见、重试可恢复、不牵连兄弟节点 |
 
 ### FSRS 基准向量再生成
 
@@ -134,7 +141,7 @@ MIKI_BENCH=1 NODE_OPTIONS=--expose-gc npx vitest run src/main/__tests__/minevent
 ```
 
 建议每月跑一次（可选）：`MIKI_BENCH=1 npm run test` 会把 bench 组一起跑；日常 `npm test` 只跑常规用例。
-下面第 8 行那条 `workspace-io.spec` 的内存对照是「只输出不断言」的，跑不跑都不影响绿灯。
+测试表里 `workspace-io.spec.ts` 那条的内存对照是「只输出不断言」的，跑不跑都不影响绿灯。
 
 默认跳过，不影响 `npm test`。perf.spec 输出各核心操作耗时表（导入 / 查询 / 答题 / 重放 / 批量删除 / 撤销）；minevents.spec 构造 100 万历史事件重启，断言 `events` 不驻留且 heapUsed 远低于事件总量（需 `--expose-gc` 排除 parse 垃圾干扰）。
 
@@ -197,4 +204,4 @@ MIKI_BENCH=1 NODE_OPTIONS=--expose-gc npx vitest run src/main/__tests__/minevent
   - **自写豁免**：本机所有写路径（原子写/追加）完成后立即更新快照，不把自己的写入当外部变更——若漏挂一处，也只多一次全量重载，不会死循环（重载结束重扫快照）；
   - **冷却**：3s 内重复变化合并（置 dirty），git pull 大操作期间最多每 3s 重载一次；
   - **撤销栈作废**：外部变更后撤销目标可能失效（卡被改/删、事件行序变化），重载即清空会话撤销栈（D2 仅本会话）；
-  - **不主动压实**：热加载不清 delta、不折叠他人刚同步的文件，只在内存中重建（压实阈值从零重新计数，与重启一致）。
+  - **不主动压实**：热加载不清 delta、不折叠他人刚同步的文件，只在内存中重建（压实阈值从零重新计数，与重启一致）。`pendingDeletes` 与 `deltaCounts` 一起归零是**有意**的——不因为本地攒了删除就去重写他人刚同步的文件；这个计数丢失不会造成永久滞留，因为下次启动的 `compactStaleDeletions` 直接读加载期快照（不依赖计数残留），会把积压补上。

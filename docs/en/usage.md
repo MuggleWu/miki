@@ -33,6 +33,7 @@ Launching: the packaged app lives at `/Applications/Miki.app` (type `miki` in Ra
 - **Filters**: two dropdowns in the toolbar — "state" filters by scheduling state (new / learning / review / suspended, where suspended is the leech pool), and "due" filters by due window (due / due today / overdue / next 3 days / next 7 days / next 30 days / scheduled). Both combine with the search terms and the deck selection, the choices are remembered across launches, and "clear filters" resets them in one click.
   "Overdue" and "due today" are strictly complementary (overdue = due before 00:00 today), so nothing is double-counted or missed. Every due option except "any" only shows cards that have a scheduled due date; new cards have none and therefore do not appear (use the state filter for those).
 - The "due in" column refreshes every 60 seconds; the selection is restored across launches.
+- Pagination: 400 rows per page, with the next page prefetched as you scroll near the bottom (the whole library is never fetched at once, so even very large decks keep scrolling). Timed refreshes re-fetch only the loaded prefix to preserve scroll position; changing the search or filter terms returns to the first page.
 
 ## Stats
 
@@ -56,12 +57,14 @@ Launching: the packaged app lives at `/Applications/Miki.app` (type `miki` in Ra
 | --- | --- | --- |
 | Reveal answer / rate Good | `Space` | `Space` |
 | Rate Again / Hard / Good / Easy | `1` `2` `3` `4` | `1` `2` `3` `4` |
-| Study / Browser / Stats / Home | `S` `B` `T` `D` | `S` `B` `T` `D` |
+| Study (**home tab only**) / Browser / Stats / Home | `S` `B` `T` `D` | `S` `B` `T` `D` |
 | Add card / Edit current card | `A` `E` | `A` `E` |
 | Delete current card | `⌘D` | `Ctrl+D` |
 | Undo last answer / delete | `⌘Z` | `Ctrl+Z` |
 | Select all (Browser) | `⌘A` | `Ctrl+A` |
 | Focus browser search | `⌘F` | `Ctrl+F` |
+| Bold selection in editor | `⌘B` | `Ctrl+B` |
+| Toggle source / preview in editor | `` ` `` | `` ` `` |
 | Confirm add/edit window | `⌘Enter` | `Ctrl+Enter` |
 | Close add/edit window | `Esc` | `Esc` |
 
@@ -69,7 +72,7 @@ Single-key shortcuts are ignored while typing in a text field, so `Ctrl+C/V` etc
 
 ## Data & backup
 
-- All data lives in the workspace folder (default `~/miki-base`, overridable via `MIKI_WORKSPACE`), separate from the code; see [data-format.md](data-format.md) for the format.
+- All data lives in the workspace folder, separate from the code; the actual path is whichever folder you picked in first-launch onboarding (the prompt suggests `~/miki-base`), and `MIKI_WORKSPACE` can override it. See [data-format.md](data-format.md) for the format.
 - Backing up = copying the folder; managing review history with git also works (NDJSON split by month, append-friendly).
 - **Hot reload**: external changes to the workspace while the app is running (e.g. `git pull` syncing new content) are detected and applied automatically, no restart or window switching needed; the card being studied is not cleared (same card keeps its question/answer phase).
 - For programmatic access (scripts / AI), use the local HTTP API or MCP — see [api.md](api.md).

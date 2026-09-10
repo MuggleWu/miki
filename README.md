@@ -22,7 +22,7 @@ It is a very small open-source project. Perhaps by the time I grow old, no one i
 
 ### Views & card workflow
 
-- **Five views** — decks (table sorted by name), study, card browser, stats (forecast / heatmap / reviews / card states / intervals), and settings
+- **Five views** — decks (table sorted by name), study, card browser, stats, and settings; the stats page has six sections: heatmap, forecast (upcoming due), reviews, retention, card counts, and intervals
 - **Card browser** — multi-keyword AND search, configurable columns with drag-resizable widths and rotate sort, resizable side/panel dividers, inline editor with live Markdown preview, and virtual scrolling that stays smooth with tens of thousands of cards; due shown in two columns — relative ("in 5 minutes") and absolute ("2026-09-06 16:49")
 - **Standalone card window** — add/edit happens in a child window that can be dragged out of the main window (even onto another screen); its position and size are remembered across launches, and add mode supports continuous card entry
 - **Rich card content** — Markdown + KaTeX + syntax highlighting
@@ -48,15 +48,18 @@ Single-key shortcuts are identical on all platforms. Wherever the app or this RE
 | --- | --- | --- |
 | Reveal answer / rate Good | `Space` | `Space` |
 | Rate Again / Hard / Good / Easy | `1` `2` `3` `4` | `1` `2` `3` `4` |
-| Study / Browser / Stats / Home | `S` `B` `T` `D` | `S` `B` `T` `D` |
+| Study (**home tab only**) / Browser / Stats / Home | `S` `B` `T` `D` | `S` `B` `T` `D` |
 | Add card / Edit current card | `A` `E` | `A` `E` |
 | Delete current card | `⌘D` | `Ctrl+D` |
 | Undo last answer / delete | `⌘Z` | `Ctrl+Z` |
+| Select all cards in browser | `⌘A` | `Ctrl+A` |
 | Focus browser search | `⌘F` | `Ctrl+F` |
+| Bold selection in editor | `⌘B` | `Ctrl+B` |
+| Toggle source / preview in editor | `` ` `` | `` ` `` |
 | Confirm add/edit dialog | `⌘Enter` | `Ctrl+Enter` |
 | Close dialog | `Esc` | `Esc` |
 
-Single-key shortcuts are ignored while typing in a text field, so `Ctrl+C/V` etc. keep working inside inputs.
+Single-key shortcuts are ignored while typing in a text field, so `Ctrl+C/V` etc. keep working inside inputs. `S` only works on the home tab (it enters a deck from there); the other navigation keys work anywhere. Inside editors `⌘B` bolds and `` ` `` toggles between source and preview.
 
 ## Development
 
@@ -94,7 +97,7 @@ node scripts/mcp-server.mjs
 
 Explicit token & port (legacy behavior) also work: `MIKI_TOKEN=<token from config.json> node scripts/mcp-server.mjs`.
 
-It exposes tools such as `list_decks`, `add_cards`, `search_cards`, `update_cards`, `move_cards`, `set_suspended`, `delete_cards`, `reset_progress` and `get_stats` (batch tools accept up to 500 card IDs per call; `search_cards` date params accept `YYYY-MM-DD`, parsed at local midnight).
+It exposes 14 tools: `list_decks`, `create_decks`, `rename_deck`, `delete_deck`, `search_cards`, `get_cards`, `add_cards`, `update_cards`, `move_cards`, `set_suspended`, `delete_cards`, `reset_progress`, `get_stats` and `api_schema` (the last one returns the local HTTP API's OpenAPI description, so an AI can learn every endpoint and then call HTTP directly). Batch tools accept up to 500 card IDs per call; `search_cards` date params accept `YYYY-MM-DD`, parsed at local midnight.
 
 ## Documentation
 
