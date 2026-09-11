@@ -102,3 +102,40 @@ describe('GithubClient 的失败分类与提示', () => {
     }
   })
 })
+
+describe('请求超时', () => {
+  it('卡住的请求会被放弃并报成网络问题（否则界面永远停在"同步中"）', async () => {
+    // busy 只在 runSync 返回/抛错时释放：没有超时的话，一次卡住的请求会让同步按钮一直转，
+    // 用户除了杀进程没别的办法。这里用假时钟把 30 秒推过去，不真等。
+    vi.useFakeTimers()
+    vi.stubGlobal('fetch', (_url: string, init?: RequestInit) => {
+      return new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new Error('aborted')))
+      })
+    })
+    try {
+      const p = new GithubClient(creds).head()
+      const expectFail = expect(p).rejects.toThrow('已放弃这次请求')
+      await vi.advanceTimersByTimeAsync(30_000)
+      await expectFail
+    } finally {
+      vi.useRealTimers()
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('正常响应不受超时影响（计时器被清掉，不会在稍后误伤）', async () => {
+    vi.stubGlobal('fetch', async (url: string) => {
+      const body: Record<string, unknown> = String(url).includes('/git/ref/')
+        ? { object: { sha: 'c1' } }
+        : { tree: { sha: 't1' } }
+      return { ok: true, status: 200, json: async () => body }
+    })
+    try {
+      const client = new GithubClient(creds)
+      await expect(client.head()).resolves.toBeTruthy()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+})

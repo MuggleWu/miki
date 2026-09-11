@@ -11,6 +11,13 @@ import type { SyncCreds } from './types'
 
 const API = 'https://api.github.com'
 
+/**
+ * 单个请求的超时。取 30 秒：手机热点或地铁里一次 GitHub 请求偶尔要十几秒，但**永远卡住**
+ * 不可接受——同步期间界面是 busy 的，没有超时用户只能杀进程。这是"每个请求"的上限，
+ * 一次同步有很多请求，慢网络下总时长仍可能长，但每次失败都能明确报出来并释放 busy。
+ */
+const REQUEST_TIMEOUT_MS = 30_000
+
 export class GithubError extends Error {
   constructor(
     readonly status: number,
@@ -71,6 +78,12 @@ export class GithubClient {
 
   private async req<T>(method: string, path: string, body?: unknown): Promise<T> {
     let res: Response
+    // 每个请求各自超时：没有超时的话，一次卡住的请求会让界面永远停在"同步中"（busy 只有
+    // 在 runSync 返回/抛错时才释放），用户除了杀进程没有别的办法。用 AbortController 而不是
+    // AbortSignal.timeout：后者要较新的 WebView，这个应用不假设 WebView 版本。
+    const ac = new AbortController()
+    const timer = setTimeout(() => ac.abort(), REQUEST_TIMEOUT_MS)
+    let aborted = false
     try {
       res = await fetch(`${API}${path}`, {
         method,
@@ -79,6 +92,7 @@ export class GithubClient {
         // 一次同步开头读分支头（缓存），40 秒后推送完再读回，拿到的是推送前那个头，
         // 于是"推送成功却报读回不一致"。Node 侧的 undici 没有 HTTP 缓存，所以只有真机看得见。
         cache: 'no-store',
+        signal: ac.signal,
         headers: {
           Authorization: `Bearer ${this.creds.token}`,
           Accept: 'application/vnd.github+json',
@@ -88,9 +102,17 @@ export class GithubClient {
         body: body ? JSON.stringify(body) : undefined
       })
     } catch {
-      // fetch 抛错 = 压根没拿到 HTTP 响应（DNS/连接/证书/被拦）。这条以前会原样抛成
+      aborted = ac.signal.aborted
+      // fetch 抛错 = 压根没拿到 HTTP 响应（DNS/连接/证书/被拦/超时）。这条以前会原样抛成
       // "Failed to fetch"，用户看到四个英文单词，无从判断是网络还是凭据——分开报。
-      throw new GithubError(NETWORK_STATUS, explainFailure('network', '', this.creds.repo))
+      throw new GithubError(
+        NETWORK_STATUS,
+        aborted
+          ? `等了 ${Math.round(REQUEST_TIMEOUT_MS / 1000)} 秒没有响应，已放弃这次请求（网络可能断了）。可以稍后重试，本地数据没有被改动。`
+          : explainFailure('network', '', this.creds.repo)
+      )
+    } finally {
+      clearTimeout(timer)
     }
     if (!res.ok) {
       // 把状态码翻成"下一步做什么"，并保留 GitHub 原话与具体请求，便于排查时不被二次转述失真。

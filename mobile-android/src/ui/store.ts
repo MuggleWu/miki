@@ -29,7 +29,7 @@ import {
 } from '@mobile/sync/creds'
 import { runSync } from '@mobile/sync'
 import { GithubClient } from '@mobile/sync/github'
-import type { SyncMode } from '@mobile/sync'
+import type { SyncMode, SyncOptions } from '@mobile/sync'
 import type { SyncReport } from '@mobile/sync/types'
 import type { FontScale, ThemePref } from '@mobile/theme'
 import { shouldSnapOpen } from './edge-swipe'
@@ -130,7 +130,7 @@ interface AppState {
    * - 'full'：拉 + 推（只有用户点"推送进度 / 立即同步"才走它），并有提示。
    * 以前这里是 `manual: boolean`，但 direction 并没有真的传下去——回前台那次也照样推送。
    */
-  syncNow(mode: SyncMode): Promise<SyncReport | null>
+  syncNow(mode: SyncMode, opts?: SyncOptions): Promise<SyncReport | null>
 }
 
 export const useApp = create<AppState>((set, get) => ({
@@ -313,17 +313,20 @@ export const useApp = create<AppState>((set, get) => ({
     get().notify('已清空 GitHub 凭据')
   },
 
-  async syncNow(mode) {
+  async syncNow(mode, opts) {
     const { ws, sync } = get()
     if (!ws || sync.busy) return null
-    const { repo, branch, token } = await loadCreds()
-    if (!token) {
-      set({ sync: { ...get().sync, lastError: '还没有配置 GitHub 凭据' } })
-      if (mode === 'full') get().notify('还没配置同步：去设置页填仓库与 PAT')
-      return null
-    }
+    // 闸门必须在**第一个 await 之前**落下：loadCreds() 是异步的，先 await 再置 busy 的话，
+    // 连点两下（或"回前台自动拉"与手动推送撞上）会同时开两次同步 —— 两次都读同一份 base、
+    // 各自算一遍合并、各自推一次，后一次必然撞 422，而前一次的成果可能已经被覆盖。
     set({ sync: { ...get().sync, busy: true, lastError: null } })
     try {
+      const { repo, branch, token } = await loadCreds()
+      if (!token) {
+        set({ sync: { ...get().sync, busy: false, lastError: '还没有配置 GitHub 凭据' } })
+        if (mode === 'full') get().notify('还没配置同步：去设置页填仓库与 PAT')
+        return null
+      }
       const base = await loadBase()
       const outcome = await runSync(
         {
@@ -343,7 +346,8 @@ export const useApp = create<AppState>((set, get) => ({
         },
         { repo, branch, token },
         base,
-        mode
+        mode,
+        opts
       )
       await saveBase(outcome.base)
       await saveLastSyncAt(outcome.report.at)
