@@ -121,7 +121,12 @@ export function LibraryPage(): JSX.Element {
         open={openRow !== null}
         title={editingCard ? '编辑卡片' : '卡片详情'}
         full={editingCard}
-        onClose={() => setOpenId(null)}
+        // 关闭时必须把编辑态一起清掉：CardDetail 会随关闭卸载（内部编辑态自然复位），
+        // 页面这份 editingCard 却会留下来 —— 下次打开就变成"标题写着编辑卡片、内容却是只读"。
+        onClose={() => {
+          setOpenId(null)
+          setEditingCard(false)
+        }}
       >
         {openRow ? (
           <CardDetail
@@ -130,6 +135,7 @@ export function LibraryPage(): JSX.Element {
             onChanged={() => {
               bump()
               setOpenId(null)
+              setEditingCard(false)
             }}
             onNotify={notify}
           />

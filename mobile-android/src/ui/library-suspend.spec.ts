@@ -54,3 +54,15 @@ describe('卡片库：暂停 / 解除暂停', () => {
     expect(whenSuspended).not.toContain('setCardSuspended(row.id, true)')
   })
 })
+
+describe('详情弹层的编辑态必须随关闭复位', () => {
+  it('关闭与保存后都清掉 editingCard（否则下次打开是"编辑卡片"标题 + 只读内容）', () => {
+    // 源码级：CardDetail 关闭时会卸载、内部编辑态自然复位，页面这份 state 不会 ——
+    // 这条断言钉住"两条关闭路径都复位"，去掉任一处的 setEditingCard(false) 都会红
+    const src = readSource('pages/LibraryPage.tsx')
+    const closes = src.match(/setOpenId\(null\)/g) ?? []
+    const resets = src.match(/setEditingCard\(false\)/g) ?? []
+    expect(closes.length).toBeGreaterThan(0)
+    expect(resets.length).toBe(closes.length)
+  })
+})
