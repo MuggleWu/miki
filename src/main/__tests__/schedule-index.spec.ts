@@ -5,7 +5,9 @@ import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import { WorkspaceService } from '../workspace'
+import { WorkspacePaths } from '../workspace-io'
 import { pickNext, remainingCount } from '../../core/queue'
+import { FSRS_STATE } from '../../shared/types'
 import type { Card, Rating } from '../../shared/types'
 
 const dirs: string[] = []
@@ -57,7 +59,7 @@ function assertIndexMatchesScan(w: WorkspaceService): void {
   for (const deck of w.decks) {
     const list = refCards(w, deck.id)
     const study = w.getStudy(deck.id)
-    const refCard = pickNext(list, now, eot)
+    const refCard = pickNext(list, now)
     expect(study.card?.id ?? null, `pickNext mismatch deck=${deck.name}`).toBe(refCard?.id ?? null)
     expect(study.remaining, `remaining mismatch deck=${deck.name}`).toBe(remainingCount(list, eot))
     const info = w.deckInfos().find((x) => x.id === deck.id)
@@ -188,6 +190,52 @@ describe('调度索引随机对拍', () => {
     }
   })
 
+  it('到期卡刷完后先出新卡，稍后到点的复习卡不提前放（出卡口径回归）', () => {
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(new Date('2026-10-06T10:00:00')) // 今天上午 10 点
+      const dir = tmp()
+      const w = newWs(dir)
+      const d = w.addDeck('稍后到点组').id
+      const [later, fresh] = w.addCards(d, [
+        { front: '今晚 22 点才到点', back: '' },
+        { front: '还没学的新卡', back: '' }
+      ])
+      // 这种卡的成因（真实数据里就这么来的）：昨天同一时刻复习、间隔 1 天 → 到期落在今天 22 点。
+      // 只能从事件流里来，所以往 review-log 追加一条 answer 事件后重开工作区。
+      const t0 = new Date('2026-10-05T22:00:00').getTime()
+      const due = new Date('2026-10-06T22:00:00').getTime()
+      const log = new WorkspacePaths(dir).logFile(t0)
+      fs.mkdirSync(path.dirname(log), { recursive: true })
+      fs.writeFileSync(
+        log,
+        JSON.stringify({
+          seq: 1,
+          t: t0,
+          action: 'answer',
+          cardId: later.id,
+          deckId: d,
+          rating: 3,
+          before: null,
+          after: { state: FSRS_STATE.Review, step: null, stability: 5, difficulty: 5, due, lastReview: t0 }
+        }) + '\n'
+      )
+      const w2 = newWs(dir)
+      expect(w2.getCard(later.id)!.fsrs).toMatchObject({ state: FSRS_STATE.Review, due })
+      expect(w2.deckInfos().find((x) => x.id === d)!.counts.due).toBe(0) // 到期列是空的
+      // 到期列空着就不该再出学过的卡：新卡先出（旧口径下这里出的是那张 22 点的复习卡）
+      expect(w2.getStudy(d).card?.id).toBe(fresh.id)
+      // 新卡也出完了就到此为止：22 点那张不提前放（用户 2026-09-12 定：只管到期）
+      w2.deleteCards([fresh.id])
+      expect(w2.getStudy(d).card).toBeNull()
+      // 时间真的走到 due，它自然出现（不需要任何兜底）
+      vi.setSystemTime(new Date('2026-10-06T22:00:00'))
+      expect(w2.getStudy(d).card?.id).toBe(later.id)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('堆死条目过半重建：状态反复变更后取卡/到期计数仍与全量扫描一致（rebuildHeapsIfStale）', () => {
     vi.useFakeTimers()
     try {
@@ -214,7 +262,7 @@ describe('调度索引随机对拍', () => {
         const info = w.deckInfos().find((x) => x.id === d)!
         expect(info.counts).toEqual(refTableCounts(list, now))
         const s = w.getStudy(d)
-        expect(s.card?.id ?? null).toBe(pickNext(list, now, w.endOfToday())?.id ?? null)
+        expect(s.card?.id ?? null).toBe(pickNext(list, now)?.id ?? null)
       }
       // 40 张里 20 张状态反复变更 ≥3 轮：stale 远超堆半，重灌必然发生——对拍通过即分支生效
     } finally {

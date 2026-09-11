@@ -29,7 +29,7 @@ src/
 ├── core/            # pure-function domain logic; no Electron / file system access
 │   ├── fsrs.ts      #   FSRS-6 scheduler (line-by-line port of py-fsrs v6.3.2)
 │   ├── replay.ts    #   event replay (review-log → card state)
-│   ├── queue.ts     #   study queue & counts (learning due → today's reviews → new)
+│   ├── queue.ts     #   study queue & counts (learning due → reviews due now → new)
 │   ├── query.ts     #   browser filtering / sorting / view rows
 │   └── stats.ts     #   the five stats panels
 ├── main/            # Electron main process

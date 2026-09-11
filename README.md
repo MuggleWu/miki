@@ -17,7 +17,7 @@ It is a very small open-source project. Perhaps by the time I grow old, no one i
 ### Scheduling & review
 
 - **FSRS-6 scheduling** — ported from py-fsrs v6.3.2, verified against 550+ generated conformance vectors; every rating button previews the next due date before you commit
-- **Unlimited daily review** — learning comebacks slot back in when due, and new cards only start once every old card due today has been cleared: finish the old, then the new
+- **Unlimited daily review** — learning comebacks slot back in when due, and only cards due *right now* get ahead of new cards: clear what is due and new cards start; a review card due later today is not served early
 - **Leech handling** — a card that reaches the lapse threshold is auto-suspended: it leaves the queue and all counts, shows as ⏸ in the browser, and can be unsuspended with one click
 
 ### Views & card workflow

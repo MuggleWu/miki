@@ -288,7 +288,7 @@ export class ScheduleIndex {
     return null
   }
 
-  /** 学习页取下一张卡：learning → 当日到期 review → 新卡 */
+  /** 学习页取下一张卡：到点 learning → 此刻到期 review → 新卡（看不到点的卡就返回 null） */
   pickNextIdx(deckId: string, now: number): Card | null {
     const ix = this.ensureBuilt(deckId)
     this.rebuildHeapsIfStale(deckId, ix)
@@ -299,12 +299,11 @@ export class ScheduleIndex {
       (c, e) => !!c.fsrs && displayState(c) === 'learning' && c.fsrs!.due === e.key
     )
     if (learning) return learning
-    // 刷完旧卡才能刷新卡：当日会到期的复习卡（含今日稍后到点）都先于新卡出
-    const eot = endOfLocalDay(now)
+    // 挡在新卡前的只有**此刻已到期**的复习卡；今日稍后才到点的卡不出（用户 2026-09-12 定：只看到点）
     const review = this.heapNext(
       ix.review,
       deckId,
-      eot,
+      now,
       (c, e) => displayState(c) === 'review' && c.fsrs!.due === e.key
     )
     if (review) return review

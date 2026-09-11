@@ -29,7 +29,7 @@ src/
 ├── core/            # 纯函数域逻辑，不碰 Electron / 文件系统
 │   ├── fsrs.ts      #   FSRS-6 调度器（py-fsrs v6.3.2 逐行移植）
 │   ├── replay.ts    #   事件重放（review-log → 卡片状态）
-│   ├── queue.ts     #   学习队列与计数（学习到点 → 当日复习 → 新卡）
+│   ├── queue.ts     #   学习队列与计数（学习到点 → 此刻到期复习 → 新卡）
 │   ├── query.ts     #   卡片库过滤 / 排序 / 视图行
 │   └── stats.ts     #   统计六板块（含留存率）
 ├── main/            # Electron 主进程
