@@ -150,6 +150,33 @@ select {
   flex: 0 0 auto;
 }
 
+/*
+ * 页头里的小动作按钮（首页"推送进度"）：和"今日已学"同一行的次要操作，所以做得比主按钮轻
+ * ——药丸形 + 细描边 + 12px 字，跟牌组徽标同一套视觉语言。
+ * 但视觉小不等于能点得准：用 ::after 把可点范围撑到 44px 高，与全站其它按钮一致。
+ */
+.head-btn {
+  position: relative;
+  flex: 0 0 auto;
+  font-size: 12px;
+  line-height: 1;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.head-btn::after {
+  content: '';
+  position: absolute;
+  inset: -7px -3px;
+}
+
+.head-btn:disabled {
+  color: var(--muted);
+}
+
 .page-body {
   flex: 1 1 auto;
   overflow-y: auto;
@@ -1234,6 +1261,7 @@ code {
 .deck-row:active,
 .sheet-item:active,
 .icon-btn:active:not(:disabled),
+.head-btn:active:not(:disabled),
 .rate-btn:active:not(:disabled),
 .fab:active,
 .tab:active {
