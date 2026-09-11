@@ -1276,6 +1276,69 @@ code {
   background-color: var(--line);
 }
 
+/* ---------- 渲染错误边界（页面级崩溃的可读兜底） ---------- */
+
+/*
+ * 出错时这一页整体被换成边界自己，所以它得顶替页面原来的位置：.app 是纵向 flex 容器，
+ * 而页面平时由 .page-head + .page-body 两格撑满，这里就自己 flex: 1 撑满并负责滚动
+ * （栈可能比一屏长，不能让「重试」按钮被挤出屏幕——那是唯一能自救的动作）。
+ */
+.error-boundary {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.error-boundary-title {
+  font-size: calc(16px * var(--fs-scale));
+  font-weight: 600;
+  color: var(--fail);
+}
+
+.error-boundary-msg {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--fg);
+  word-break: break-all;
+}
+
+.error-boundary-hint {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+/*
+ * 栈只当"可复制的线索"：限高 + 自己滚动，别把提示与按钮挤走。
+ * pre-wrap 是必需的——栈里一行很长，而 <pre> 默认的 white-space: pre 不换行，
+ * 光靠 word-break 在 Chrome 上不会断（这里的 pre 里是纯文本，没有 markdown 会被穿透）。
+ */
+.error-boundary-stack {
+  margin: 0;
+  padding: 10px;
+  max-height: 30vh;
+  overflow: auto;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--muted);
+  word-break: break-all;
+  white-space: pre-wrap;
+}
+
+/* 按钮推到最下面：出错时这一屏只有「重试」是可点的，别让它夹在中间 */
+.error-boundary .btn {
+  flex: 0 0 auto;
+  margin-top: auto;
+}
+
 /* 系统开了"减弱动态效果"就不要动画 */
 @media (prefers-reduced-motion: reduce) {
   *,
