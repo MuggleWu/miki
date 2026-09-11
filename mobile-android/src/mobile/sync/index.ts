@@ -181,7 +181,8 @@ export async function runSync(
   const blockedPaths = files.filter((f) => f.action === 'blocked').map((f) => f.path)
   const blockedNote =
     blockedPaths.length > 0
-      ? `另有 ${blockedPaths.length} 个文件不能自动合并、已跳过（本机那份保持原样）：${blockedPaths.join('、')}`
+      ? `另有 ${blockedPaths.length} 个文件不能自动合并、已跳过（本机那份保持原样）：${blockedPaths.join('、')}` +
+        '。要放弃本机这几份、直接用远端覆盖，可到设置页点「用远端覆盖本机」'
       : ''
 
   // 要推的文件在**落地之前**就得算出来：合并结果一写进本地，工作区里"合并前的那份"就没了。

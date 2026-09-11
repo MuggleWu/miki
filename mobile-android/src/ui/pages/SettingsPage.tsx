@@ -15,6 +15,20 @@ import { Sheet } from '../components/Sheet'
 import { Confirm } from '../components/Confirm'
 import { SyncConfigForm } from '../forms/SyncConfigForm'
 import type { FontScale, ThemePref } from '@mobile/theme'
+import type { DamageReport } from '@shared/workspace'
+import type { SyncReport } from '@mobile/sync/types'
+
+/**
+ * 「用远端覆盖本机」要救哪几个文件。
+ *
+ * 两类：① JSON 文档读不出来（decks.json / config.json 半写，本机这份没救了）；
+ * ② 上次同步判过"不能自动合并"、至今没对齐的（行拼接会静默丢掉一边的改动）。
+ * 只救点名的这几个 —— 整仓库覆盖会把还没推上去的答题进度一起抹掉。
+ */
+export function rescueCandidates(dmg: DamageReport, report: SyncReport | null): string[] {
+  const blocked = (report?.files ?? []).filter((f) => f.action === 'blocked').map((f) => f.path)
+  return [...new Set([...dmg.corruptDocs, ...blocked])].sort()
+}
 
 export function SettingsPage(): JSX.Element {
   const ws = useWorkspace()
@@ -27,6 +41,7 @@ export function SettingsPage(): JSX.Element {
   const [configSync, setConfigSync] = useState(false)
   const [showDetail, setShowDetail] = useState(false)
   const [confirmClear, setConfirmClear] = useState(false)
+  const [confirmRescue, setConfirmRescue] = useState(false)
   const sync = useApp((s) => s.sync)
   const loadSyncInfo = useApp((s) => s.loadSyncInfo)
   const syncNow = useApp((s) => s.syncNow)
@@ -58,6 +73,8 @@ export function SettingsPage(): JSX.Element {
   }
 
   const dmg = ws.damageReport()
+  // 本机这份已经没救的文件（损坏的 JSON 文档 / 判过不能自动合并的分叉），可以点名用远端覆盖
+  const rescue = rescueCandidates(dmg, sync.report)
 
   return (
     <>
@@ -206,6 +223,18 @@ export function SettingsPage(): JSX.Element {
               ) : null}
             </>
           )}
+          {rescue.length > 0 && sync.status?.configured ? (
+            <>
+              <p className="bad-line">这几份本机这份救不回来：{rescue.join('、')}</p>
+              <p className="muted">
+                下面的按钮会把这几份换成远端那份（只拉不推，不产生 commit）。本机这几份里还没推上去的
+                改动会丢，所以覆盖前会自动留一份快照（目录名在同步明细里，需要时把文件拷回工作区即可）。
+              </p>
+              <button className="btn danger" onClick={() => setConfirmRescue(true)}>
+                用远端覆盖本机（{rescue.length} 个文件）
+              </button>
+            </>
+          ) : null}
           <button className="btn" onClick={() => go({ kind: 'selfcheck' })}>
             打开设备自检（读写 / 性能 / 往返一致性）
           </button>
@@ -227,6 +256,19 @@ export function SettingsPage(): JSX.Element {
         onConfirm={() => {
           setConfirmClear(false)
           void clearSyncCreds()
+        }}
+      />
+
+      {/* 覆盖本机会丢掉本机那几份的内容，所以和删卡片一样先确认一次，并把清单摊开说清 */}
+      <Confirm
+        open={confirmRescue}
+        title="用远端覆盖本机？"
+        detail={`将覆盖：${rescue.join('、')}。本机这几份当前的内容会被远端那份替换，其中还没推上去的改动会丢；覆盖前会自动留一份快照。不会产生 commit，也不会动其它文件。`}
+        confirmText="用远端覆盖"
+        onCancel={() => setConfirmRescue(false)}
+        onConfirm={() => {
+          setConfirmRescue(false)
+          void syncNow('force-pull', { forcePaths: rescue })
         }}
       />
 

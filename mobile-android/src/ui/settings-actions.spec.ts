@@ -9,6 +9,7 @@
 // 断言前先剥注释：这两条修复的说明里原样写着这些模式，不剥就会「注释满足断言」。
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
+import { rescueCandidates } from './pages/SettingsPage'
 
 /** 读源码并剥掉注释（块注释 + 行注释，含行尾注释），再去掉换行/缩进差异 */
 function readSource(rel: string): string {
@@ -81,5 +82,50 @@ describe('清空本机偏好：删的确实是"偏好"，而且立刻生效', ()
   it('提示语如实：不再宣称"已清空本机偏好"却只删了上次的牌组', () => {
     expect(src).not.toContain('已清空本机偏好（工作区数据不受影响）')
     expect(clearFn).toContain('主题跟随系统')
+  })
+})
+
+describe('用远端覆盖本机的候选集', () => {
+  const dmg = (corruptDocs: string[]) => ({ damagedLines: 0, truncatedFiles: [], files: [], corruptDocs })
+  const report = (files: { path: string; action: string; reason: string }[]) => ({
+    ok: true,
+    at: 1,
+    message: '',
+    files,
+    pushed: 0,
+    pulled: 0,
+    reviews: 0,
+    cards: 0,
+    commit: null
+  })
+
+  it('损坏的 JSON 文档与判过不能合并的分叉都要救，其余不进来', () => {
+    expect(rescueCandidates(dmg(['decks.json']), null)).toEqual(['decks.json'])
+    expect(
+      rescueCandidates(
+        dmg([]),
+        report([
+          { path: 'cards/d1.ndjson', action: 'blocked', reason: 'x' },
+          { path: 'cards/d2.ndjson', action: 'keep-local', reason: 'y' },
+          { path: 'review-log/2026-09.ndjson', action: 'blocked', reason: 'z' }
+        ])
+      )
+    ).toEqual(['cards/d1.ndjson', 'review-log/2026-09.ndjson'])
+  })
+
+  it('两类重叠时去重，且结果是稳定的字典序（确认框里读起来一致）', () => {
+    expect(
+      rescueCandidates(
+        dmg(['decks.json', 'config.json']),
+        report([{ path: 'decks.json', action: 'blocked', reason: 'x' }])
+      )
+    ).toEqual(['config.json', 'decks.json'])
+  })
+
+  it('按钮真的走 force-pull 并带上清单（不能退化成整仓库覆盖）', () => {
+    // 源码级：覆盖本机会丢掉本机那份内容，必须点名几个文件；一旦有人把它改成整仓库覆盖，
+    // 这条会红——那是"顺手抹掉还没推上去的答题进度"的入口
+    const src = readSource('pages/SettingsPage.tsx')
+    expect(src).toContain("syncNow('force-pull', { forcePaths: rescue })")
   })
 })
