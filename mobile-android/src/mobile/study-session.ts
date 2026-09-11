@@ -66,6 +66,29 @@ export class StudySession {
     return this.state
   }
 
+  /**
+   * 工作区在页面之外被改过（同步拉取 / 回到前台重载）后刷新一次。
+   *
+   * 页面上的 `state.card` 是重载**之前**那个 Card 对象：重载会整体换新卡对象，手里这份
+   * 就成了脱钩的旧快照——卡面还是旧文案、可撤销数还是旧值。这里按 id 重新取一次当前这张，
+   * 但**不换卡**：正在看的这张不动（答题被中途抽走比看到旧文案糟得多）。
+   * 当前这张已经不在（被删/暂停/不再到期）了才交给 load() 重挑一张。
+   */
+  refresh(now = Date.now()): StudyState {
+    const cur = this.state.card
+    if (!cur) return this.load(now)
+    const live = this.ws.getCard(cur.id)
+    if (!live || live.deletedAt || live.suspended) return this.load(now)
+    this.state = {
+      ...this.state,
+      card: live,
+      remaining: this.ws.getStudy(this.deckId).remaining,
+      todayCount: this.ws.todayCount(),
+      undoable: this.ws.undoableCount()
+    }
+    return this.state
+  }
+
   /** 点按卡面：显示答案并算出四档的下次间隔预览 */
   reveal(now = Date.now()): StudyState {
     const card = this.state.card

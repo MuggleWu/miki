@@ -29,6 +29,13 @@ export function StudyPage({ deckId }: { deckId: string }): JSX.Element {
   const [editing, setEditing] = useState(false)
   const busy = useRef(false)
 
+  // 工作区在页面之外被改过（同步拉取、回到前台重载）→ 手里这张卡是重载前的旧对象：
+  // 卡面文案、可撤销数都会停在旧值上。刷新一次（不换卡，见 StudySession.refresh）。
+  const version = useApp((s) => s.version)
+  useEffect(() => {
+    setState(session.refresh())
+  }, [version, session])
+
   const deckName = ws.deckNameOf(deckId)
 
   // 刷卡字体跟随桌面端设置（config.json 的 study.fontFamily / study.fontSize，桌面端只把它

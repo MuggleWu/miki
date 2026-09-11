@@ -166,3 +166,56 @@ describe('学习会话', () => {
     expect(s.card!.front).toBe('改过的卡面')
   })
 })
+
+describe('会话刷新（同步拉取 / 回到前台重载之后）', () => {
+  let fs: MemoryFileStore
+  let ws: MobileWorkspace
+  let session: StudySession
+
+  beforeEach(async () => {
+    fs = new MemoryFileStore()
+    seed(fs)
+    ws = new MobileWorkspace(fs, new MobilePaths(ROOT))
+    await ws.init()
+    session = new StudySession(ws, DECK)
+    session.start()
+  })
+
+  it('不换卡，但卡面内容跟着新数据走', async () => {
+    const id = session.get().card!.id
+    const before = session.get().card!.front
+    // 别机改过这张卡的正文（写进 delta，重载后生效）
+    fs.seed(
+      `${ROOT}/cards/${DECK}.delta.ndjson`,
+      JSON.stringify({
+        id,
+        front: '别机改过的正面',
+        back: 'x',
+        createdAt: 1,
+        updatedAt: 9_999_999_999_999,
+        deletedAt: null,
+        suspended: false
+      }) + '\n'
+    )
+    await ws.reload()
+    const s = session.refresh()
+    expect(s.card!.id).toBe(id) // 不换卡：正在看的这张不动
+    expect(s.card!.front).toBe('别机改过的正面') // 但内容必须是新的
+    expect(s.card!.front).not.toBe(before)
+  })
+
+  it('可撤销数跟着走：重载会重建会话日志，页面不能还显示旧的可撤销数', async () => {
+    session.reveal() // rate 要求先显示答案（与真机上的操作顺序一致）
+    await session.rate(3)
+    expect(session.get().undoable).toBe(1)
+    await ws.reload() // 同步拉取后就是这样：撤销栈被重放重建，stack 空了
+    expect(session.refresh().undoable).toBe(0)
+  })
+
+  it('当前这张被删/暂停了才重挑一张', async () => {
+    const id = session.get().card!.id
+    await ws.setCardSuspended(id, true)
+    const s = session.refresh()
+    expect(s.card?.id).not.toBe(id)
+  })
+})
