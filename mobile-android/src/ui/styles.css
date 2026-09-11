@@ -1,0 +1,167 @@
+:root {
+  --bg: #ffffff;
+  --fg: #1c1c1e;
+  --muted: #6b7280;
+  --card: #f5f5f7;
+  --line: #e5e7eb;
+  --accent: #2563eb;
+  --pass: #16a34a;
+  --fail: #dc2626;
+  --skip: #b45309;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111214;
+    --fg: #e8e8ea;
+    --muted: #9ca3af;
+    --card: #1b1d21;
+    --line: #2a2d33;
+    --accent: #60a5fa;
+    --pass: #4ade80;
+    --fail: #f87171;
+    --skip: #fbbf24;
+  }
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  /* 刘海屏/手势条安全区：配合 index.html 的 viewport-fit=cover */
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  /* 移动端不要选中文本（长按选中会干扰后续手势力） */
+  user-select: none;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+.app-header {
+  padding: 16px 16px 8px;
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.app-body {
+  padding: 0 16px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 14px;
+}
+
+.card h2,
+.card h3 {
+  margin: 0 0 8px;
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.muted {
+  color: var(--muted);
+  font-size: 13px;
+  margin: 0 0 10px;
+  line-height: 1.5;
+}
+
+.btn {
+  width: 100%;
+  padding: 14px;
+  font-size: 16px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+}
+
+.tag {
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+}
+
+.tag.pass {
+  color: var(--pass);
+}
+.tag.fail {
+  color: var(--fail);
+}
+.tag.skip {
+  color: var(--skip);
+}
+
+.detail {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--muted);
+  /* 路径/耗时这类内容允许换行，别撑破屏幕 */
+  word-break: break-all;
+}
+
+.note {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: var(--fail);
+}
+
+code {
+  font-size: 12px;
+  word-break: break-all;
+}
+
+/* 自检总览一行：全过就是绿的，有失败就是红的 */
+.ok-line,
+.bad-line {
+  margin: 0 0 10px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.ok-line {
+  color: var(--pass);
+}
+
+.bad-line {
+  color: var(--fail);
+}

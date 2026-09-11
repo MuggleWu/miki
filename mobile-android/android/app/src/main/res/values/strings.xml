@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Miki</string>
+    <string name="title_activity_main">Miki</string>
+    <string name="package_name">com.mugglewu.miki</string>
+    <string name="custom_url_scheme">com.mugglewu.miki</string>
+</resources>
