@@ -20,7 +20,9 @@ export default tseslint.config(
     }
   },
   {
-    files: ['src/ui/**/*.tsx'],
+    // 自定义 hook 常常写在 .ts 里（不带 JSX），所以这一档要覆盖 ui 下的两种扩展名，
+    // 否则 .ts 里的 hook 既查不到问题，写 eslint-disable 还会报「规则未定义」
+    files: ['src/ui/**/*.{ts,tsx}'],
     plugins: { 'react-hooks': reactHooks },
     rules: {
       ...reactHooks.configs.flat.recommended.rules,

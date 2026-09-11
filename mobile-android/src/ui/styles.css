@@ -8,6 +8,11 @@
   --pass: #16a34a;
   --fail: #dc2626;
   --skip: #b45309;
+  --r1: #dc2626;
+  --r2: #d97706;
+  --r3: #2563eb;
+  --r4: #16a34a;
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -21,6 +26,10 @@
     --pass: #4ade80;
     --fail: #f87171;
     --skip: #fbbf24;
+    --r1: #f87171;
+    --r2: #fbbf24;
+    --r3: #60a5fa;
+    --r4: #4ade80;
   }
 }
 
@@ -42,38 +51,381 @@ body {
   font-family:
     -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
   /* 刘海屏/手势条安全区：配合 index.html 的 viewport-fit=cover */
-  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
-  /* 移动端不要选中文本（长按选中会干扰后续手势力） */
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
+  /* 移动端不要选中文本（长按选中会干扰后续手势），编辑框里单独放开 */
   user-select: none;
+  overscroll-behavior: none;
+}
+
+textarea,
+input,
+select {
+  user-select: text;
 }
 
 .app {
   display: flex;
   flex-direction: column;
-  min-height: 100%;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
 }
 
-.app-header {
-  padding: 16px 16px 8px;
+/* ---------- 顶栏 / 页体 ---------- */
+
+.page-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  flex: 0 0 auto;
 }
 
-.app-header h1 {
+.page-head h1 {
   margin: 0;
-  font-size: 22px;
+  font-size: 17px;
+  font-weight: 600;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
-.app-body {
-  padding: 0 16px 24px;
+.head-note {
+  font-size: 12px;
+  color: var(--muted);
+  flex: 0 0 auto;
+}
+
+.page-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 12px;
+}
+
+.study-body {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding-bottom: 96px;
+}
+
+.icon-btn {
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  font-size: 20px;
+  line-height: 1;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--fg);
+}
+
+.icon-btn:disabled {
+  opacity: 0.3;
+}
+
+.ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- 牌组列表 ---------- */
+
+.deck-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.deck-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card);
+  color: var(--fg);
+  font-size: 16px;
+  text-align: left;
+}
+
+.deck-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.deck-counts {
+  display: flex;
+  gap: 10px;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.c-new {
+  color: var(--accent);
+}
+.c-due {
+  color: var(--fail);
+}
+.c-total {
+  color: var(--muted);
+}
+
+.legend {
+  margin-top: 12px;
+}
+
+/* ---------- 学习页 ---------- */
+
+.card-face {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 22px 18px;
+  min-height: 40vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 14px;
+  font-size: 20px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.card-face .front {
+  font-weight: 500;
+}
+
+.card-face .back {
+  color: var(--fg);
+}
+
+.sep {
+  border: none;
+  border-top: 1px dashed var(--line);
+  margin: 0;
+}
+
+.hint {
+  text-align: center;
+  margin: 0;
+}
+
+.rating-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  gap: 6px;
+  padding: 8px 8px calc(8px + var(--safe-bottom));
+  background: var(--bg);
+  border-top: 1px solid var(--line);
+}
+
+.rate-btn {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 12px 4px;
+  border-radius: 12px;
+  border: 1px solid currentColor;
+  background: transparent;
+  color: var(--fg);
+}
+
+.rate-btn .rate-label {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.rate-btn .rate-due {
+  font-size: 11px;
+  opacity: 0.75;
+  font-variant-numeric: tabular-nums;
+}
+
+.rate-btn.r1 {
+  color: var(--r1);
+}
+.rate-btn.r2 {
+  color: var(--r2);
+}
+.rate-btn.r3 {
+  color: var(--r3);
+}
+.rate-btn.r4 {
+  color: var(--r4);
+}
+
+/* ---------- FAB / 弹层 ---------- */
+
+.fab {
+  position: fixed;
+  right: 18px;
+  bottom: calc(20px + var(--safe-bottom));
+  width: 58px;
+  height: 58px;
+  border-radius: 50%;
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  font-size: 26px;
+  line-height: 1;
+  box-shadow: 0 4px 14px rgb(0 0 0 / 22%);
+}
+
+.sheet {
+  position: fixed;
+  inset: auto 0 0 0;
+  width: 100%;
+  max-width: 100%;
+  max-height: 86vh;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 16px 16px 0 0;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.sheet::backdrop {
+  background: rgb(0 0 0 / 40%);
+}
+
+.sheet-inner {
+  display: flex;
+  flex-direction: column;
+  max-height: 86vh;
+}
+
+.sheet-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 12px 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.sheet-head h2 {
+  margin: 0;
+  font-size: 16px;
+  flex: 1 1 auto;
+}
+
+.sheet-body {
+  padding: 12px 14px calc(16px + var(--safe-bottom));
+  overflow-y: auto;
+}
+
+.sheet-item {
+  display: block;
+  width: 100%;
+  padding: 15px 4px;
+  font-size: 16px;
+  text-align: left;
+  border: none;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  color: var(--fg);
+}
+
+.sheet-item:last-child {
+  border-bottom: none;
+}
+
+.sheet-item:disabled {
+  opacity: 0.4;
+}
+
+.sheet-item.danger {
+  color: var(--fail);
+}
+
+/* ---------- 表单 ---------- */
+
+.form {
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field > span {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.field textarea,
+.field input,
+.field select {
+  width: 100%;
+  padding: 11px 12px;
+  font-size: 16px; /* ≥16px 才不会触发 iOS 聚焦缩放 */
+  font-family: inherit;
+  color: var(--fg);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  resize: vertical;
+}
+
+.btn {
+  padding: 14px;
+  font-size: 16px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+}
+
+.row-btns {
+  display: flex;
+  gap: 10px;
+}
+
+.row-btns .btn {
+  flex: 1 1 0;
+}
+
+/* ---------- 杂项 ---------- */
 
 .card {
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: 12px;
   padding: 14px;
+  margin-bottom: 12px;
 }
 
 .card h2,
@@ -92,24 +444,17 @@ body {
   line-height: 1.5;
 }
 
-.btn {
-  width: 100%;
-  padding: 14px;
-  font-size: 16px;
-  border-radius: 10px;
-  border: 1px solid var(--line);
-  background: var(--bg);
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  word-break: break-all;
+  margin: 0 0 10px;
+}
+
+.empty {
+  text-align: center;
+  padding: 40px 16px;
   color: var(--fg);
-}
-
-.btn.primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-}
-
-.btn:disabled {
-  opacity: 0.5;
 }
 
 .tag {
@@ -135,7 +480,6 @@ body {
   font-size: 12.5px;
   line-height: 1.7;
   color: var(--muted);
-  /* 路径/耗时这类内容允许换行，别撑破屏幕 */
   word-break: break-all;
 }
 
@@ -143,6 +487,7 @@ body {
   margin: 8px 0 0;
   font-size: 13px;
   color: var(--fail);
+  line-height: 1.5;
 }
 
 code {
@@ -150,7 +495,6 @@ code {
   word-break: break-all;
 }
 
-/* 自检总览一行：全过就是绿的，有失败就是红的 */
 .ok-line,
 .bad-line {
   margin: 0 0 10px;
@@ -164,4 +508,27 @@ code {
 
 .bad-line {
   color: var(--fail);
+}
+
+.flash {
+  margin: 0;
+  padding: 8px 12px;
+  font-size: 13px;
+  text-align: center;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+}
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(90px + var(--safe-bottom));
+  transform: translateX(-50%);
+  max-width: 80vw;
+  padding: 10px 16px;
+  border-radius: 999px;
+  background: rgb(0 0 0 / 78%);
+  color: #fff;
+  font-size: 14px;
+  z-index: 10;
 }

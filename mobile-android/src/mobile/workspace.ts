@@ -401,6 +401,11 @@ export class MobileWorkspace {
     return this.totalAnsweredCount
   }
 
+  /** 本会话还能撤销几步（撤销按钮的可用态；重启后为 0，这是有意的） */
+  undoableCount(): number {
+    return this.session.undoableCount
+  }
+
   deckNameOf(deckId: string): string {
     return this.decks.find((d) => d.id === deckId)?.name ?? ''
   }
