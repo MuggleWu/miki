@@ -132,7 +132,7 @@ describe('runSync 编排', () => {
     gh.push('decks.json', '[{"id":"d1","name":"A"}]')
     gh.push('cards/d1.ndjson', row({ id: 'c1', front: 'q' }))
     const store = new MemoryFileStore()
-    const out = await runSync({ store, paths, reloadAndVerify: verifyFrom(store) }, creds, emptyBase())
+    const out = await runSync({ store, paths, reloadAndVerify: verifyFrom(store) }, creds, emptyBase(), 'full')
 
     expect(out.report.ok).toBe(true)
     expect(out.report.pulled).toBe(2)
@@ -146,7 +146,7 @@ describe('runSync 编排', () => {
     const store = new MemoryFileStore()
     await store.writeText(`${ROOT}/review-log/2026-09.ndjson`, row({ action: 'answer', cardId: 'c1', t: 1, rating: 3 }))
     // 先同步一次拿到 base（此时本地与远端一致）
-    const first = await runSync({ store, paths, reloadAndVerify: verifyFrom(store) }, creds, emptyBase())
+    const first = await runSync({ store, paths, reloadAndVerify: verifyFrom(store) }, creds, emptyBase(), 'full')
     expect(first.report.pushed).toBe(0)
 
     // 手机上又答了一题
@@ -154,7 +154,7 @@ describe('runSync 编排', () => {
       `${ROOT}/review-log/2026-09.ndjson`,
       row({ action: 'answer', cardId: 'c2', t: 2, rating: 4 })
     )
-    const second = await runSync({ store, paths, reloadAndVerify: verifyFrom(store) }, creds, first.base)
+    const second = await runSync({ store, paths, reloadAndVerify: verifyFrom(store) }, creds, first.base, 'full')
 
     expect(second.report.ok).toBe(true)
     expect(second.report.pushed).toBe(1)
@@ -177,7 +177,7 @@ describe('runSync 编排', () => {
     const store = new MemoryFileStore()
     await store.writeText(`${ROOT}/cards/d1.ndjson`, card)
     await store.writeText(`${ROOT}/review-log/2026-09.ndjson`, ev1)
-    const first = await runSync({ store, paths, reloadAndVerify: verifyFrom(store) }, creds, emptyBase())
+    const first = await runSync({ store, paths, reloadAndVerify: verifyFrom(store) }, creds, emptyBase(), 'full')
     expect(first.report.pushed).toBe(0)
 
     // 手机上答了一题：只有 review-log 该被推，它排在 cards/d1.ndjson 后面
@@ -185,7 +185,7 @@ describe('runSync 编排', () => {
       `${ROOT}/review-log/2026-09.ndjson`,
       row({ action: 'answer', cardId: 'c2', t: 2, rating: 4 })
     )
-    const second = await runSync({ store, paths, reloadAndVerify: verifyFrom(store) }, creds, first.base)
+    const second = await runSync({ store, paths, reloadAndVerify: verifyFrom(store) }, creds, first.base, 'full')
 
     expect(second.report.ok).toBe(true)
     expect(second.report.pushed).toBe(1)
@@ -198,7 +198,7 @@ describe('runSync 编排', () => {
     gh.push('review-log/2026-09.ndjson', shared)
     const store = new MemoryFileStore()
     await store.writeText(`${ROOT}/review-log/2026-09.ndjson`, shared)
-    const first = await runSync({ store, paths, reloadAndVerify: verifyFrom(store) }, creds, emptyBase())
+    const first = await runSync({ store, paths, reloadAndVerify: verifyFrom(store) }, creds, emptyBase(), 'full')
 
     // 桌面端追加一条并推送；手机上也答了一题
     gh.push('review-log/2026-09.ndjson', shared + row({ action: 'answer', cardId: 'desktop', t: 10, rating: 1 }))
@@ -207,7 +207,7 @@ describe('runSync 编排', () => {
       row({ action: 'answer', cardId: 'phone', t: 20, rating: 4 })
     )
 
-    const out = await runSync({ store, paths, reloadAndVerify: verifyFrom(store) }, creds, first.base)
+    const out = await runSync({ store, paths, reloadAndVerify: verifyFrom(store) }, creds, first.base, 'full')
 
     expect(out.report.ok).toBe(true)
     const local = await store.readText(`${ROOT}/review-log/2026-09.ndjson`)
@@ -225,24 +225,24 @@ describe('runSync 编排', () => {
     gh.push('review-log/2026-09.ndjson', row({ action: 'answer', cardId: 'c0', t: 0, rating: 3 }))
     const store = new MemoryFileStore()
     await store.writeText(`${ROOT}/review-log/2026-09.ndjson`, row({ action: 'answer', cardId: 'c0', t: 0, rating: 3 }))
-    const first = await runSync({ store, paths, reloadAndVerify: verifyFrom(store) }, creds, emptyBase())
+    const first = await runSync({ store, paths, reloadAndVerify: verifyFrom(store) }, creds, emptyBase(), 'full')
 
     await store.appendText(
       `${ROOT}/review-log/2026-09.ndjson`,
       row({ action: 'answer', cardId: 'mine', t: 5, rating: 4 })
     )
     gh.conflictOnNextRef = true
-    await expect(runSync({ store, paths, reloadAndVerify: verifyFrom(store) }, creds, first.base)).rejects.toThrow(
-      /422|fast forward/
-    )
+    await expect(
+      runSync({ store, paths, reloadAndVerify: verifyFrom(store) }, creds, first.base, 'full')
+    ).rejects.toThrow(/422|fast forward/)
   })
 
   it('推送前留下快照（工作区整份复制到 <root>-backups）', async () => {
     gh.push('review-log/2026-09.ndjson', row({ action: 'answer', cardId: 'c0', t: 0, rating: 3 }))
     const store = new MemoryFileStore()
-    const first = await runSync({ store, paths, reloadAndVerify: verifyFrom(store) }, creds, emptyBase())
+    const first = await runSync({ store, paths, reloadAndVerify: verifyFrom(store) }, creds, emptyBase(), 'full')
     await store.appendText(`${ROOT}/review-log/2026-09.ndjson`, row({ action: 'answer', cardId: 'x', t: 1, rating: 3 }))
-    const out = await runSync({ store, paths, reloadAndVerify: verifyFrom(store) }, creds, first.base)
+    const out = await runSync({ store, paths, reloadAndVerify: verifyFrom(store) }, creds, first.base, 'full')
 
     expect(out.report.snapshot).toBeTruthy()
     const backups = await store.list(`${ROOT}-backups`)
@@ -252,16 +252,26 @@ describe('runSync 编排', () => {
   })
 
   it('重放校验发现坏行 → 停止同步、不推送', async () => {
-    gh.push('review-log/2026-09.ndjson', row({ action: 'answer', cardId: 'c0', t: 0, rating: 3 }))
+    // 只有"本次真的有东西写进本地"才会走到重放校验（没有写入就没什么可校验的，
+    // 见 runSync 里那条 `if (toWrite.length > 0)`）：所以先建立 base，再让远端多一行，
+    // 这样本次是一次纯拉取落地。
+    const ev1 = row({ action: 'answer', cardId: 'c0', t: 0, rating: 3 })
+    gh.push('review-log/2026-09.ndjson', ev1)
     const store = new MemoryFileStore()
-    await store.writeText(`${ROOT}/review-log/2026-09.ndjson`, row({ action: 'answer', cardId: 'c0', t: 0, rating: 3 }))
+    await store.writeText(`${ROOT}/review-log/2026-09.ndjson`, ev1)
+    const first = await runSync({ store, paths, reloadAndVerify: verifyFrom(store) }, creds, emptyBase(), 'full')
+    gh.push('review-log/2026-09.ndjson', ev1 + row({ action: 'answer', cardId: 'c1', t: 1, rating: 3 }))
+
     await expect(
       runSync(
         { store, paths, reloadAndVerify: async () => ({ eventCount: 0, damaged: 2, truncated: 0, cards: 0 }) },
         creds,
-        emptyBase()
+        first.base,
+        'full'
       )
     ).rejects.toThrow(/坏行/)
+    // 校验没过 → 一个 commit 都不该产生（测试名里的"不推送"）
+    expect(gh.refUpdates).toBe(0)
   })
 })
 
@@ -269,12 +279,92 @@ describe('记账', () => {
   it('同步后回写 base：下次同步能识别"远端没动"从而不下载文件', async () => {
     gh.push('decks.json', '[{"id":"d1"}]')
     const store = new MemoryFileStore()
-    const first = await runSync({ store, paths, reloadAndVerify: verifyFrom(store) }, creds, emptyBase())
+    const first = await runSync({ store, paths, reloadAndVerify: verifyFrom(store) }, creds, emptyBase(), 'full')
     expect(Object.keys(first.base.remoteSha)).toContain('decks.json')
     expect(first.base.commit).toBe(gh.commit)
 
     const second: SyncBase = first.base
-    const out = await runSync({ store, paths, reloadAndVerify: verifyFrom(store) }, creds, second)
+    const out = await runSync({ store, paths, reloadAndVerify: verifyFrom(store) }, creds, second, 'full')
     expect(out.report.message).toContain('已是最新')
+  })
+})
+
+describe('只拉模式（回前台的自动同步）', () => {
+  // 用户 报的 bug：说好"回前台静默拉一次"，结果把手机上攒的进度也推上去了。
+  it('本地有新进度、远端没动 → 绝不推送，远端一行都不多（回归）', async () => {
+    const ev1 = row({ action: 'answer', cardId: 'c1', t: 1, rating: 3 })
+    gh.push('review-log/2026-09.ndjson', ev1)
+    const store = new MemoryFileStore()
+    await store.writeText(`${ROOT}/review-log/2026-09.ndjson`, ev1)
+    const first = await runSync({ store, paths, reloadAndVerify: verifyFrom(store) }, creds, emptyBase(), 'full')
+    expect(first.report.pushed).toBe(0)
+
+    // 手机上答了一题（只在本机）
+    const ev2 = row({ action: 'answer', cardId: 'c2', t: 2, rating: 4 })
+    await store.appendText(`${ROOT}/review-log/2026-09.ndjson`, ev2)
+
+    const auto = await runSync({ store, paths, reloadAndVerify: verifyFrom(store) }, creds, first.base, 'pull-only')
+
+    expect(auto.report.ok).toBe(true)
+    expect(auto.report.pushed).toBe(0)
+    expect(auto.report.commit).toBeNull()
+    expect(gh.refUpdates).toBe(0) // 一次 ref 更新都没有
+    expect(gh.commitMessages).toHaveLength(0) // 也就没有任何 commit
+    // 远端那份内容还和原来一模一样
+    expect(gh.blobs.get(gh.files.get('review-log/2026-09.ndjson')!)).toBe(ev1)
+    // 本机那条也还在（只拉模式不该动它）
+    expect(await store.readText(`${ROOT}/review-log/2026-09.ndjson`)).toContain('"c2"')
+  })
+
+  it('远端有新文件 → 拉下来；记账推进到远端头', async () => {
+    const store = new MemoryFileStore()
+    const first = await runSync({ store, paths, reloadAndVerify: verifyFrom(store) }, creds, emptyBase(), 'full')
+    gh.push('decks.json', '[{"id":"d1","name":"新牌组"}]')
+
+    const auto = await runSync({ store, paths, reloadAndVerify: verifyFrom(store) }, creds, first.base, 'pull-only')
+
+    expect(auto.report.pulled).toBe(1)
+    expect(auto.report.pushed).toBe(0)
+    expect(gh.refUpdates).toBe(0)
+    expect(await store.readText(`${ROOT}/decks.json`)).toBe('[{"id":"d1","name":"新牌组"}]')
+    expect(auto.base.commit).toBe(gh.commit)
+
+    // 再做一次：这次两边一致，什么都不用做
+    const again = await runSync({ store, paths, reloadAndVerify: verifyFrom(store) }, creds, auto.base, 'pull-only')
+    expect(again.report.pulled).toBe(0)
+    expect(again.report.message).toContain('已是最新')
+  })
+
+  it('两边都动过 → 只拉模式不碰不推、记账也不推进；下次手动推送两边内容都不丢（回归）', async () => {
+    const ev1 = row({ action: 'answer', cardId: 'c1', t: 1, rating: 3 })
+    gh.push('review-log/2026-09.ndjson', ev1)
+    const store = new MemoryFileStore()
+    await store.writeText(`${ROOT}/review-log/2026-09.ndjson`, ev1)
+    const first = await runSync({ store, paths, reloadAndVerify: verifyFrom(store) }, creds, emptyBase(), 'full')
+
+    // 桌面端答了一题（远端前进），同时手机上也答了一题
+    const ev2 = row({ action: 'answer', cardId: 'c2', t: 2, rating: 4 })
+    const ev3 = row({ action: 'answer', cardId: 'c3', t: 3, rating: 2 })
+    gh.push('review-log/2026-09.ndjson', ev1 + ev2)
+    await store.appendText(`${ROOT}/review-log/2026-09.ndjson`, ev3)
+
+    const auto = await runSync({ store, paths, reloadAndVerify: verifyFrom(store) }, creds, first.base, 'pull-only')
+
+    expect(auto.report.pushed).toBe(0)
+    expect(gh.refUpdates).toBe(0)
+    // 记账停在原地：推进了的话，下次同步会以为"远端没变过"，ev2 就永远拉不回来了
+    expect(auto.base.commit).toBe(first.base.commit)
+    const local = await store.readText(`${ROOT}/review-log/2026-09.ndjson`)
+    expect(local).toContain('"c3"') // 本机那条还在
+    expect(local).not.toContain('"c2"') // 也没偷偷把远端的合并进来
+
+    // 用户点"推送进度"：两边的内容都要落地，一条不丢
+    const manual = await runSync({ store, paths, reloadAndVerify: verifyFrom(store) }, creds, auto.base, 'full')
+    expect(manual.report.pushed).toBe(1)
+    expect(gh.refUpdates).toBe(1)
+    const remote = gh.blobs.get(gh.files.get('review-log/2026-09.ndjson')!)!
+    for (const id of ['c1', 'c2', 'c3']) expect(remote).toContain(`"${id}"`)
+    const localAfter = await store.readText(`${ROOT}/review-log/2026-09.ndjson`)
+    for (const id of ['c1', 'c2', 'c3']) expect(localAfter).toContain(`"${id}"`)
   })
 })

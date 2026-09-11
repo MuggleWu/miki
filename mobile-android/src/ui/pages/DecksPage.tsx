@@ -31,7 +31,7 @@ export function DecksPage(): JSX.Element {
         </button>
         <h1>牌组</h1>
         {/* 拉取是自动的（回前台静默拉），首页只放推送——进度攒在本机，手动推一次就够了 */}
-        <button className="head-btn" onClick={() => void syncNow(true)} disabled={sync.busy}>
+        <button className="head-btn" onClick={() => void syncNow('full')} disabled={sync.busy}>
           {sync.busy ? '推送中…' : '推送进度'}
         </button>
         <span className="head-note">今日已学 {today} 次</span>

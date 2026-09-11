@@ -110,7 +110,7 @@ export function SettingsPage(): JSX.Element {
               ) : null}
               {sync.lastError ? <p className="note">{sync.lastError}</p> : null}
               <div className="row-btns">
-                <button className="btn primary" disabled={sync.busy} onClick={() => void syncNow(true)}>
+                <button className="btn primary" disabled={sync.busy} onClick={() => void syncNow('full')}>
                   {sync.busy ? '同步中…' : '立即同步'}
                 </button>
                 <button className="btn" onClick={() => setConfigSync(true)}>

@@ -53,13 +53,25 @@ export interface SyncOutcome {
   base: SyncBase
 }
 
+/**
+ * 同步方向。**故意做成必填、且不给默认值**：
+ * - `'pull-only'`：只拉，绝不产生 commit。回到前台的自动同步走这条。
+ * - `'full'`：拉 + 推。只有用户点"推送进度 / 立即同步"才走这条。
+ *
+ * 之前这里没有这个参数，回前台那次也照样执行推送段——用户看到的是"说好只拉，结果把我
+ * 本机的进度也推上去了"。加上参数并不够，所以不留默认值：漏传时编译就过不去。
+ */
+export type SyncMode = 'full' | 'pull-only'
+
 /** 一次同步。任何一步失败都抛出，由 UI 层转成提示；不吞异常 */
-export async function runSync(env: SyncEnv, creds: SyncCreds, base: SyncBase): Promise<SyncOutcome> {
+export async function runSync(env: SyncEnv, creds: SyncCreds, base: SyncBase, mode: SyncMode): Promise<SyncOutcome> {
   const client = new GithubClient(creds)
   const at = Date.now()
   const head = await client.head()
 
   const files: MergeResult[] = []
+  /** 远端变了、这次没取过来的文件（只拉模式下会让记账的 commit 停在原地） */
+  const remotePending: string[] = []
   const localOf = async (p: string): Promise<string | null> => env.store.readText(`${env.paths.root}/${p}`)
 
   // 远端没有动过（头一致）时不必下载任何文件，直接看本地有什么要推的
@@ -72,6 +84,11 @@ export async function runSync(env: SyncEnv, creds: SyncCreds, base: SyncBase): P
 
   /** 拉下来的新内容（path → 文本），落地与推送都用它 */
   const pulled = new Map<string, string>()
+  /** path → 远端 blob sha（含"头没变、这次没列远端"时沿用的上次记录） */
+  const remoteShaOf = new Map<string, string>([
+    ...Object.entries(base.remoteSha),
+    ...remoteFiles.map((e) => [e.path, e.sha] as [string, string])
+  ])
 
   for (const path of allPaths) {
     const local = localPaths.includes(path) ? await localOf(path) : null
@@ -108,9 +125,13 @@ export async function runSync(env: SyncEnv, creds: SyncCreds, base: SyncBase): P
         ? mergeFile({ path, local, remote, base: remote })
         : mergeFile({ path, local, remote })
     files.push(r)
+    // 远端变了、但这次结果不是"直接取远端"（要合并 / 冲突 / 拦住）：留给手动推送处理
+    if (remoteDiffers && r.action !== 'take-remote') remotePending.push(path)
   }
 
-  const blocked = files.filter((f) => f.action === 'blocked')
+  // 只拉模式下遇到不能自动合并的文件不算错误：推送本来就不会发生，把它留着不动，
+  // 其它文件照拉——用户下次手动推送时再一起处理。
+  const blocked = mode === 'full' ? files.filter((f) => f.action === 'blocked') : []
   if (blocked.length > 0) {
     return {
       base,
@@ -128,28 +149,78 @@ export async function runSync(env: SyncEnv, creds: SyncCreds, base: SyncBase): P
     }
   }
 
-  // ---- 落地：把 take-remote / union 的结果写进本地工作区 ----
-  const toWrite = files.filter((f) => f.content !== null)
+  // ---- 落地：把结果写进本地工作区 ----
+  // 只拉模式只写"直接取远端"（take-remote）的文件：合并结果（union）不与推送分离——
+  // 那种文件的本地版本会与远端分叉，必须由手动推送一并推上去，静默拉取不碰它。
+  const toWrite =
+    mode === 'pull-only'
+      ? files.filter((f) => f.action === 'take-remote' && f.content !== null)
+      : files.filter((f) => f.content !== null)
   for (const f of toWrite) {
     await env.store.writeText(`${env.paths.root}/${f.path}`, f.content!)
   }
 
   // ---- 重放校验：写下去的东西必须被工作区完整吃进去 ----
-  const verify = await env.reloadAndVerify()
-  if (verify.damaged > 0 || verify.truncated > 0) {
-    throw new Error(
-      `合并后重放发现坏行（坏行 ${verify.damaged} 条、截断文件 ${verify.truncated} 个），已停止同步。` +
-        '请到设置页的「数据健康」看是哪个文件。'
+  // 没有写入就不必整份重载工作区（回前台那次同步以前每次都白重载一遍）
+  if (toWrite.length > 0) {
+    const verify = await env.reloadAndVerify()
+    if (verify.damaged > 0 || verify.truncated > 0) {
+      throw new Error(
+        `合并后重放发现坏行（坏行 ${verify.damaged} 条、截断文件 ${verify.truncated} 个），已停止同步。` +
+          '请到设置页的「数据健康」看是哪个文件。'
+      )
+    }
+    // 本地事件数必须覆盖本次落地的**事件行**（只有 review-log 里的行才是事件；
+    // decks.json / 卡片文件的行不是事件，混进来会让这条校验永远误报）
+    const expectedEvents = files.reduce(
+      (n, f) => n + (f.content && f.path.startsWith('review-log/') ? countEvents(f.content) : 0),
+      0
     )
+    if (expectedEvents > 0 && verify.eventCount < expectedEvents) {
+      throw new Error(`合并后重放只吃到 ${verify.eventCount} 条事件，少于写入的 ${expectedEvents} 条，已停止同步。`)
+    }
   }
-  // 本地事件数必须覆盖本次落地的**事件行**（只有 review-log 里的行才是事件；
-  // decks.json / 卡片文件的行不是事件，混进来会让这条校验永远误报）
-  const expectedEvents = files.reduce(
-    (n, f) => n + (f.content && f.path.startsWith('review-log/') ? countEvents(f.content) : 0),
-    0
-  )
-  if (expectedEvents > 0 && verify.eventCount < expectedEvents) {
-    throw new Error(`合并后重放只吃到 ${verify.eventCount} 条事件，少于写入的 ${expectedEvents} 条，已停止同步。`)
+
+  // ---- 只拉模式到此为止：绝不产生 commit，记账按"实际拉到了什么"更新 ----
+  if (mode === 'pull-only') {
+    // 记账：以上次那份为底，只把这次真正拉下来的文件更新掉。
+    // 只要还有"远端变了、这次没取过来"的文件，commit 就停在原地——推进了的话，
+    // 下次同步会以为"远端没变过"，那些文件的远端改动就再也拉不回来了。
+    const nextRemoteSha = { ...base.remoteSha }
+    const nextLocalHash = { ...base.localHash }
+    if (remoteChanged && remotePending.length === 0) {
+      // 远端清单这次列全了、也没有留下没处理的：直接用这份清单，
+      // 顺带清掉远端已删文件的旧记录，免得上一次删除永远留在记账里
+      for (const k of Object.keys(nextRemoteSha)) delete nextRemoteSha[k]
+      for (const e of remoteFiles) nextRemoteSha[e.path] = e.sha
+    }
+    for (const f of toWrite) {
+      const sha = remoteShaOf.get(f.path)
+      if (sha) nextRemoteSha[f.path] = sha
+      const text = await env.store.readText(`${env.paths.root}/${f.path}`)
+      if (text !== null) nextLocalHash[f.path] = await hashText(text)
+    }
+    return {
+      base: {
+        commit: remotePending.length === 0 ? head.commit : base.commit,
+        remoteSha: nextRemoteSha,
+        localHash: nextLocalHash
+      },
+      report: {
+        ok: true,
+        at,
+        message:
+          toWrite.length > 0
+            ? `自动拉取：更新 ${toWrite.length} 个文件（只拉不推，没有产生 commit）`
+            : '已是最新，无需改动（只拉不推）',
+        files: files.map((f) => ({ path: f.path, action: f.action, reason: f.reason })),
+        pulled: toWrite.length,
+        pushed: 0,
+        reviews: 0,
+        cards: 0,
+        commit: null
+      }
+    }
   }
 
   // ---- 推送 ----

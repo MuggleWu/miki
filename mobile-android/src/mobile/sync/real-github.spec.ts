@@ -140,7 +140,7 @@ describe.skipIf(!enabled)(`真实 GitHub 演练（分支 ${BRANCH}）`, () => {
 
   it('推送：本地有内容 → 真服务器上出现一条 commit，内容可读回', async () => {
     const { env, store } = makeWorkspace()
-    const out = await runSync(env, creds, base)
+    const out = await runSync(env, creds, base, 'full')
     console.log(`[演练] 首次同步：${out.report.message}`)
 
     // 远端确实是空的（刚建的分支沿用远端骨架）→ 应当全部推上去
@@ -165,7 +165,7 @@ describe.skipIf(!enabled)(`真实 GitHub 演练（分支 ${BRANCH}）`, () => {
   it('无变更：再同步一次不产生 commit（不做无意义的写入）', async () => {
     const { env } = makeWorkspace()
     // 把上次推送后的 base 交给它：远端头没变、本地内容也没变
-    const out = await runSync(env, creds, base)
+    const out = await runSync(env, creds, base, 'full')
     expect(out.report.pushed).toBe(0)
     expect(out.report.pulled).toBe(0)
     expect(out.report.files.every((f) => f.action === 'skip')).toBe(true)
@@ -178,7 +178,7 @@ describe.skipIf(!enabled)(`真实 GitHub 演练（分支 ${BRANCH}）`, () => {
     const log = (await store.readText('drill-ws/review-log/2026-09.ndjson')) + extra
     await pushAsDesktop({ 'review-log/2026-09.ndjson': log }, 'desktop: 演练——桌面端追答一条')
 
-    const out = await runSync(env, creds, base)
+    const out = await runSync(env, creds, base, 'full')
     console.log(`[演练] 拉取同步：${out.report.message}`)
     expect(out.report.ok).toBe(true)
     expect(out.report.pulled).toBeGreaterThan(0)
@@ -196,7 +196,7 @@ describe.skipIf(!enabled)(`真实 GitHub 演练（分支 ${BRANCH}）`, () => {
     const localDecks = JSON.stringify([{ id: 'drill-deck-0001', name: '演练牌组（手机端改名）', createdAt: 1 }]) + '\n'
     await store.writeText('drill-ws/decks.json', localDecks)
 
-    const out = await runSync(env, creds, base)
+    const out = await runSync(env, creds, base, 'full')
     console.log(`[演练] 冲突同步：${out.report.message}`)
     expect(out.report.ok).toBe(false)
     expect(out.report.files.some((f) => f.action === 'blocked')).toBe(true)

@@ -111,6 +111,7 @@ export function App(): JSX.Element {
   }, [])
 
   // 回到前台自动拉取（设计文档：拉取是只读的、静默的；推送只由用户点触发）
+  // 注意这里必须是 'pull-only'：推送只发生在用户点"推送进度 / 立即同步"时
   useEffect(() => {
     let handle: { remove(): Promise<void> } | undefined
     void CapApp.addListener('appStateChange', ({ isActive }) => {
@@ -118,7 +119,7 @@ export function App(): JSX.Element {
       const st = useApp.getState()
       // 还没配同步、正在同步、或工作区还没起来都不重复拉
       if (!st.ws || st.sync.busy || !st.sync.status?.configured) return
-      void st.syncNow(false)
+      void st.syncNow('pull-only')
     }).then((h) => {
       handle = h
     })

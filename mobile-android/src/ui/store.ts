@@ -29,6 +29,7 @@ import {
 } from '@mobile/sync/creds'
 import { runSync } from '@mobile/sync'
 import { GithubClient } from '@mobile/sync/github'
+import type { SyncMode } from '@mobile/sync'
 import type { SyncReport } from '@mobile/sync/types'
 import type { FontScale, ThemePref } from '@mobile/theme'
 import { shouldSnapOpen } from './edge-swipe'
@@ -123,7 +124,13 @@ interface AppState {
   saveSyncConfig(repo: string, branch: string, token: string | null): Promise<void>
   clearSyncCreds(): Promise<void>
   /** 手动同步：拉取 → 合并 → 推送（设计文档：推送只在你点它时发生） */
-  syncNow(manual: boolean): Promise<SyncReport | null>
+  /**
+   * 同步。`mode` 是**唯一**的方向开关：
+   * - 'pull-only'：只拉、不产生 commit（回前台的自动同步走它，静默，不弹提示）；
+   * - 'full'：拉 + 推（只有用户点"推送进度 / 立即同步"才走它），并有提示。
+   * 以前这里是 `manual: boolean`，但 direction 并没有真的传下去——回前台那次也照样推送。
+   */
+  syncNow(mode: SyncMode): Promise<SyncReport | null>
 }
 
 export const useApp = create<AppState>((set, get) => ({
@@ -306,13 +313,13 @@ export const useApp = create<AppState>((set, get) => ({
     get().notify('已清空 GitHub 凭据')
   },
 
-  async syncNow(manual) {
+  async syncNow(mode) {
     const { ws, sync } = get()
     if (!ws || sync.busy) return null
     const { repo, branch, token } = await loadCreds()
     if (!token) {
       set({ sync: { ...get().sync, lastError: '还没有配置 GitHub 凭据' } })
-      if (manual) get().notify('还没配置同步：去设置页填仓库与 PAT')
+      if (mode === 'full') get().notify('还没配置同步：去设置页填仓库与 PAT')
       return null
     }
     set({ sync: { ...get().sync, busy: true, lastError: null } })
@@ -335,7 +342,8 @@ export const useApp = create<AppState>((set, get) => ({
           }
         },
         { repo, branch, token },
-        base
+        base,
+        mode
       )
       await saveBase(outcome.base)
       await saveLastSyncAt(outcome.report.at)
@@ -349,7 +357,7 @@ export const useApp = create<AppState>((set, get) => ({
         }
       })
       get().bump()
-      if (manual) get().notify(outcome.report.message)
+      if (mode === 'full') get().notify(outcome.report.message)
       return outcome.report
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
@@ -364,7 +372,7 @@ export const useApp = create<AppState>((set, get) => ({
         }
       })
       if (stale) await saveVerify({ at: Date.now(), ok: false, message: msg })
-      if (manual) get().notify(`同步失败：${msg}`)
+      if (mode === 'full') get().notify(`同步失败：${msg}`)
       return null
     }
   },
