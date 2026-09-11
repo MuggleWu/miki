@@ -15,8 +15,13 @@ export const PREF_KEYS = {
   fontScale: 'miki.display.fontScale',
   keepAwake: 'miki.display.keepAwake',
   githubRepo: 'miki.sync.repo',
+  githubBranch: 'miki.sync.branch',
   githubPat: 'miki.sync.pat',
-  lastSyncAt: 'miki.sync.lastAt'
+  lastSyncAt: 'miki.sync.lastAt',
+  /** 上次同步的两侧状态（JSON）：判断"谁变了"的依据 */
+  syncBase: 'miki.sync.base',
+  /** 上次连接验证的结果（JSON：{at, ok, message}） */
+  syncVerify: 'miki.sync.verify'
 } as const
 
 export async function prefGet(key: string): Promise<string | null> {

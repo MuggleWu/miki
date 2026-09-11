@@ -304,7 +304,11 @@ select {
   inset: auto 0 0 0;
   width: 100%;
   max-width: 100%;
-  max-height: 86vh;
+  /* --kb 是键盘高度（App 里用 VisualViewport 量的）。直接用 max-height 表达
+     "最多占到键盘上沿"，比依赖系统窗口 inset 的行为更可控——真机上就吃过这个亏：
+     编辑卡片时键盘盖住了保存按钮，用户找不到怎么保存。 */
+  max-height: calc(86vh - var(--kb, 0px));
+  bottom: var(--kb, 0px);
   margin: 0;
   padding: 0;
   border: none;
@@ -320,7 +324,11 @@ select {
 .sheet-inner {
   display: flex;
   flex-direction: column;
-  max-height: 86vh;
+  max-height: calc(86vh - var(--kb, 0px));
+}
+
+.sheet-full .sheet-inner {
+  max-height: none;
 }
 
 .sheet-head {
@@ -858,25 +866,36 @@ code {
 .sheet-full {
   width: 100%;
   max-width: 100%;
-  height: 100%;
-  max-height: 100%;
+  /* 全屏 = 占满"键盘以上的那块区域"，用 top/bottom 拉伸而不是给高度：
+     fixed 元素的包含块会随 adjustResize 收缩，而 `100dvh` 在 Chrome 上**不**随虚拟键盘
+     收缩（实测键盘弹起时 innerHeight 从 842 变成 530，dvh 仍是 842）。
+     用高度写死就会得到一个比可见区域还高的弹层，底部按钮永远在屏幕外。 */
+  top: 0;
+  bottom: var(--kb, 0px);
+  height: auto;
+  max-height: none;
   margin: 0;
   border-radius: 0;
-  top: 0;
   transform: none;
 }
 
 .sheet-full .sheet-inner {
   height: 100%;
+  max-height: 100%;
   display: flex;
   flex-direction: column;
 }
 
+/* 头固定、中间滚、底部的操作按钮跟着一起滚到底部可见 */
 .sheet-full .sheet-body {
   flex: 1;
   overflow-y: auto;
-  /* 键盘弹出时（visualViewport 缩小）不要被顶飞，让内容自己滚 */
-  padding-bottom: 24px;
+  padding-bottom: calc(24px + var(--kb, 0px));
+  scroll-padding-bottom: calc(24px + var(--kb, 0px));
+}
+
+.sheet-body {
+  padding-bottom: calc(16px + var(--kb, 0px));
 }
 
 /* ---------- markdown 渲染（与桌面端同一份管线） ---------- */
@@ -983,4 +1002,69 @@ code {
 /* 行内公式跟随字号缩放（KaTeX 内部用的是 em，这里只需保证不额外放大） */
 .md .katex {
   font-size: 1.05em;
+}
+
+/* ---------- 同步明细（设置页） ---------- */
+
+.sync-detail code {
+  font-size: 12px;
+}
+
+.sync-files {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+}
+
+.sync-files li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: baseline;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+}
+
+.sync-files .muted {
+  flex-basis: 100%;
+}
+
+.tag {
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  background: color-mix(in srgb, var(--line) 55%, transparent);
+}
+
+.tag-keep-local {
+  color: var(--accent);
+}
+
+.tag-take-remote {
+  color: var(--ok, var(--accent));
+}
+
+.tag-union {
+  color: var(--warn, var(--accent));
+}
+
+.tag-blocked {
+  color: var(--fail);
+}
+
+/* 表单里的 input（同步配置用）与 textarea 同一套外观 */
+.form input {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 15px;
+}
+
+.form details summary {
+  padding: 8px 0;
+  color: var(--muted);
 }

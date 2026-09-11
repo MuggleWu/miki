@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 11 及以下的备份规则（后端存储与 rules 格式都与 12+ 不同，两份都要有）。
+  语义与 data_extraction_rules.xml 的 cloud-backup 段一致：凭据与工作区都不进备份。
+-->
+<full-backup-content>
+    <exclude domain="sharedpref" path="." />
+    <exclude domain="file" path="." />
+    <exclude domain="database" path="." />
+</full-backup-content>

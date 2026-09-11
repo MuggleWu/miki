@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 12+（API 31+）的备份规则。
+
+  为什么要专门写这个文件：Android 的自动备份默认会把 SharedPreferences（同步 PAT 就在里面）
+  与 files 目录（整个 miki 工作区）一起传到 Google Drive。两件事都不该发生：
+  ① 凭据离开设备是安全问题；② 工作区本来就有 GitHub 私有仓库作权威副本，系统备份是多余的暴露面。
+  它同时削弱"只有本 App 能读这些文件"这条前提——写入备份的东西，能读它的人就不止本 App。
+
+  设备迁移（device-transfer）只排除凭据：没推送的学习记录跟人走是有价值的，
+  而 token 到新机上重新填一次即可（工作区还能从 GitHub 重新拉）。
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="." />
+        <exclude domain="file" path="." />
+        <exclude domain="database" path="." />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="." />
+    </device-transfer>
+</data-extraction-rules>

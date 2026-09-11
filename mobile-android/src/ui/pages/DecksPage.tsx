@@ -20,6 +20,7 @@ export function DecksPage(): JSX.Element {
   const decks = ws.deckInfos()
   const today = ws.todayCount()
   const dmg = ws.damageReport()
+  const sync = useApp((s) => s.sync)
 
   return (
     <>
@@ -30,6 +31,12 @@ export function DecksPage(): JSX.Element {
         <h1>牌组</h1>
         <span className="head-note">今日已学 {today} 次</span>
       </div>
+
+      {sync.status?.configured && sync.verify && !sync.verify.ok ? (
+        <button className="banner" onClick={() => go({ kind: 'settings' })}>
+          GitHub 凭据失效（同步没在跑）：点这里去设置页换 PAT
+        </button>
+      ) : null}
 
       {dmg.damagedLines > 0 ? (
         <button className="banner" onClick={() => go({ kind: 'settings' })}>
