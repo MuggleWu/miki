@@ -18,7 +18,12 @@ import type { MobilePaths } from '../paths'
 /** 工作区里参与同步的文件（config.json 只读不写：机器本地字段归桌面端管） */
 export function isSyncable(path: string): boolean {
   if (path.endsWith('stats.json')) return false // 派生缓存，桌面端也不进仓库
-  return path === 'decks.json' || path === 'config.json' || path.endsWith('.ndjson')
+  if (path === 'decks.json' || path === 'config.json') return true
+  // 只认工作区自己的两个数据目录、且只认一层：远端树里的路径要当**输入**看待，
+  // 不该因为"以 .ndjson 结尾"就在本机建出任意目录（例如 `foo/evil.ndjson`）。
+  const slash = path.indexOf('/')
+  const oneLevel = slash > 0 && slash === path.lastIndexOf('/')
+  return oneLevel && path.endsWith('.ndjson') && (path.startsWith('cards/') || path.startsWith('review-log/'))
 }
 
 /** 递归列出工作区文件（相对 root 的 POSIX 路径） */
@@ -29,7 +34,10 @@ export async function listWorkspaceFiles(store: FileStore, paths: MobilePaths): 
   }
   for (const dir of ['cards', 'review-log']) {
     for (const e of await store.list(`${paths.root}/${dir}`)) {
-      if (e.type === 'file' && isSyncable(e.name)) out.push(`${dir}/${e.name}`)
+      // 传拼接后的相对路径而不是裸文件名：isSyncable 的判据是「一层深的 cards/*.ndjson」，
+      // 换成本地这份裸名字两边就不是同一个判断了（裸名字没有斜杠，会被判成不可同步）
+      const rel = `${dir}/${e.name}`
+      if (e.type === 'file' && isSyncable(rel)) out.push(rel)
     }
   }
   return out.sort()

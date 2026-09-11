@@ -528,3 +528,27 @@ describe('用远端覆盖本机（force-pull）', () => {
     await expect(runSync(env, creds, emptyBase(), 'force-pull', {})).rejects.toThrow('没有点名任何文件')
   })
 })
+
+describe('同步路径白名单', () => {
+  it('远端树里的任意 .ndjson 不会在本机建出目录（路径是输入，不是指令）', async () => {
+    gh.push('foo/evil.ndjson', row({ id: 'x' }))
+    gh.push('cards/a/b.ndjson', row({ id: 'y' }))
+    gh.push('cards/good.ndjson', row({ id: 'z' }))
+    gh.push('stats.json', '{"派生缓存":true}')
+    const store = new MemoryFileStore()
+    const out = await runSync({ store, paths, reloadAndVerify: verifyFrom(store) }, creds, emptyBase(), 'full')
+    expect(out.report.pulled).toBe(1) // 只有 cards/good.ndjson
+    expect(await store.readText(`${ROOT}/foo/evil.ndjson`)).toBeNull()
+    expect(await store.readText(`${ROOT}/cards/a/b.ndjson`)).toBeNull()
+    expect(await store.readText(`${ROOT}/stats.json`)).toBeNull()
+    expect(await store.readText(`${ROOT}/cards/good.ndjson`)).not.toBeNull()
+  })
+
+  it('本地 cards/ 下的一层 .ndjson 照常参与（白名单不能误伤自己）', async () => {
+    const store = new MemoryFileStore()
+    await store.writeText(`${ROOT}/cards/d1.ndjson`, row({ id: 'c1' }))
+    await store.writeText(`${ROOT}/review-log/2026-09.ndjson`, row({ id: 'r1' }))
+    const out = await runSync({ store, paths, reloadAndVerify: verifyFrom(store) }, creds, emptyBase(), 'full')
+    expect(out.report.pushed).toBe(2)
+  })
+})
