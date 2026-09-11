@@ -308,4 +308,27 @@ describe('移动版工作区：写入 → 重载 的往返一致性', () => {
     // 卡片本身还在内存里（重放不丢），只是查询口径排除
     expect(w.cards.size).toBe(2)
   })
+
+  // 真机演练抓到的 bug：同一天里第二次加载时，调度索引的跨天检测会直接早退，
+  // 而卡对象与卡桶已经换新 → 索引计数器保留旧值。表现是「新 / 总数」显示 0，
+  // 而「待复习」因为走现场扫桶路径仍然正确——只有重载路径才会出现，首次装载不会。
+  describe('重载：索引计数必须跟着新数据走（回归）', () => {
+    it('reload 后牌组的 新 / 待复习 / 总数 与新内容一致', async () => {
+      const fs3 = new MemoryFileStore()
+      seedWorkspace(fs3) // 1 个牌组 + 2 张新卡
+      const w = await openWorkspace(fs3)
+      expect(w.deckInfos()[0].counts).toMatchObject({ new: 2, total: 2 })
+
+      // 模拟"同步拉下来了更多卡片"：直接往文件里加一张，然后重载
+      const row = (id: string, t: number): string =>
+        JSON.stringify({ id, front: id, back: id, createdAt: t, updatedAt: t, deletedAt: null, suspended: false })
+      const base = await fs3.readText(`${ROOT}/cards/d1.ndjson`)
+      await fs3.writeText(`${ROOT}/cards/d1.ndjson`, base + row('c3', 1_700_000_002_000) + '\n')
+
+      await w.reload()
+      // 修之前这里是 { new: 2, total: 2 }（旧值），due 却是对的
+      expect(w.deckInfos()[0].counts).toMatchObject({ new: 3, total: 3 })
+      expect(w.cards.size).toBe(3)
+    })
+  })
 })

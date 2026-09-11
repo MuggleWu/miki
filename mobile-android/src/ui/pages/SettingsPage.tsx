@@ -198,8 +198,8 @@ export function SettingsPage(): JSX.Element {
           ) : (
             <>
               <p className="muted">
-                还没配置同步：工作区目前只在这台手机上。桌面端与手机之间通过 GitHub 私有仓库
-                <code> miki-base</code> 传数据，需要一个只对这一个仓库有 Contents 读写权限的细粒度 PAT。
+                还没配置同步：工作区目前只在这台手机上。桌面端与手机之间通过一个 GitHub 私有仓库
+                （你自己建的那个）传数据，需要一个只对这一个仓库有 Contents 读写权限的细粒度 PAT。
               </p>
               <p className="note">在同步接上之前，别在这台手机上做"删了就找不回来"的操作：本机的学习记录还没推上去。</p>
               <button className="btn primary" onClick={() => setConfigSync(true)}>

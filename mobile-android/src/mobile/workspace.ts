@@ -147,6 +147,12 @@ export class MobileWorkspace {
     const t4 = now()
     // 跨天检测：首次调用即全量建索引（tie 分配 + 各牌组计数）
     this.sched.ensureDay()
+    // 重载时必须**强制**全量重建，不能只靠 ensureDay 的跨天语义：
+    // 同一天里第二次加载时 ensureDay 会直接早退，而卡对象与卡桶已经整体换新，
+    // 索引计数器会保留上一次的旧值（表现：同步拉取后/回前台重载后，牌组列表的
+    // 「新」与「总数」显示 0，而「待复习」因为走的是现场扫桶路径仍然正确）。
+    // 桌面端 reloadFromDisk 末尾同样有这一步，这里是把它对齐过来。
+    this.sched.forceRebuild(localDateKey(Date.now()), Date.now())
     const t5 = now()
     this.loadTiming = {
       config: t1 - t0,
