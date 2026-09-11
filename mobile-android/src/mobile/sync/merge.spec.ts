@@ -136,3 +136,59 @@ describe('summarize', () => {
     expect(s.blocked).toEqual([])
   })
 })
+
+describe('同一张卡两侧改得不一样', () => {
+  // 行并集对"同一张卡被改成不同内容"是静默丢改动：两条都留着，重放按文件顺序取最后一条，
+  // 一边的编辑就没了，而两边都显示同步成功 —— 这是最坏的一类（用户以为自己备份好了）。
+  const card = (id: string, front: string): string => JSON.stringify({ id, front })
+
+  it('三方判定：两侧都改了且不一样 → blocked，并点名是哪张卡', () => {
+    const base = card('c1', '原文') + '\n'
+    const local = card('c1', '手机上改的') + '\n'
+    const remote = card('c1', '桌面端改的') + '\n'
+    const r = mergeFile({ path: 'cards/d1.ndjson', local, remote, base })
+    expect(r.action).toBe('blocked')
+    expect(r.reason).toContain('c1')
+    expect(r.content).toBeNull()
+  })
+
+  it('只有一侧改过 → 不是冲突（那是明确的，不该拦）', () => {
+    const base = card('c1', '原文') + '\n'
+    const local = card('c1', '手机上改的') + '\n'
+    const r = mergeFile({ path: 'cards/d1.ndjson', local, remote: base, base })
+    expect(r.action).toBe('keep-local')
+  })
+
+  it('两侧改成一模一样 → 不是冲突（同一行会被多重集相抵）', () => {
+    const base = card('c1', '原文') + '\n'
+    const same = card('c1', '都改成这句') + '\n'
+    const r = mergeFile({ path: 'cards/d1.ndjson', local: same, remote: same, base })
+    expect(r.action).not.toBe('blocked')
+  })
+
+  it('不同卡片各自追加 → 照常并集（这条路径不能被误伤）', () => {
+    const base = card('c1', '原文') + '\n'
+    const local = base + card('c2', '手机新增') + '\n'
+    const remote = base + card('c3', '桌面新增') + '\n'
+    const r = mergeFile({ path: 'cards/d1.ndjson', local, remote, base })
+    expect(r.action).toBe('union')
+    expect(r.content).toContain('手机新增')
+    expect(r.content).toContain('桌面新增')
+  })
+
+  it('没有 base（祖先未知）时也拦：无从判断谁改了什么，宁可多问一句', () => {
+    const r = mergeFile({
+      path: 'cards/d1.ndjson',
+      local: card('c1', '手机改的') + '\n',
+      remote: card('c1', '桌面改的') + '\n'
+    })
+    expect(r.action).toBe('blocked')
+  })
+
+  it('复盘日志不按 id 判冲突（事件行本来就是多条真实历史）', () => {
+    const local = '{"action":"answer","cardId":"c1","t":1,"rating":3}\n'
+    const remote = '{"action":"answer","cardId":"c1","t":2,"rating":4}\n'
+    const r = mergeFile({ path: 'review-log/2026-09.ndjson', local, remote })
+    expect(r.action).not.toBe('blocked')
+  })
+})

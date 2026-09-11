@@ -60,6 +60,50 @@ function looksCompacted(lines: string[], path: string): boolean {
   return lines.some((l) => /"__mikiSeq"\s*:/.test(l) || /"__mikiCheckpoint"\s*:/.test(l))
 }
 
+/**
+ * 同一张卡（同 id 的内容行）在两侧被改成了不同的行 → 这些 id 就是冲突。
+ *
+ * 三方可判时只在"两侧都改了、而且改得不一样"时才报（`base` 是共同祖先那一行：
+ * 与任一侧相同就说明只有另一侧动过，那是明确的，不该拦）。没有 base 时无从判断谁改了什么，
+ * 一律报出来——这里宁可贵在"多问一句"，也不能静默丢掉一边的编辑。
+ *
+ * 同一侧出现多行同 id 时按最后一条算：重放就是这么取值的，判据与它保持一致。
+ */
+export function findCardConflicts(remoteLines: string[], localLines: string[], baseLines: string[] | null): string[] {
+  const index = (lines: string[]): Map<string, string> => {
+    const m = new Map<string, string>()
+    for (const line of lines) {
+      const id = contentIdOf(line)
+      if (id !== null) m.set(id, line)
+    }
+    return m
+  }
+  const remote = index(remoteLines)
+  const local = index(localLines)
+  const base = baseLines === null ? null : index(baseLines)
+  const conflicts: string[] = []
+  for (const [id, localLine] of local) {
+    const remoteLine = remote.get(id)
+    if (remoteLine === undefined || remoteLine === localLine) continue
+    if (base) {
+      const baseLine = base.get(id)
+      if (baseLine === localLine || baseLine === remoteLine) continue
+    }
+    conflicts.push(id)
+  }
+  return conflicts.sort()
+}
+
+/** 内容行的 id（没有 id 的行——meta/水位行、事件行——不参与按 id 的冲突判断） */
+function contentIdOf(line: string): string | null {
+  try {
+    const row = JSON.parse(line) as { id?: unknown }
+    return typeof row.id === 'string' ? row.id : null
+  } catch {
+    return null
+  }
+}
+
 function isPrefix(short: string[], long: string[]): boolean {
   if (short.length > long.length) return false
   for (let i = 0; i < short.length; i++) if (short[i] !== long[i]) return false
@@ -204,6 +248,25 @@ export function mergeFile(c: FileCompare): MergeResult {
 
   // 两侧各自追加：行并集
   const merged = unionLines(remoteLines, localLines)
+
+  // 卡片文件先查"同一张卡两侧改得不一样"：行并集对它是**静默丢改动**——
+  // 两条都留着，重放按文件顺序取最后一条，一边的编辑就没了，而两边都显示同步成功。
+  // 这类只能停下（要么在桌面端对齐，要么用设置页的「用远端覆盖本机」）。
+  if (path.startsWith('cards/')) {
+    const conflicts = findCardConflicts(remoteLines, localLines, base === null ? null : linesOf(base, path))
+    if (conflicts.length > 0) {
+      const shown = conflicts.slice(0, 5).join('、')
+      return {
+        path,
+        action: 'blocked',
+        content: null,
+        reason:
+          `同一张卡在两侧被改成了不同内容（${shown}${conflicts.length > 5 ? ` 等 ${conflicts.length} 张` : ''}）：` +
+          '行拼接会静默丢掉一边的改动，所以不自动合并。请在桌面端对齐后再同步，' +
+          '或用设置页的「用远端覆盖本机」以远端为准。'
+      }
+    }
+  }
 
   // 有压实痕迹就停：被重写过的行在另一侧不一定以同样的行存在，
   // 行拼接会得到"看着没问题、语义已经错了"的结果——这是最坏的一类 bug。
