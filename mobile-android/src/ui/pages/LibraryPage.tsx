@@ -98,7 +98,8 @@ export function LibraryPage(): JSX.Element {
                   <span className="row-front">{r.front}</span>
                   <span className="row-meta">
                     <span className={`st st${r.state}`}>{STATE_LABEL[r.state]}</span>
-                    <span className="muted">{dueText(r)}</span>
+                    {/* 新卡没有到期时间：状态标签已经写着"未学习"，再跟一句"未学"是重复 */}
+                    {r.state !== 'new' && <span className="muted">{dueText(r)}</span>}
                   </span>
                   <span className="row-deck muted">{r.deckName}</span>
                 </button>
@@ -137,7 +138,7 @@ export function LibraryPage(): JSX.Element {
 }
 
 function dueText(r: CardRow): string {
-  if (r.state === 'new' || r.due === null) return '未学'
+  if (r.state === 'new' || r.due === null) return ''
   return `到期 ${fmtDuePreview(r.due)}`
 }
 

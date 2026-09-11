@@ -47,7 +47,7 @@ import { FsrScheduler } from '@core/fsrs'
 import { applyEvent } from '@core/replay'
 import { filterCards, sortByKeys, toRow } from '@core/query'
 import { bumpDailyAgg, computeStats, endOfLocalDay, localDateKey, statsCacheKey, type DailyAgg } from '@core/stats'
-import type { FileStore } from './fs'
+import { readTexts, type FileStore } from './fs'
 import type { MobilePaths } from './paths'
 
 /** WebView 里的 UUID（crypto.randomUUID 在 https 与 localhost 下可用；Capacitor 默认 androidScheme=https） */
@@ -55,11 +55,19 @@ function newId(): string {
   return globalThis.crypto.randomUUID()
 }
 
+/** 取路径最后一段：与目录列举结果（只有文件名）比对时用 */
+function baseNameOf(path: string): string {
+  const i = path.lastIndexOf('/')
+  return i < 0 ? path : path.slice(i + 1)
+}
+
 /** 一次全量加载的分段耗时（毫秒） */
 export interface LoadTiming {
   config: number
   decks: number
   cards: number
+  /** 「卡片」那一段里"读文件"占的比重（诊断用：剩下的是解析与建索引） */
+  cardsRead: number
   events: number
   index: number
   total: number
@@ -133,7 +141,7 @@ export class MobileWorkspace {
     await this.loadDecks()
     const t2 = now()
     this.loadIssues = newLoadIssues()
-    await this.loadCardsWithCheckpoint(this.loadIssues)
+    const cardsRead = await this.loadCardsWithCheckpoint(this.loadIssues)
     const t3 = now()
     const events = await this.streamEvents(this.loadIssues)
     const t4 = now()
@@ -144,6 +152,7 @@ export class MobileWorkspace {
       config: t1 - t0,
       decks: t2 - t1,
       cards: t3 - t2,
+      cardsRead,
       events: t4 - t3,
       index: t5 - t4,
       total: t5 - t0,
@@ -152,6 +161,7 @@ export class MobileWorkspace {
     console.log(
       `[miki-load] 合计 ${this.loadTiming.total}ms` +
         `（config ${this.loadTiming.config} / 牌组 ${this.loadTiming.decks} / 卡片 ${this.loadTiming.cards}` +
+        `（其中读文件 ${cardsRead}）` +
         ` / 重放 ${this.loadTiming.events}（${events} 条事件）/ 建索引 ${this.loadTiming.index}）`
     )
   }
@@ -209,17 +219,34 @@ export class MobileWorkspace {
     }
   }
 
-  /** 读全部卡片：基文件（含检查点快照行）→ delta 覆盖/墓碑（行序=时序）→ 卡片内存态 */
-  private async loadCardsWithCheckpoint(issues: LoadIssues): Promise<void> {
+  /** 读全部卡片：基文件（含检查点快照行）→ delta 覆盖/墓碑（行序=时序）→ 卡片内存态。
+   *  返回"读文件"那部分的毫秒数，用来区分耗时是 IO 还是解析。 */
+  private async loadCardsWithCheckpoint(issues: LoadIssues): Promise<number> {
     this.cards = new Map()
     this.deckCheckpoints = new Map()
     this.byDeck = new Map()
     this.lowerCache = new Map()
+    // 先把所有卡片文件并发读回来再解析。这里的开销几乎全在**调用次数**上：
+    // 读一个 2MB 的文件只要 66ms（探针 2），而每次跨桥调用有约 4ms 固定成本。
+    // 所以先 list 一次目录、只对真实存在的文件发起读取——delta 文件通常不存在，
+    // 200 个牌组就是 200 次白读，而且走的是异常路径（更慢）。
+    const present = new Set((await this.store.list(this.paths.cardsDir())).map((e) => e.name))
+    const filePaths: string[] = []
+    for (const deck of this.decks) {
+      const base = this.paths.deckCardsFile(deck.id)
+      const delta = this.paths.deckDeltaFile(deck.id)
+      if (present.has(baseNameOf(base))) filePaths.push(base)
+      if (present.has(baseNameOf(delta))) filePaths.push(delta)
+    }
+    const readStart = now()
+    const texts = await readTexts(this.store, filePaths)
+    const readMs = now() - readStart
+
     for (const deck of this.decks) {
       const rows = new Map<string, CardCheckpointRow>()
       let cp = 0
       const baseFile = this.paths.deckCardsFile(deck.id)
-      const baseText = await this.store.readText(baseFile)
+      const baseText = texts.get(baseFile) ?? null
       if (baseText !== null) {
         for (const line of iterateNdjsonText(baseText, baseFile, issues)) {
           let row: CardCheckpointRow
@@ -241,7 +268,7 @@ export class MobileWorkspace {
       }
 
       const deltaFile = this.paths.deckDeltaFile(deck.id)
-      const deltaText = await this.store.readText(deltaFile)
+      const deltaText = texts.get(deltaFile) ?? null
       if (deltaText !== null) {
         for (const line of iterateNdjsonText(deltaText, deltaFile, issues)) {
           let row: (CardCheckpointRow & { __mikiTombstone?: boolean }) | null
@@ -285,6 +312,7 @@ export class MobileWorkspace {
         this.deckBucket(deck.id).push(card)
       }
     }
+    return readMs
   }
 
   /**

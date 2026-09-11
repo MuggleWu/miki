@@ -94,11 +94,13 @@ export function CardEditForm({ cardId, onDone }: Props): JSX.Element {
           关掉后重新打开这张卡再编辑。
         </p>
       ) : null}
+      {/* 类名要与设置页的分段控件一致（seg-btn + on）：漏掉 seg-btn 就没有选中态，
+          用户看不出当前是编辑还是预览（真机上就是这么发现的） */}
       <div className="seg">
-        <button type="button" className={preview ? '' : 'on'} onClick={() => setPreview(false)}>
+        <button type="button" className={`seg-btn${preview ? '' : ' on'}`} onClick={() => setPreview(false)}>
           编辑
         </button>
-        <button type="button" className={preview ? 'on' : ''} onClick={() => setPreview(true)}>
+        <button type="button" className={`seg-btn${preview ? ' on' : ''}`} onClick={() => setPreview(true)}>
           预览
         </button>
       </div>
