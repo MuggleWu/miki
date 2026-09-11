@@ -107,6 +107,14 @@ export class CapacitorFileStore implements FileStore {
     const t = normalizeRelPath(to)
     if (f === t) return
     await this.ensureDir(parentDir(t))
+    // 源不存在是调用方的 bug，`Filesystem.rename` 会抛错 —— 但**抛之前目标已经被删掉了**
+    // （上面那步覆盖语义的结果）。所以先确认源在，把"删了目标才发现搬不动"挡在前面；
+    // 语义与内存替身（memory-fs）对齐：源缺失一律报错，且不产出任何目标。
+    try {
+      await Filesystem.stat({ path: f, directory: this.directory })
+    } catch {
+      throw new Error(`rename: 源不存在：${f}`)
+    }
     // 覆盖语义对齐桌面端 renameSync：目标存在先删掉，否则 Android 侧会直接报错
     await this.remove(t)
     await Filesystem.rename({ from: f, to: t, directory: this.directory, toDirectory: this.directory })

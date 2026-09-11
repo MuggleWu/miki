@@ -31,7 +31,11 @@ export interface FileStore {
   mkdir(dir: string): Promise<void>
   /** 删除文件或目录（不存在则 no-op） */
   remove(path: string): Promise<void>
-  /** 重命名；目标已存在时先删目标（与桌面端 renameSync 覆盖语义对齐） */
+  /**
+   * 重命名；目标已存在时先删目标（与桌面端 renameSync 覆盖语义对齐）。
+   * 源不存在必须**抛错**且不产出任何目标——两套实现（真机 / 内存替身）都要守这条：
+   * 替身宽松会让「rename 失败」的路径在 node 里假通过（见 fs/memory-fs.ts 的注释）。
+   */
   rename(from: string, to: string): Promise<void>
   /** 真实绝对路径/URI——排查数据落在哪、以及备份规则要排除哪个目录时用 */
   uri(path: string): Promise<string>

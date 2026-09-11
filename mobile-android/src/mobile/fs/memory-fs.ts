@@ -102,8 +102,15 @@ export class MemoryFileStore implements FileStore {
     const f = normalizeRelPath(from)
     const t = normalizeRelPath(to)
     this.calls.push(`rename:${f}->${t}`)
-    await this.remove(t)
+    // 源既不是文件也不是已知目录：真机的 Filesystem.rename 会抛错。这里必须先判后动——
+    // 少了这道判断，源缺失会落进下面的「目录改名」分支，静默造出一个空目标（幻影文件）：
+    // 看起来成功了、实际什么都没搬，依赖「rename 失败要报错」的用例在 node 里就会假通过
+    // （例如整份重写的文件走 tmp + rename：tmp 缺失这条路径测不出来）。
+    // 顺序上先判源、再删目标：真机是先删目标再抛错（源缺失时会连老目标一起删掉），
+    // 内存替身不复制这个破坏性细节，只对齐「源缺失必须报错、且不留下目标」这条契约。
     const file = this.files.get(f)
+    if (!file && !this.dirs.has(f)) throw new Error(`rename: 源不存在：${f}`)
+    await this.remove(t)
     if (file) {
       this.files.delete(f)
       this.mkdirSync(parentDir(t))

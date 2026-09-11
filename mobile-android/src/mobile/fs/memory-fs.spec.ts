@@ -65,6 +65,28 @@ describe('MemoryFileStore 与 Capacitor 实现对齐的语义', () => {
     expect(await fs.readText('ws/a.ndjson')).toBeNull()
   })
 
+  it('rename 源不存在时抛错，且不留下任何目标（对齐真机 Filesystem.rename 的失败语义）', async () => {
+    const fs = new MemoryFileStore()
+    await expect(fs.rename('ws/missing.ndjson', 'ws/target.ndjson')).rejects.toThrow('源不存在')
+    // 回归护栏：以前源不存在会落进「目录改名」兜底分支，静默造出一个空目标——stat 非 null 却读不出内容，
+    // 于是所有依赖「rename 失败要报错」的用例在 node 里都假通过（例如 tmp 缺失时的原子写路径）。
+    expect(await fs.stat('ws/target.ndjson')).toBeNull()
+    expect(await fs.readText('ws/target.ndjson')).toBeNull()
+    expect(await fs.list('ws')).toEqual([])
+  })
+
+  it('rename 源是目录时整体平移前缀，旧目录不留残影', async () => {
+    const fs = new MemoryFileStore()
+    await fs.writeText('ws/sub/a.ndjson', 'A')
+    await fs.writeText('ws/sub/deep/b.ndjson', 'B')
+    await fs.rename('ws/sub', 'ws/renamed')
+    expect(await fs.readText('ws/renamed/a.ndjson')).toBe('A')
+    expect(await fs.readText('ws/renamed/deep/b.ndjson')).toBe('B')
+    expect(await fs.stat('ws/sub/a.ndjson')).toBeNull()
+    expect(await fs.stat('ws/sub')).toBeNull()
+    expect((await fs.list('ws')).map((e) => e.name)).toEqual(['renamed'])
+  })
+
   it('list 只列直接子项，目录与文件都标对类型', async () => {
     const fs = new MemoryFileStore()
     await fs.writeText('ws/1.ndjson', 'a')
