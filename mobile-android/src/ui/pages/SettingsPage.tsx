@@ -154,23 +154,38 @@ export function SettingsPage(): JSX.Element {
         </section>
         <section className="card">
           <h2>数据健康</h2>
-          {dmg.damagedLines === 0 && dmg.truncatedFiles.length === 0 ? (
-            <p className="ok-line">加载正常：没有坏行，也没有读到截断的文件。</p>
+          {dmg.damagedLines === 0 && dmg.truncatedFiles.length === 0 && dmg.corruptDocs.length === 0 ? (
+            <p className="ok-line">加载正常：没有坏行，没有截断文件，JSON 文档也都读得出来。</p>
           ) : (
             <>
-              <p className="bad-line">
-                坏行 {dmg.damagedLines} 条
-                {dmg.truncatedFiles.length > 0 ? `，截断文件 ${dmg.truncatedFiles.length} 个` : ''}
-              </p>
-              <p className="muted">
-                坏行会被跳过而不是让整个工作区打不开（这行数据丢了，但它后面的都能读）。
-                出现大量坏行通常意味着同步过程中断了，先在桌面端确认数据完整。
-              </p>
-              <ul className="detail">
-                {dmg.files.map((f) => (
-                  <li key={f}>{f}</li>
-                ))}
-              </ul>
+              {dmg.corruptDocs.length > 0 && (
+                <>
+                  <p className="bad-line">JSON 文档有问题：{dmg.corruptDocs.join('、')}</p>
+                  <p className="muted">
+                    这几份文件是整份读写的（牌组表、配置），坏掉时整份内容读不出来 ——
+                    牌组列表看起来被清空，而卡片文件其实还在（只是暂时成了孤儿）。
+                    多半是写入被打断，或同步/外部编辑造成的；先在桌面端把这份文件的 JSON 修好，
+                    或让远端那份重新拉下来覆盖本机，再回来同步。
+                  </p>
+                </>
+              )}
+              {dmg.damagedLines > 0 || dmg.truncatedFiles.length > 0 ? (
+                <>
+                  <p className="bad-line">
+                    坏行 {dmg.damagedLines} 条
+                    {dmg.truncatedFiles.length > 0 ? `，截断文件 ${dmg.truncatedFiles.length} 个` : ''}
+                  </p>
+                  <p className="muted">
+                    坏行会被跳过而不是让整个工作区打不开（这行数据丢了，但它后面的都能读）。
+                    出现大量坏行通常意味着同步过程中断了，先在桌面端确认数据完整。
+                  </p>
+                  <ul className="detail">
+                    {dmg.files.map((f) => (
+                      <li key={f}>{f}</li>
+                    ))}
+                  </ul>
+                </>
+              ) : null}
             </>
           )}
           <button className="btn" onClick={() => go({ kind: 'selfcheck' })}>

@@ -184,21 +184,25 @@ function MainApp() {
       </div>
 
       <div className="content">
-        {damage && (damage.damagedLines > 0 || damage.truncatedFiles.length > 0) && (
-          <div className="damage-banner">
-            <span>
-              检测到数据异常：
-              {damage.damagedLines > 0 && `${damage.damagedLines} 行无法解析（这些行的效果已丢失）`}
-              {damage.damagedLines > 0 && damage.truncatedFiles.length > 0 && '；'}
-              {damage.truncatedFiles.length > 0 &&
-                `${damage.truncatedFiles.length} 个文件末尾不完整（多半是异常退出时写入被中断）`}
-              {damage.files.length > 0 && `。涉及：${damage.files.join('、')}`}
-            </span>
-            <button className="damage-dismiss" onClick={() => setDamage(null)} title="关闭提示（数据不会因此恢复）">
-              知道了
-            </button>
-          </div>
-        )}
+        {damage &&
+          (damage.damagedLines > 0 || damage.truncatedFiles.length > 0 || (damage.corruptDocs?.length ?? 0) > 0) && (
+            <div className="damage-banner">
+              <span>
+                检测到数据异常：
+                {(damage.corruptDocs?.length ?? 0) > 0 &&
+                  `${damage.corruptDocs.join('、')} 读不出来（JSON 文档损坏或写入被中断）——` +
+                    '牌组表读不出来时卡片会全部变成孤儿，先在桌面端修好这份文件再同步；'}
+                {damage.damagedLines > 0 && `${damage.damagedLines} 行无法解析（这些行的效果已丢失）`}
+                {damage.damagedLines > 0 && damage.truncatedFiles.length > 0 && '；'}
+                {damage.truncatedFiles.length > 0 &&
+                  `${damage.truncatedFiles.length} 个文件末尾不完整（多半是异常退出时写入被中断）`}
+                {damage.files.length > 0 && `。涉及：${damage.files.join('、')}`}
+              </span>
+              <button className="damage-dismiss" onClick={() => setDamage(null)} title="关闭提示（数据不会因此恢复）">
+                知道了
+              </button>
+            </div>
+          )}
         {undoLost !== null && (
           <div className="damage-banner">
             <span>

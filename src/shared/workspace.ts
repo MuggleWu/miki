@@ -40,10 +40,14 @@ export interface DamageReport {
   truncatedFiles: string[]
   /** 含坏行的文件（相对工作区路径，最多 5 个，按发现顺序） */
   files: string[]
+  /** JSON 文档层损坏/写入中断的文件（相对工作区路径，如 decks.json、config.json）。
+   *  NDJSON 的坏行能被跳过，文档坏掉却是整份读不出来（牌组表丢了 = 所有卡片成孤儿），
+   *  所以这一层必须单独报出来，不能因为「没有坏行」就显示加载正常。 */
+  corruptDocs: string[]
 }
 
-/** 没有损坏时的空报告（渲染层判断要不要显示提示只看 damagedLines/truncatedFiles） */
-export const NO_DAMAGE: DamageReport = { damagedLines: 0, truncatedFiles: [], files: [] }
+/** 没有损坏时的空报告（渲染层判断要不要显示提示只看 damagedLines/truncatedFiles/corruptDocs） */
+export const NO_DAMAGE: DamageReport = { damagedLines: 0, truncatedFiles: [], files: [], corruptDocs: [] }
 
 /** 展示名 = 末段文件夹名；兼容 / 与 \ 分隔 */
 export function workspaceName(p: string): string {

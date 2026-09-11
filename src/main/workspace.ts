@@ -44,6 +44,7 @@ import {
   type CardCheckpointRow,
   type LoadIssues
 } from './workspace-io'
+import type { DamageReport } from '../shared/workspace'
 import { WorkspaceWatcher } from './workspace-watcher'
 
 /** delta 压实阈值（行）：追加超过它、或启动时发现 delta 现存行数超过它，就把该牌组压实。
@@ -110,6 +111,9 @@ export class WorkspaceService {
   /** 最近一次全量加载发现的文件级损坏（无法解析的行 / 末尾缺换行）。UI 据此提示用户，
    * 否则坏行只会被静默 continue 掉，用户看到的是「数字对不上」而不是「有数据坏了」 */
   private loadIssues: LoadIssues = newLoadIssues()
+  /** JSON 文档层损坏（decks.json / config.json 解析失败）：NDJSON 坏行之外的一层，
+   *  不报出来的话用户只会看到「库空了」+「加载正常」 */
+  private corruptDocs = new Set<string>()
   /** 热加载作废撤销栈时的通知回调（丢掉的步数） */
   private undoDiscardedCbs: ((dropped: number) => void)[] = []
   /** 加载时基文件的删除标记快照（id → deletedAt 是否非空）。
@@ -172,6 +176,7 @@ export class WorkspaceService {
       } catch {
         stored = {}
         // raw 保留原样：损坏内容也要参与下方「是否需要重写」判定
+        this.corruptDocs.add('config.json')
       }
     }
     // study 嵌套字段单独合并，避免旧 config 整体覆盖默认值
@@ -234,16 +239,20 @@ export class WorkspaceService {
 
   private loadDecks(): void {
     this.hiddenCache = null
-    if (fs.existsSync(this.paths.decksFile())) {
+    const exists = fs.existsSync(this.paths.decksFile())
+    if (exists) {
       try {
         this.decks = JSON.parse(fs.readFileSync(this.paths.decksFile(), 'utf-8'))
         return
       } catch {
-        // 损坏则重建为空
+        // 损坏：记账（以前这一层在健康报告里一条都不显示），但**不覆盖原文件**——
+        // 当场写一份空数组会把牌组 id 永久抹掉、卡片全成孤儿，而半写/冲突标记往往是可救的。
+        this.corruptDocs.add('decks.json')
       }
     }
     this.decks = []
-    this.saveDecks()
+    // 只有「文件不存在」才补一份空表（首次启动）；损坏时原样留着，等用户/同步决定怎么救
+    if (!exists) this.saveDecks()
   }
 
   private saveDecks(): void {
@@ -544,13 +553,14 @@ export class WorkspaceService {
   /** 本次加载发现的文件损坏摘要（UI 启动提示用）。
    * 之前坏行被静默 continue 掉：app 照常启动、数字悄悄偏移，用户只会觉得「数字不对」
    * 而不知道有数据坏了。这里如实报出，并给出去重后的文件名（最多 5 个） */
-  damageReport(): { damagedLines: number; truncatedFiles: string[]; files: string[] } {
+  damageReport(): DamageReport {
     const damagedLines = [...this.loadIssues.damaged.values()].reduce((a, b) => a + b, 0)
     const rel = (p: string) => path.relative(this.root, p)
     return {
       damagedLines,
       truncatedFiles: [...this.loadIssues.truncated].map(rel),
-      files: [...this.loadIssues.damaged.keys()].map(rel).slice(0, 5)
+      files: [...this.loadIssues.damaged.keys()].map(rel).slice(0, 5),
+      corruptDocs: [...this.corruptDocs].sort()
     }
   }
 

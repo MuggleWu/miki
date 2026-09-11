@@ -49,6 +49,7 @@ import { filterCards, sortByKeys, toRow } from '@core/query'
 import { bumpDailyAgg, computeStats, endOfLocalDay, localDateKey, statsCacheKey, type DailyAgg } from '@core/stats'
 import { readTexts, type FileStore } from './fs'
 import { atomicWriteText, readJsonDoc } from './fs/atomic-write'
+import type { DamageReport } from '@shared/workspace'
 import type { MobilePaths } from './paths'
 
 /** WebView 里的 UUID（crypto.randomUUID 在 https 与 localhost 下可用；Capacitor 默认 androidScheme=https） */
@@ -105,6 +106,8 @@ export class MobileWorkspace {
   private deckCheckpoints = new Map<string, number>()
   private hiddenCache: Set<string> | null = null
   private loadIssues: LoadIssues = newLoadIssues()
+  /** JSON 文档层损坏（decks.json / config.json 解析失败，或写入被打断后靠 .tmp 救回） */
+  private corruptDocs = new Set<string>()
   /** 最近一次全量加载的分段耗时（启动速度的观测口） */
   private loadTiming: LoadTiming | null = null
 
@@ -146,6 +149,8 @@ export class MobileWorkspace {
   private async loadAll(): Promise<void> {
     // 逐段计时：手机上"启动慢"只可能慢在这四段里，不把数字打出来就只能靠猜
     const t0 = now()
+    // 清在**读文件之前**：loadConfig/loadDecks 是往这里记账的，清晚了会把本次加载的损坏抹掉
+    this.corruptDocs.clear()
     this.config = await this.loadConfig()
     this.scheduler = this.buildScheduler(this.config)
     this.previewScheduler = this.buildScheduler(this.config, true)
@@ -197,6 +202,7 @@ export class MobileWorkspace {
   private async loadConfig(): Promise<MikiConfig> {
     // 主文件缺失/半写都退回 .tmp（原子写被打断的恢复路径），坏掉也不会整套退回默认值
     const doc = await readJsonDoc<Partial<MikiConfig>>(this.store, this.paths.configFile())
+    if (doc.mainCorrupt) this.corruptDocs.add('config.json')
     const stored: Partial<MikiConfig> = doc.value ?? {}
     const study = { ...DEFAULT_CONFIG.study, ...(stored.study ?? {}) }
     const api = { ...DEFAULT_CONFIG.api, ...(stored.api ?? {}) }
@@ -224,6 +230,8 @@ export class MobileWorkspace {
   private async loadDecks(): Promise<void> {
     this.hiddenCache = null
     const doc = await readJsonDoc<Deck[]>(this.store, this.paths.decksFile())
+    // 主文件坏掉/缺席（原子写被打断）都要记账：这时牌组表是从 .tmp 救回来的
+    if (doc.mainCorrupt || doc.fromTmp) this.corruptDocs.add('decks.json')
     this.decks = Array.isArray(doc.value) ? doc.value : []
     if (doc.fromTmp) {
       // 主文件缺席/半写时从 .tmp 救回：立刻把主文件补好，别让每次启动都走兜底
@@ -510,13 +518,14 @@ export class MobileWorkspace {
   }
 
   /** 加载期数据损坏摘要（坏行被静默跳过时给用户一个可见出口） */
-  damageReport(): { damagedLines: number; truncatedFiles: string[]; files: string[] } {
+  damageReport(): DamageReport {
     const prefix = `${this.paths.root}/`
     const rel = (p: string): string => (p.startsWith(prefix) ? p.slice(prefix.length) : p)
     return {
       damagedLines: [...this.loadIssues.damaged.values()].reduce((a, b) => a + b, 0),
       truncatedFiles: [...this.loadIssues.truncated].map(rel),
-      files: [...this.loadIssues.damaged.keys()].map(rel).slice(0, 5)
+      files: [...this.loadIssues.damaged.keys()].map(rel).slice(0, 5),
+      corruptDocs: [...this.corruptDocs].sort()
     }
   }
 

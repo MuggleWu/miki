@@ -401,3 +401,48 @@ describe('牌组表的原子写与半写恢复', () => {
     expect(ws.deckInfos().map((d) => d.name)).toEqual(['测试牌组'])
   })
 })
+
+// JSON 文档层损坏要看得见：以前这一层在"数据健康"里一条都不显示，用户只看到库空了却被告知加载正常。
+describe('JSON 文档层损坏的可见性', () => {
+  it('decks.json 损坏：牌组为空、原文件保留、健康报告里点名', async () => {
+    const fs = new MemoryFileStore()
+    fs.seed(`${ROOT}/decks.json`, '[{"id":"d1","name":"半写')
+    const ws = await openWorkspace(fs)
+    expect(ws.deckInfos()).toEqual([])
+    expect(await fs.readText(`${ROOT}/decks.json`)).toBe('[{"id":"d1","name":"半写')
+    expect(ws.damageReport().corruptDocs).toEqual(['decks.json'])
+  })
+
+  it('config.json 损坏：退回默认值，同时进健康报告', async () => {
+    const fs = new MemoryFileStore()
+    seedWorkspace(fs)
+    fs.seed(`${ROOT}/config.json`, '{坏')
+    const ws = await openWorkspace(fs)
+    expect(ws.damageReport().corruptDocs).toEqual(['config.json'])
+  })
+
+  it('靠 .tmp 救回来也算出过问题（健康报告要如实说），但牌组照常可用', async () => {
+    const fs = new MemoryFileStore()
+    seedWorkspace(fs)
+    await fs.remove(`${ROOT}/decks.json`)
+    fs.seed(
+      `${ROOT}/decks.json.tmp`,
+      JSON.stringify([{ id: 'd1', name: '测试牌组', order: 0, createdAt: 1_700_000_000_000, deletedAt: null }])
+    )
+    const ws = await openWorkspace(fs)
+    expect(ws.deckInfos().map((d) => d.name)).toEqual(['测试牌组'])
+    expect(ws.damageReport().corruptDocs).toEqual(['decks.json'])
+  })
+
+  it('一切正常时是干净的空报告', async () => {
+    const fs = new MemoryFileStore()
+    seedWorkspace(fs)
+    const ws = await openWorkspace(fs)
+    expect(ws.damageReport()).toEqual({
+      damagedLines: 0,
+      truncatedFiles: [],
+      files: [],
+      corruptDocs: []
+    })
+  })
+})

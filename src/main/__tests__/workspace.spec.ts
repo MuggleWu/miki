@@ -339,6 +339,39 @@ describe('损坏容错', () => {
   })
 })
 
+// JSON 文档层是 NDJSON 坏行之外的一层：文档坏掉是整份读不出来（牌组表没了 = 所有卡片成孤儿），
+// 所以既要报出来，也不能在加载时就把原文件覆盖掉。
+describe('JSON 文档层损坏', () => {
+  it('decks.json 损坏时保留原文件、牌组列表为空、且健康报告里看得见', () => {
+    const d = tmpKept()
+    const w = newWs(d)
+    w.addDeck('会被丢掉吗')
+    const decksFile = path.join(d, 'decks.json')
+    fs.writeFileSync(decksFile, '[{"id":"d1","name":"半写')
+    const w2 = newWs(d)
+    expect(w2.deckInfos()).toEqual([])
+    // 关键：原文件一个字节都没动（修之前这里会被写成 "[]"，牌组 id 永久丢失）
+    expect(fs.readFileSync(decksFile, 'utf-8')).toBe('[{"id":"d1","name":"半写')
+    expect(w2.damageReport().corruptDocs).toEqual(['decks.json'])
+    expect(w2.damageReport().damagedLines).toBe(0)
+  })
+
+  it('config.json 损坏时也进健康报告', () => {
+    const d = tmpKept()
+    newWs(d)
+    fs.writeFileSync(path.join(d, 'config.json'), '{broken')
+    const w2 = newWs(d)
+    expect(w2.damageReport().corruptDocs).toEqual(['config.json'])
+  })
+
+  it('decks.json 不存在（首次启动）仍补一份空表，且不算损坏', () => {
+    const d = tmpKept()
+    const w = newWs(d)
+    expect(w.damageReport().corruptDocs).toEqual([])
+    expect(fs.existsSync(path.join(d, 'decks.json'))).toBe(true)
+  })
+})
+
 describe('saveConfig', () => {
   it('study/browser 段深合并不丢其他字段', () => {
     const w = newWs(tmpKept())
