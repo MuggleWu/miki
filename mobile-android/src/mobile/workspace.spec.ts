@@ -357,3 +357,47 @@ describe('牌组排序（与桌面端一致）', () => {
     expect(w.deckInfos().map((d) => d.name)).toEqual(['第 2 章', '第 10 章'])
   })
 })
+
+// 牌组表是整份重写的文件：写一半被杀进程会让整个牌组列表读不出来（A 级数据风险）。
+// 这里钉住两件事：① 写走 tmp + 改名，不直接盖主文件；② 主文件半写/缺失时能从 tmp 救回并自我修复。
+describe('牌组表的原子写与半写恢复', () => {
+  let fs: MemoryFileStore
+  beforeEach(() => {
+    fs = new MemoryFileStore()
+    seedWorkspace(fs)
+  })
+
+  it('保存牌组走 tmp + 改名，不直接覆盖主文件', async () => {
+    const ws = await openWorkspace(fs)
+    fs.calls.length = 0
+    await ws.addDeck('新牌组')
+    expect(fs.calls).toContain(`write:${ROOT}/decks.json.tmp`)
+    expect(fs.calls).toContain(`rename:${ROOT}/decks.json.tmp->${ROOT}/decks.json`)
+    expect(fs.calls).not.toContain(`write:${ROOT}/decks.json`)
+    expect(await fs.readText(`${ROOT}/decks.json.tmp`)).toBeNull()
+  })
+
+  it('主文件半写时从 .tmp 救回牌组表，并把主文件补好', async () => {
+    fs.seed(`${ROOT}/decks.json`, '[{"id":"d1","name":"测试牌组"') // 半截 JSON
+    fs.seed(
+      `${ROOT}/decks.json.tmp`,
+      JSON.stringify([{ id: 'd1', name: '测试牌组', order: 0, createdAt: 1_700_000_000_000, deletedAt: null }])
+    )
+    const ws = await openWorkspace(fs)
+    expect(ws.deckInfos().map((d) => d.name)).toEqual(['测试牌组'])
+    // 自我修复：主文件已经是合法 JSON，兜底文件被消费掉
+    const repaired = JSON.parse((await fs.readText(`${ROOT}/decks.json`))!) as { name: string }[]
+    expect(repaired.map((d) => d.name)).toEqual(['测试牌组'])
+    expect(await fs.readText(`${ROOT}/decks.json.tmp`)).toBeNull()
+  })
+
+  it('主文件缺失（改名窗口里被杀）时同样从 .tmp 救回', async () => {
+    await fs.remove(`${ROOT}/decks.json`)
+    fs.seed(
+      `${ROOT}/decks.json.tmp`,
+      JSON.stringify([{ id: 'd1', name: '测试牌组', order: 0, createdAt: 1_700_000_000_000, deletedAt: null }])
+    )
+    const ws = await openWorkspace(fs)
+    expect(ws.deckInfos().map((d) => d.name)).toEqual(['测试牌组'])
+  })
+})

@@ -11,6 +11,7 @@
 import { GithubClient } from './github'
 import { mergeFile, type MergeResult } from './merge'
 import { emptyBase, type SyncBase, type SyncCreds, type SyncReport } from './types'
+import { atomicWriteText } from '../fs/atomic-write'
 import type { FileStore } from '../fs/types'
 import type { MobilePaths } from '../paths'
 
@@ -157,7 +158,8 @@ export async function runSync(env: SyncEnv, creds: SyncCreds, base: SyncBase, mo
       ? files.filter((f) => f.action === 'take-remote' && f.content !== null)
       : files.filter((f) => f.content !== null)
   for (const f of toWrite) {
-    await env.store.writeText(`${env.paths.root}/${f.path}`, f.content!)
+    // 原子写：拉取是"整份替换"，半写文件（decks.json / config.json / 卡片基文件）会让整套数据读不出来
+    await atomicWriteText(env.store, `${env.paths.root}/${f.path}`, f.content!)
   }
 
   // ---- 重放校验：写下去的东西必须被工作区完整吃进去 ----

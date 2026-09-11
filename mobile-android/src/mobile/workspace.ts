@@ -48,6 +48,7 @@ import { applyEvent } from '@core/replay'
 import { filterCards, sortByKeys, toRow } from '@core/query'
 import { bumpDailyAgg, computeStats, endOfLocalDay, localDateKey, statsCacheKey, type DailyAgg } from '@core/stats'
 import { readTexts, type FileStore } from './fs'
+import { atomicWriteText, readJsonDoc } from './fs/atomic-write'
 import type { MobilePaths } from './paths'
 
 /** WebView 里的 UUID（crypto.randomUUID 在 https 与 localhost 下可用；Capacitor 默认 androidScheme=https） */
@@ -194,15 +195,9 @@ export class MobileWorkspace {
 
   /** 读 config.json 并补齐默认值。移动端**不写回**这个文件（机器本地字段由桌面端管） */
   private async loadConfig(): Promise<MikiConfig> {
-    const raw = await this.store.readText(this.paths.configFile())
-    let stored: Partial<MikiConfig> = {}
-    if (raw !== null) {
-      try {
-        stored = JSON.parse(raw) as Partial<MikiConfig>
-      } catch {
-        stored = {}
-      }
-    }
+    // 主文件缺失/半写都退回 .tmp（原子写被打断的恢复路径），坏掉也不会整套退回默认值
+    const doc = await readJsonDoc<Partial<MikiConfig>>(this.store, this.paths.configFile())
+    const stored: Partial<MikiConfig> = doc.value ?? {}
     const study = { ...DEFAULT_CONFIG.study, ...(stored.study ?? {}) }
     const api = { ...DEFAULT_CONFIG.api, ...(stored.api ?? {}) }
     return {
@@ -228,15 +223,15 @@ export class MobileWorkspace {
 
   private async loadDecks(): Promise<void> {
     this.hiddenCache = null
-    const raw = await this.store.readText(this.paths.decksFile())
-    if (raw === null) {
-      this.decks = []
-      return
-    }
-    try {
-      this.decks = JSON.parse(raw) as Deck[]
-    } catch {
-      this.decks = []
+    const doc = await readJsonDoc<Deck[]>(this.store, this.paths.decksFile())
+    this.decks = Array.isArray(doc.value) ? doc.value : []
+    if (doc.fromTmp) {
+      // 主文件缺席/半写时从 .tmp 救回：立刻把主文件补好，别让每次启动都走兜底
+      try {
+        await this.saveDecks()
+      } catch {
+        // 补不回去也不该让加载失败：这一次已经用上了 tmp 里的牌组表
+      }
     }
   }
 
@@ -540,7 +535,8 @@ export class MobileWorkspace {
   }
 
   private async saveDecks(): Promise<void> {
-    await this.store.writeText(this.paths.decksFile(), JSON.stringify(this.decks, null, 2))
+    // 原子写：牌组表是整份重写的文件，写到一半被杀进程会让整个牌组列表读不出来（见 fs/atomic-write）
+    await atomicWriteText(this.store, this.paths.decksFile(), JSON.stringify(this.decks, null, 2))
   }
 
   // ---------- 卡片写路径 ----------
