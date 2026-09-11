@@ -145,7 +145,7 @@ notified via `subscribeHighlighter` and adds the token colours. Two easy traps w
 
 One path that looks like a performance problem but was checked and is fine, recorded here so it is not
 suspected again: `pickNext` in `core/queue.ts` is a linear O(cards-in-deck) scan, but it is only the test
-oracle — production picking goes through the heaps in `main/schedule-index.ts`. `deckInfos()` does one merged
+oracle — production picking goes through the heaps in `shared/schedule-index.ts`. `deckInfos()` does one merged
 pass over the un-built decks per call (~48k iterations for 8 decks x 6000 cards), which is tunable rather
 than alarming. The 60s deep-scroll refetch in the card browser is deliberate and stays.
 

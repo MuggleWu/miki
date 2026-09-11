@@ -174,7 +174,7 @@ MIKI_BENCH=1 NODE_OPTIONS=--expose-gc npx vitest run src/main/__tests__/minevent
 
 有一条容易误判成性能问题、但复查后确认没问题的路径，记在这里免得反复怀疑：
 `core/queue.ts` 的 `pickNext` 是 O(牌组卡数) 线性扫，但它只是测试对照 oracle，生产出卡走
-`main/schedule-index.ts` 的堆；`deckInfos()` 每次调用对未建堆的牌组做一次合并单趟扫描
+`shared/schedule-index.ts` 的堆；`deckInfos()` 每次调用对未建堆的牌组做一次合并单趟扫描
 （8 牌组 × 6000 卡约 4.8 万次迭代），属可调不可怕；卡片库的 60s 深滚动重取是有意保留的。
 
 ### NDJSON 行读
