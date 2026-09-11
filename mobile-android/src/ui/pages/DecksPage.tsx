@@ -4,14 +4,14 @@ import { useState } from 'react'
 import { useApp } from '../store'
 import { useWorkspace } from '../use-workspace'
 import { Sheet } from '../components/Sheet'
-import { Drawer } from '../components/Drawer'
 import { AddCardForm } from '../forms/AddCardForm'
 import { AddDeckForm } from '../forms/AddDeckForm'
 
 export function DecksPage(): JSX.Element {
   const ws = useWorkspace()
   const go = useApp((s) => s.go)
-  const [drawer, setDrawer] = useState(false)
+  // 抽屉挂在 App 里（左边缘右滑也要能拉起它），这里只负责把汉堡按钮接上去
+  const setDrawer = useApp((s) => s.setDrawer)
   const [menu, setMenu] = useState(false)
   const [addCard, setAddCard] = useState(false)
   const [addDeck, setAddDeck] = useState(false)
@@ -76,8 +76,6 @@ export function DecksPage(): JSX.Element {
       <button className="fab" onClick={() => setMenu(true)} aria-label="新增">
         ＋
       </button>
-
-      <Drawer open={drawer} onClose={() => setDrawer(false)} />
 
       <Sheet open={menu} title="新增" onClose={() => setMenu(false)}>
         <button

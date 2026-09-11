@@ -1,0 +1,9 @@
+# 依赖、构建产物与生成的原生工程（与仓库根的 .prettierignore 同口径）。
+# 没有它的时候 `npm run format:check` 会把 dist/ 与 android/ 里的产物也算进来，
+# 报出上百个"格式问题"，这个命令就没法当门禁用。
+node_modules/
+dist/
+android/
+package-lock.json
+# 手写文档：散文换行属作者风格，格式化只有搅动没有收益
+*.md

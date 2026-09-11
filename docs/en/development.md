@@ -244,6 +244,39 @@ Two traps that only a real device exposes — read this before touching sync cod
   and worse, merge decisions also depend on reading the current remote. Node's undici has no HTTP
   cache, which is why only a real device catches this.
 
+There is a third trap around system-bar safe areas (status bar / punch hole, navigation bar /
+gesture bar) that only appears in one specific combination — read this before touching layout or
+the Android project: **`env(safe-area-inset-*)` is not a reliable source on Android.** It only has
+a value when the WebView is version 140+ *and* the page carries `viewport-fit=cover`, while
+Capacitor 8's SystemBars plugin only pads the WebView's parent on **Android 15+** in the
+non-passthrough case. So the "Android 14 or below + older WebView" cell gets nothing from either
+mechanism: the page sees all zeros and content slides under the status bar and the navigation bar
+(measured on an Android 14 device). Three pieces now cooperate:
+
+- `--inset-*` in `src/ui/styles.css` takes the maximum of `env()`, the `--safe-area-inset-*` values
+  Capacitor injects, and `--native-inset-*` injected by `MainActivity`;
+- `MainActivity.publishInsets()` reads the real window insets and publishes them, sending **0 for
+  any side the native side has already padded**, so taking the maximum never double-counts. Debug
+  this class of problem with `adb logcat -s miki-insets`: the log line carries "what the system
+  reported / what native already padded / what was sent to the page";
+- `body` uses `--inset-*` for its padding, and `.app` must be `100%` of its container rather than
+  `100dvh`: the latter is one safe area taller than the container, and `overflow: hidden` then clips
+  the bottom strip. Fixed elements (rating bar / FAB / toast / drawer padding / sheets) are
+  positioned against the viewport and unaffected by the body padding, so each applies
+  `--inset-bottom` itself.
+
+A practical verification recipe: configure the emulator for the target device
+(`cmd overlay enable com.android.internal.systemui.navbar.threebutton` for 3-button navigation,
+`com.android.internal.display.cutout.emulation.tall` for a punch hole), then measure
+`getBoundingClientRect()` over the DevTools protocol. To exercise the "the page pads itself" cell,
+set `--native-inset-*` to the real values by hand — the emulator usually lands in the "native
+already padded" cell, where the UI looks identical either way.
+
+Icons are not hand-edited binaries: `mobile-android/scripts/gen_icons.py` extracts the fox from the
+desktop `resources/icon.png` and derives the adaptive-icon foreground, the legacy square/round
+icons, the Android 13 themed-icon monochrome layer, and the splash logo. Change the desktop image
+and re-run the script (`pip install pillow`).
+
 ## Upgrading FSRS
 
 `core/fsrs.ts` is a line-by-line port of the py-fsrs scheduler (including Python's banker's rounding and `timedelta` floor semantics). When py-fsrs releases a new version: diff the official `scheduler.py`, port the changes, then regenerate expected outputs for the fixed inputs with the vector scripts — any vector mismatch means a porting error or a semantic change.

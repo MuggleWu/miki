@@ -243,6 +243,33 @@ npx tsc --noEmit && npx eslint . && npx vitest run && npm run build
   更危险的是合并判定也依赖「当前远端」的读取。Node 侧（undici）没有 HTTP 缓存，所以这个问题
   只有真机能测出来。
 
+系统栏安全区（状态栏/挖孔、导航栏/手势条）另有一个只在特定组合上出现的坑，改布局或碰
+Android 工程前务必先看：**`env(safe-area-inset-*)` 在 Android 上不是可靠来源**——
+它只在「WebView ≥ 140 且页面带 `viewport-fit=cover`」时才有值，而 Capacitor 8 的 SystemBars
+插件在不透传的那种组合里**只对 Android 15+**给 WebView 的父视图补内边距。于是
+「Android 14 及以下 + 老 WebView」这一格两个机制都不生效，网页拿到的全是 0，内容就会压进
+状态栏与三大金刚（Android 14 机器上实测就是这一格）。现在三处配合解决：
+
+- `src/ui/styles.css` 的 `--inset-*` 取 `env()`、Capacitor 注入的 `--safe-area-inset-*`、
+  以及 `MainActivity` 兜底注入的 `--native-inset-*` 三者最大值；
+- `MainActivity.publishInsets()` 读真实窗口内边距并按上述变量发给网页，**已经被原生留过白的
+  方向发 0**，所以取最大值不会叠加；排这类问题用 `adb logcat -s miki-insets`，日志里有
+  「系统报了多少 / 原生补了多少 / 发给网页多少」三个数；
+- `body` 用 `--inset-*` 留白，而 `.app` 的高度必须是容器的 `100%` 而不是 `100dvh`：
+  后者比容器高出一个安全区，底部那一条会被 `overflow: hidden` 裁掉。固定的元素
+  （评级条 / FAB / 提示条 / 抽屉内边距 / 弹层）按视口定位，不受 `body` padding 影响，各自
+  还要用一次 `--inset-bottom`。
+
+真机验证的取巧办法：模拟器上按目标机型配置（`cmd overlay enable
+com.android.internal.systemui.navbar.threebutton` 开三大金刚、
+`com.android.internal.display.cutout.emulation.tall` 模拟挖孔），再用 `chrome://inspect` 同款的
+DevTools 协议直接量 `getBoundingClientRect()`。想验证「网页自己留白」那一格，可以在页面里
+手动把 `--native-inset-*` 设成真值（模拟器多半落在「原生已补内边距」那格，光看界面看不出差别）。
+
+图标不是手改的二进制：`mobile-android/scripts/gen_icons.py` 从桌面端的
+`resources/icon.png` 抠出会标狐狸，派生自适应图标前景、传统方形/圆形图标、Android 13 主题图标
+单色层与启动图 logo。换图标改桌面那张图后重跑脚本即可（`pip install pillow`）。
+
 ## FSRS 升级路径
 `core/fsrs.ts` 是 py-fsrs scheduler 的逐行移植（含 Python banker's rounding 与 timedelta floor 语义的复刻）。py-fsrs 发布新版本后：diff 官方 `scheduler.py`，同步改动，再用基准向量脚本对固定输入重新生成期望输出——向量不一致即移植有误或语义变化。
 

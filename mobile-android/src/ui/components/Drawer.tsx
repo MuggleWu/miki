@@ -4,6 +4,7 @@
 import { useEffect, useRef } from 'react'
 import { useApp, type Route } from '../store'
 import { useWorkspace } from '../use-workspace'
+import { shouldCloseDrawer } from '../edge-swipe'
 
 const ITEMS: { label: string; kind: Route['kind']; note: string }[] = [
   { label: '牌组', kind: 'decks', note: '主页' },
@@ -18,6 +19,8 @@ export function Drawer({ open, onClose }: { open: boolean; onClose(): void }): J
   const route = useApp((s) => s.route)
   // 从抽屉换页 = 重置导航栈：这些是"同级页"，返回键该回主页而不是回到上一个同级页
   const reset = useApp((s) => s.reset)
+  // 抽屉内左滑关闭的手势起点。阈值口径与 use-edge-swipe 一致（见那里的注释）
+  const swipe = useRef<{ x: number; y: number } | null>(null)
 
   useEffect(() => {
     const el = ref.current
@@ -36,6 +39,22 @@ export function Drawer({ open, onClose }: { open: boolean; onClose(): void }): J
       }}
       onClick={(e) => {
         if (e.target === ref.current) onClose()
+      }}
+      onTouchStart={(e) => {
+        if (e.touches.length !== 1) return
+        swipe.current = { x: e.touches[0].clientX, y: e.touches[0].clientY }
+      }}
+      onTouchMove={(e) => {
+        const s = swipe.current
+        if (!s || e.touches.length !== 1) return
+        const now = { x: e.touches[0].clientX, y: e.touches[0].clientY }
+        if (shouldCloseDrawer(s, now)) {
+          swipe.current = null
+          onClose()
+        }
+      }}
+      onTouchEnd={() => {
+        swipe.current = null
       }}
     >
       <nav className="drawer-inner">

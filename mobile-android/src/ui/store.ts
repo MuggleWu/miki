@@ -71,6 +71,8 @@ interface AppState {
   route: Route
   stack: Route[]
   toast: string | null
+  /** 左侧抽屉是否打开。放在全局而不是某个页面里：汉堡按钮与「左边缘右滑」都要能拉起它 */
+  drawerOpen: boolean
   /** 写操作计数器：页面把它放进 useMemo 依赖，驱动派生数据重算 */
   version: number
   sync: SyncUiState
@@ -83,6 +85,7 @@ interface AppState {
   reset(route: Route): void
   back(): void
   notify(msg: string | null): void
+  setDrawer(open: boolean): void
   bump(): void
 
   /** 读本机同步配置与上次结果（启动、进设置页时调用） */
@@ -101,6 +104,7 @@ export const useApp = create<AppState>((set, get) => ({
   route: { kind: 'decks' },
   stack: [],
   toast: null,
+  drawerOpen: false,
   version: 0,
   sync: { status: null, verify: null, report: null, lastSyncAt: null, busy: false, lastError: null },
 
@@ -162,6 +166,9 @@ export const useApp = create<AppState>((set, get) => ({
 
   notify(msg) {
     set({ toast: msg })
+  },
+  setDrawer(open) {
+    set({ drawerOpen: open })
   },
 
   async loadSyncInfo() {

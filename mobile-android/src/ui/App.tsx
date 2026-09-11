@@ -11,6 +11,8 @@ import { LibraryPage } from './pages/LibraryPage'
 import { StatsPage } from './pages/StatsPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { SelfCheckPage } from './pages/SelfCheckPage'
+import { Drawer } from './components/Drawer'
+import { useEdgeSwipeDrawer } from './use-edge-swipe'
 import { applyAppearance, acquireWakeLock, watchSystemDark } from '@mobile/theme'
 
 export function App(): JSX.Element {
@@ -23,11 +25,16 @@ export function App(): JSX.Element {
   const back = useApp((s) => s.back)
   const boot = useApp((s) => s.boot)
   const loadPrefs = useApp((s) => s.loadPrefs)
+  const drawerOpen = useApp((s) => s.drawerOpen)
+  const setDrawer = useApp((s) => s.setDrawer)
 
   useEffect(() => {
     void boot()
     void loadPrefs()
   }, [boot, loadPrefs])
+
+  // 左边缘右滑唤出抽屉：抽屉本身挂在全局，所以任何非学习页都能滑出来
+  useEdgeSwipeDrawer()
 
   // 主题与字号：写到 <html> 上，CSS 只认 data-theme 与 --fs-scale 两个入口
   useEffect(() => {
@@ -157,6 +164,7 @@ export function App(): JSX.Element {
       {route.kind === 'stats' ? <StatsPage /> : null}
       {route.kind === 'settings' ? <SettingsPage /> : null}
       {route.kind === 'selfcheck' ? <SelfCheckPage /> : null}
+      <Drawer open={drawerOpen} onClose={() => setDrawer(false)} />
       {toast ? <div className="toast">{toast}</div> : null}
     </div>
   )

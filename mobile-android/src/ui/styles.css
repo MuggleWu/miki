@@ -15,7 +15,31 @@
   --r2: #d97706;
   --r3: #2563eb;
   --r4: #16a34a;
-  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  /*
+   * 系统栏安全区（状态栏/挖孔、导航栏/手势条）。三个来源取最大值：
+   *
+   * ① `env(safe-area-inset-*)`：网页自己的接口，但 Android 上**只有在 WebView 把窗口内边距
+   *    透传给页面时才有值**（Chromium 140 起 + viewport-fit=cover），老 WebView 一律是 0。
+   * ② `--safe-area-inset-*`：Capacitor 8 内置 SystemBars 插件注入的同名变量，透传时是真值；
+   *    不透传时它自己在原生侧给 WebView 补内边距，注入的就是 0（表示"不用你管"）。
+   * ③ `--native-inset-*`：MainActivity 兜底注入（见那里的注释）。Android 14 及以下 + 老
+   *    WebView 这一格，前两个来源都是 0 而原生也没补内边距，只有这里能拿到真值。
+   *
+   * 三者只在"该由网页自己留白"时才是同一个真值，其余情况是 0，所以取最大值不会叠加。
+   * 每个 var() 都写了兜底值：少一个的话整个 max() 会失效，安全区就静默变成 0。
+   */
+  --inset-top: max(env(safe-area-inset-top, 0px), var(--safe-area-inset-top, 0px), var(--native-inset-top, 0px));
+  --inset-right: max(
+    env(safe-area-inset-right, 0px),
+    var(--safe-area-inset-right, 0px),
+    var(--native-inset-right, 0px)
+  );
+  --inset-bottom: max(
+    env(safe-area-inset-bottom, 0px),
+    var(--safe-area-inset-bottom, 0px),
+    var(--native-inset-bottom, 0px)
+  );
+  --inset-left: max(env(safe-area-inset-left, 0px), var(--safe-area-inset-left, 0px), var(--native-inset-left, 0px));
 }
 
 /*
@@ -56,8 +80,12 @@ body {
   color: var(--fg);
   font-family:
     -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
-  /* 刘海屏/手势条安全区：配合 index.html 的 viewport-fit=cover */
-  padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
+  /*
+   * 系统栏安全区：上下都留白，让内容避开状态栏/挖孔与导航栏（三大金刚或手势条）。
+   * body 的 padding 只解决"随文档流动"的内容；position: fixed 的元素按视口定位，
+   * 不受这里影响，所以它们各自还要用 --inset-* 再让一次（见 .fab / .toast / .rating-bar 等）。
+   */
+  padding: var(--inset-top) var(--inset-right) var(--inset-bottom) var(--inset-left);
   /* 移动端不要选中文本、也不要长按弹出的系统菜单——长按在手势里是"编辑"，
      系统菜单盖上来会挡住它。编辑框里单独放开。 */
   user-select: none;
@@ -74,8 +102,12 @@ select {
 .app {
   display: flex;
   flex-direction: column;
-  height: 100vh;
-  height: 100dvh;
+  /*
+   * 高度只取容器的 100%（不是 100dvh）：body 已经把安全区的内边距让出来了，
+   * #root 的高度就是"可用区域"，这里再用视口高度就会比容器高出一个安全区，
+   * 底部那一条被 overflow:hidden 裁掉（真机上表现为页面最下面压进导航栏/看不到）。
+   */
+  height: 100%;
   overflow: hidden;
 }
 
@@ -239,7 +271,7 @@ select {
   bottom: 0;
   display: flex;
   gap: 6px;
-  padding: 8px 8px calc(8px + var(--safe-bottom));
+  padding: 8px 8px calc(8px + var(--inset-bottom));
   background: var(--bg);
   border-top: 1px solid var(--line);
 }
@@ -287,7 +319,7 @@ select {
 .fab {
   position: fixed;
   right: 18px;
-  bottom: calc(20px + var(--safe-bottom));
+  bottom: calc(20px + var(--inset-bottom));
   width: 58px;
   height: 58px;
   border-radius: 50%;
@@ -346,7 +378,7 @@ select {
 }
 
 .sheet-body {
-  padding: 12px 14px calc(16px + var(--safe-bottom));
+  padding: 12px 14px calc(16px + var(--inset-bottom));
   overflow-y: auto;
 }
 
@@ -539,7 +571,7 @@ code {
 .toast {
   position: fixed;
   left: 50%;
-  bottom: calc(90px + var(--safe-bottom));
+  bottom: calc(90px + var(--inset-bottom));
   transform: translateX(-50%);
   max-width: 80vw;
   padding: 10px 16px;
@@ -575,7 +607,7 @@ code {
   display: flex;
   flex-direction: column;
   height: 100%;
-  padding: max(14px, env(safe-area-inset-top)) 0 calc(14px + var(--safe-bottom));
+  padding: max(14px, var(--inset-top)) 0 calc(14px + var(--inset-bottom));
 }
 
 .drawer-head {

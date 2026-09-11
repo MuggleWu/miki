@@ -109,24 +109,18 @@ describe.skipIf(!enabled)(`真实 GitHub 演练（分支 ${BRANCH}）`, () => {
     // ② 演练从头到尾不碰任何真实数据，也不把它们拉到内存里。
     // GitHub 不接受空树（"Invalid tree info"），所以起点放一个占位文件；
     // 演练推的合成文件都在它旁边，互不干扰。
-    const keep = (
-      await api('POST', `/repos/${REPO}/git/blobs`, {
-        content: Buffer.from('演练占位文件，跑完随分支一起删掉\n', 'utf8').toString('base64'),
-        encoding: 'base64'
-      })
-    ) as { sha: string }
-    const rootTree = (
-      await api('POST', `/repos/${REPO}/git/trees`, {
-        tree: [{ path: 'DRILL-KEEP', mode: '100644', type: 'blob', sha: keep.sha }]
-      })
-    ) as { sha: string }
-    const rootCommit = (
-      await api('POST', `/repos/${REPO}/git/commits`, {
-        message: 'drill: 空分支起点（演练用，跑完即删）',
-        tree: rootTree.sha,
-        parents: []
-      })
-    ) as { sha: string }
+    const keep = (await api('POST', `/repos/${REPO}/git/blobs`, {
+      content: Buffer.from('演练占位文件，跑完随分支一起删掉\n', 'utf8').toString('base64'),
+      encoding: 'base64'
+    })) as { sha: string }
+    const rootTree = (await api('POST', `/repos/${REPO}/git/trees`, {
+      tree: [{ path: 'DRILL-KEEP', mode: '100644', type: 'blob', sha: keep.sha }]
+    })) as { sha: string }
+    const rootCommit = (await api('POST', `/repos/${REPO}/git/commits`, {
+      message: 'drill: 空分支起点（演练用，跑完即删）',
+      tree: rootTree.sha,
+      parents: []
+    })) as { sha: string }
     await api('POST', `/repos/${REPO}/git/refs`, { ref: `refs/heads/${BRANCH}`, sha: rootCommit.sha })
     console.log(`[演练] 已建空分支 ${BRANCH}（起点 ${rootCommit.sha.slice(0, 7)}，无父提交）`)
   }, 60_000)

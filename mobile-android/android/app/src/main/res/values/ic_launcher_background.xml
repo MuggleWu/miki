@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- 自适应图标的底色。前景是白色的卡片图形，底色必须是品牌蓝——
-         默认模板给的 #FFFFFF 会让白卡贴在白底上，整个图标变成一块空白。 -->
-    <color name="ic_launcher_background">#2563EB</color>
+    <!-- 自适应图标的底色。图形是桌面那只会标狐狸的线稿（深灰），底色取桌面图标自身的
+         浅灰而不是品牌蓝：狐狸是"浅底 + 深色线稿"的画法，放到蓝底上会糊成一片。 -->
+    <color name="ic_launcher_background">#FBFBFB</color>
     <!-- 启动画面底色：与图标底色同源，避免"启动图一色、桌面图标另一色" -->
-    <color name="splash_background">#2563EB</color>
+    <color name="splash_background">#FBFBFB</color>
 </resources>
