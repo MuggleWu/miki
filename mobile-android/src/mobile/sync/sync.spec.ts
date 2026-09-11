@@ -42,6 +42,12 @@ class FakeGithub {
     this.commit = `c${++this.seq}`
   }
 
+  /** 远端删除（模拟桌面端压实后 rmSync 掉 delta） */
+  remove(path: string): void {
+    this.files.delete(path)
+    this.commit = `c${++this.seq}`
+  }
+
   handle(method: string, url: string, body?: string): { status: number; json: unknown } {
     const path = url.replace('https://api.github.com', '')
     const j = body ? (JSON.parse(body) as Record<string, unknown>) : {}
@@ -366,5 +372,30 @@ describe('只拉模式（回前台的自动同步）', () => {
     for (const id of ['c1', 'c2', 'c3']) expect(remote).toContain(`"${id}"`)
     const localAfter = await store.readText(`${ROOT}/review-log/2026-09.ndjson`)
     for (const id of ['c1', 'c2', 'c3']) expect(localAfter).toContain(`"${id}"`)
+  })
+})
+
+describe('远端删除的可见性', () => {
+  it('远端删掉一个文件后不再当成「两侧都没改」：本机副本保留，也不会被推回去', async () => {
+    // 桌面端压实会删掉 delta 文件；手机端此前用 `?? baseRemoteSha` 兜底把它读成
+    // 「远端有这个文件且没变」，于是永远留着它，本机之后一改还会把它推回去。
+    gh.push('decks.json', '[{"id":"d1","name":"A"}]')
+    gh.push('cards/d1.delta.ndjson', row({ id: 'c1', front: '改过' }))
+    const store = new MemoryFileStore()
+    const env = { store, paths, reloadAndVerify: verifyFrom(store) }
+    const first = await runSync(env, creds, emptyBase(), 'full')
+    expect(first.report.pulled).toBe(2)
+
+    gh.remove('cards/d1.delta.ndjson')
+    const refUpdatesBefore = gh.refUpdates
+    const second = await runSync(env, creds, first.base, 'full')
+    const entry = second.report.files.find((f) => f.path === 'cards/d1.delta.ndjson')
+    expect(entry?.action).toBe('skip')
+    expect(entry?.reason).toContain('远端已删除')
+    // 保守：不自动删本机文件（内容还在本机，用户可自行处理）
+    expect(await store.readText(`${ROOT}/cards/d1.delta.ndjson`)).not.toBeNull()
+    // 本机没改 → 不产生 commit（修之前这里会把它当成「只本地有」推回远端）
+    expect(gh.refUpdates).toBe(refUpdatesBefore)
+    expect(second.report.pushed).toBe(0)
   })
 })

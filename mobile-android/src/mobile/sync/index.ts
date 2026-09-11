@@ -94,9 +94,12 @@ export async function runSync(env: SyncEnv, creds: SyncCreds, base: SyncBase, mo
   for (const path of allPaths) {
     const local = localPaths.includes(path) ? await localOf(path) : null
     const baseRemoteSha = base.remoteSha[path] ?? null
-    // 头没变时不会去列远端文件，所以这里要区分"远端真没有"与"这次没查"：
-    // base 记过它，就说明远端有这个文件，只是内容与上次同步时一样
-    const rEntry = remoteSha.get(path) ?? baseRemoteSha
+    // 「这次没查」与「远端真没有」必须分开，否则会把"已删除"读成"没变"：
+    //   · 头变了 ⇒ remoteSha 是**完整**清单，清单里没有它 = 远端删了这个文件（例如桌面端
+    //     压实后 rmSync 掉 delta）。用 base 的旧记录兜底会让手机端一直留着远端早就没有的
+    //     文件，本机之后一改还会把它推回去，等于撤销桌面端的压实。
+    //   · 头没变 ⇒ 这次根本没列远端，base 记过它就说明远端有、只是内容与上次同步时一样。
+    const rEntry = remoteChanged ? (remoteSha.get(path) ?? null) : baseRemoteSha
     const lastLocal = base.localHash[path] ?? null
 
     const remoteDiffers = rEntry !== null && rEntry !== baseRemoteSha
@@ -108,7 +111,15 @@ export async function runSync(env: SyncEnv, creds: SyncCreds, base: SyncBase, mo
       continue
     }
     if (rEntry === null && !localDiffers && lastLocal !== null) {
-      files.push({ path, action: 'skip', content: null, reason: '本地未改，远端本就没有这个文件' })
+      files.push({
+        path,
+        action: 'skip',
+        content: null,
+        // 两种情况要分开报：远端删了（本机保留副本，不自动删本机文件）／远端本来就没有
+        reason: remoteChanged
+          ? '远端已删除这个文件，本机保留一份未改的副本（不自动删本机文件，只有本机改了才会推回去）'
+          : '本地未改，远端本就没有这个文件'
+      })
       continue
     }
 
