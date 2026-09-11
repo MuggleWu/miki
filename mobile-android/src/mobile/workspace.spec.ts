@@ -446,3 +446,56 @@ describe('JSON 文档层损坏的可见性', () => {
     })
   })
 })
+
+// 写盘失败要回滚：否则内存与日志分叉 —— 界面显示已答、调度器按新状态排下一张，
+// 磁盘上却什么都没有（下次重载才发现这次答题不存在）。这里用"追加就抛错"的替身注入失败。
+class FailAppendStore extends MemoryFileStore {
+  failAppend = false
+  async appendText(path: string, text: string): Promise<void> {
+    if (this.failAppend) throw new Error('写入失败（测试注入）')
+    return super.appendText(path, text)
+  }
+}
+
+describe('写盘失败时回滚内存态', () => {
+  it('答题写不进去：内存里的调度状态退回去，重载后的状态与内存一致', async () => {
+    const fs = new FailAppendStore()
+    seedWorkspace(fs)
+    const ws = await openWorkspace(fs)
+    fs.failAppend = true
+
+    await expect(ws.answer('c1', 3)).rejects.toThrow('写入失败')
+    // 内存：这张卡还是"没答过"的样子
+    const card = ws.getCard('c1')!
+    expect(card.reps).toBe(0)
+    expect(card.fsrs).toBeNull()
+    // 与磁盘一致（reload 是权威）：修之前这里内存已经前进、磁盘是空的
+    fs.failAppend = false
+    await ws.reload()
+    expect(ws.getCard('c1')!.reps).toBe(0)
+    expect(ws.getCard('c1')!.fsrs).toBeNull()
+  })
+
+  it('改卡写不进去：正文与 updatedAt 都退回去', async () => {
+    const fs = new FailAppendStore()
+    seedWorkspace(fs)
+    const ws = await openWorkspace(fs)
+    const beforeUpdatedAt = ws.getCard('c1')!.updatedAt
+    fs.failAppend = true
+
+    await expect(ws.updateCard('c1', { front: '改过的' })).rejects.toThrow('写入失败')
+    expect(ws.getCard('c1')!.front).toBe('第一张')
+    expect(ws.getCard('c1')!.updatedAt).toBe(beforeUpdatedAt)
+  })
+
+  it('新建卡片写不进去：不留只在内存里的幽灵卡', async () => {
+    const fs = new FailAppendStore()
+    seedWorkspace(fs)
+    const ws = await openWorkspace(fs)
+    const count = ws.cardCount()
+    fs.failAppend = true
+
+    await expect(ws.addCard('d1', '新的', '')).rejects.toThrow('写入失败')
+    expect(ws.cardCount()).toBe(count)
+  })
+})

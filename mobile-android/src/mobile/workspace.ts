@@ -576,8 +576,17 @@ export class MobileWorkspace {
     }
     const card: Card = { ...content, deckId, fsrs: null, reps: 0, lapses: 0 }
     this.cards.set(card.id, card)
-    this.deckBucket(deckId).push(card)
-    await this.appendCardRows(deckId, [card])
+    const bucket = this.deckBucket(deckId)
+    bucket.push(card)
+    try {
+      await this.appendCardRows(deckId, [card])
+    } catch (e) {
+      // 写失败别留一张只在内存里的幽灵卡：它会出现在列表里，点进去却什么都存不下
+      this.cards.delete(card.id)
+      const i = bucket.indexOf(card)
+      if (i >= 0) bucket.splice(i, 1)
+      throw e
+    }
     this.sched.reindexCard(card, null)
     this.statsCache.clear()
     return card
@@ -588,12 +597,21 @@ export class MobileWorkspace {
     const card = this.cards.get(cardId)
     if (!card || card.deletedAt) return null
     if (patch.front === undefined && patch.back === undefined) return card
+    const prev = { front: card.front, back: card.back, updatedAt: card.updatedAt }
     if (patch.front !== undefined) card.front = patch.front
     if (patch.back !== undefined) card.back = patch.back
     this.lowerCache.delete(cardId)
     // 严格单调：updatedAt 同时是内容版本号（乐观锁基准），同毫秒两次写入不能被误判成「没变」
     card.updatedAt = Math.max(Date.now(), card.updatedAt + 1)
-    await this.appendCardDelta(card.deckId, [card])
+    try {
+      await this.appendCardDelta(card.deckId, [card])
+    } catch (e) {
+      // 同理：写不进去就把内存那份改回去，否则界面显示改好了、重载后原样
+      card.front = prev.front
+      card.back = prev.back
+      card.updatedAt = prev.updatedAt
+      throw e
+    }
     return card
   }
 
@@ -723,7 +741,18 @@ export class MobileWorkspace {
         suspended: true
       })
     }
-    await this.appendEvents(evs)
+    // 写盘失败要回滚：坏掉的不是"这一题"，而是内存与日志分叉了 —— 界面显示已答、调度器
+    // 按新状态排下一张，磁盘上却什么都没有（下次重载才发现这次答题不存在，用户看到的是
+    // "题答了但记录没了"）。回滚的代价只是这一次答题白做，当场可以重试。
+    try {
+      await this.appendEvents(evs)
+    } catch (e) {
+      card.fsrs = beforeFsrs
+      card.reps = before.reps
+      card.lapses = before.lapses
+      card.suspended = before.suspended
+      throw e
+    }
     this.recordAnswer(card.deckId, ev.t, rating, durationMs)
     this.sched.reindexCard(card, before)
     this.session.pushUndoable([ev])

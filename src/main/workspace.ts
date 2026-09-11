@@ -1106,7 +1106,18 @@ export class WorkspaceService {
         suspended: true
       })
     }
-    this.appendEvents(evs)
+    // 写盘失败要回滚：否则内存与日志分叉 —— 界面显示已答、调度器按新状态排下一张，
+    // 磁盘上却什么都没有（下次重载才发现这次答题不存在）。回滚只是这次答题白做，
+    // 用户当场能重试；渲染层负责把这次失败报出来。
+    try {
+      this.appendEvents(evs)
+    } catch (e) {
+      card.fsrs = beforeFsrs
+      card.reps = before.reps
+      card.lapses = before.lapses
+      card.suspended = before.suspended
+      throw e
+    }
     this.ledger.recordAnswer(card.deckId, ev.t, rating, durationMs)
     this.sched.reindexCard(card, before)
     this.session.pushUndoable([ev])

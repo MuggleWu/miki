@@ -1263,3 +1263,28 @@ describe('部分更新（updateCard/updateCards 未提供字段保留原值）',
     }
   })
 })
+
+// 写盘失败要回滚：桌面端的 answer 是同步的，appendEvents 抛错时必须把内存里的调度状态
+// 退回去，否则界面显示已答、调度器按新状态排下一张，磁盘上什么都没有。
+describe('写盘失败时回滚内存态', () => {
+  it('答题写不进去：内存里的调度状态退回去', () => {
+    const d = tmpKept()
+    const w = newWs(d)
+    const deck = w.addDeck('只读').id
+    const c = w.addCard(deck, '卡', '')
+    const logDir = path.join(d, 'review-log')
+    fs.chmodSync(logDir, 0o555) // 目录只读 → 追加会失败
+    try {
+      expect(() => w.answer(c.id, 3)).toThrow()
+    } finally {
+      fs.chmodSync(logDir, 0o755)
+    }
+    const after = w.getCard(c.id)!
+    expect(after.reps).toBe(0)
+    expect(after.fsrs).toBeNull()
+    // 与磁盘一致：重新加载工作区，内存态与重放结果逐字段相同
+    const w2 = newWs(d)
+    expect(w2.getCard(c.id)!.reps).toBe(0)
+    expect(w2.getCard(c.id)!.fsrs).toBeNull()
+  })
+})

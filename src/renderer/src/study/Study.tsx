@@ -21,6 +21,7 @@ export function Study() {
   const [previewDue, setPreviewDue] = useState<number[]>([])
   /** 评级在途：闸门（ref 同 tick 生效）+ 按钮禁用反馈 */
   const [answering, setAnswering] = useState(false)
+  const [answerError, setAnswerError] = useState<string | null>(null)
   const answeringRef = useRef(false)
   const questionShownAt = useRef<number>(Date.now())
   // 最近一次装载进界面的卡（编辑弹窗确认后的重取用它判断「同卡」→ 保留当前相位）
@@ -89,11 +90,16 @@ export function Study() {
       try {
         const durationMs = Math.min(Date.now() - questionShownAt.current, MAX_ANSWER_MS)
         const p = await window.miki.answer(payload.card.id, rating, durationMs)
+        setAnswerError(null)
         setPayload(p)
         loadedCardIdRef.current = p.card?.id ?? null
         setPhase('question')
         questionShownAt.current = Date.now()
         setStudyCurrentCardId(p.card?.id ?? null)
+      } catch (e) {
+        // 答不上就是答不上：主进程会把内存态回滚（见 WorkspaceService.answer），界面上必须
+        // 说出来 —— 否则用户按了键、画面没变、也没有任何提示，只能反复按（每次都白写一遍）。
+        setAnswerError(e instanceof Error ? e.message : String(e))
       } finally {
         answeringRef.current = false
         setAnswering(false)
@@ -166,6 +172,14 @@ export function Study() {
 
   return (
     <div className="study">
+      {answerError ? (
+        <div className="damage-banner">
+          <span>这次评级没有存下来：{answerError}（卡片状态已回滚，可以直接再按一次）</span>
+          <button className="damage-dismiss" onClick={() => setAnswerError(null)}>
+            知道了
+          </button>
+        </div>
+      ) : null}
       <div className="study-head">
         <span>牌组：{deck?.name ?? '—'}</span>
         <span>
