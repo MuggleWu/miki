@@ -211,8 +211,13 @@ export function StudyPage({ deckId }: { deckId: string }): JSX.Element {
         </button>
       </Sheet>
 
+      {/*
+        只在打开时挂载表单：编辑内容与乐观锁基准都是「打开那一刻」的快照，一直挂着会在
+        刷到下一张卡后仍显示上一张的内容（真机上就是这个表现）。关掉即卸载，也顺带让
+        「取消」真的等于放弃草稿（冲突提示里让人「关掉后重新打开再编辑」，靠的就是这条）。
+      */}
       <Sheet open={editing} title="编辑卡片" full onClose={() => setEditing(false)}>
-        {card ? (
+        {editing && card ? (
           <CardEditForm
             cardId={card.id}
             onDone={(changed) => {

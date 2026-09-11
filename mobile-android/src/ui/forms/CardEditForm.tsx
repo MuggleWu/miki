@@ -26,7 +26,16 @@ interface Opened {
   updatedAt: number
 }
 
-export function CardEditForm({ cardId, onDone }: Props): JSX.Element {
+export function CardEditForm(props: Props): JSX.Element {
+  // 换卡必须换实例：下面那些 state 是「打开表单那一刻」冻住的（乐观锁的基准 + 正在编辑的文本），
+  // 它们只在**挂载**时算一次。而调用方可能一直把它挂着只切换卡片（学习页的弹层就是始终渲染
+  // children 的），那种情况下 prop 换了、state 不换 —— 真机上表现为「正在刷 A，打开编辑页却是 B」，
+  // 更糟的是保存时拿 A 的基准去写 B（updatedAt 撞车时就真写坏了，实测库里 43% 的卡时间戳相同）。
+  // 用 key 强制换卡即换实例，把这条不变量钉在组件内部，不依赖调用方写对。
+  return <CardEditFormBody key={props.cardId} {...props} />
+}
+
+function CardEditFormBody({ cardId, onDone }: Props): JSX.Element {
   const ws = useApp((s) => s.ws)!
   const notify = useApp((s) => s.notify)
   const card = ws.getCard(cardId)
