@@ -49,10 +49,15 @@ export function linesOf(text: string, path: string): string[] {
 /**
  * 是否存在"压实痕迹"：基文件被重写过（行里带调度检查点 __mikiSeq / meta 行 __mikiCheckpoint）。
  * 有痕迹时行拼接不成立——被压实的那些行在另一侧可能以完全不同的行存在。
+ *
+ * 判据用**键**而不是裸子串：卡片正文里出现 `__mikiSeq` 这几个字（比如一张讲 JSON 的卡）
+ * 会命中子串判定，把一份普通文件误判成"已压实" → 两侧都改过时直接 blocked，用户被告知
+ * "去桌面端先同步一致"，但桌面端根本没压实过。键形态（`"__mikiSeq":`）在 JSON 里不会被
+ * 值里的同名字符串命中：值里的引号会被转义成 `\"`，键判定要求引号**紧跟**在键名后面。
  */
 function looksCompacted(lines: string[], path: string): boolean {
   if (!path.endsWith('.ndjson')) return false
-  return lines.some((l) => l.includes('__mikiSeq') || l.includes('__mikiCheckpoint'))
+  return lines.some((l) => /"__mikiSeq"\s*:/.test(l) || /"__mikiCheckpoint"\s*:/.test(l))
 }
 
 function isPrefix(short: string[], long: string[]): boolean {

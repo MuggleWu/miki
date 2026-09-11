@@ -89,6 +89,19 @@ describe('mergeFile 判定', () => {
       expect(r.reason).toContain('JSON')
     })
 
+    it('正文里出现 __mikiSeq 这几个字不算压实（判据是键，不是裸子串）→ 照常合并', () => {
+      // 一张讲 JSON / 讲本项目的卡片，正文里就有这个字段名。按下标子串判定会被误判成
+      // "已压实" → 两侧都改过时直接 blocked，还让用户"去桌面端先同步一致"，而根本没压实过。
+      const c1 = row('c1', ',"front":"正文里提到 __mikiSeq 这个字段"')
+      const c2 = row('c2', ',"front":"正文抄了一段：{\\"__mikiSeq\\":9}"')
+      const c3 = row('c3', ',"front":"远端新增的卡片"')
+      const r = mergeFile({ path: 'cards/d.ndjson', local: `${c1}\n${c2}\n`, remote: `${c1}\n${c3}\n` })
+      expect(r.action).toBe('union')
+      expect(r.reason).not.toContain('压实')
+      expect(r.content).toContain('远端新增的卡片')
+      expect(r.content).toContain('正文里提到')
+    })
+
     it('合出来的行如果没法解析 → blocked（宁可不合）', () => {
       const remote = '{"a":1}\nnot json\n'
       const local = '{"a":2}\n{"b":3}\n'
