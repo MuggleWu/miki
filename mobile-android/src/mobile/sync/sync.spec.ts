@@ -431,3 +431,100 @@ describe('快照时机', () => {
     expect(second.report.snapshot!.length).toBeGreaterThan(20)
   })
 })
+
+describe('blocked 的文件级粒度', () => {
+  it('一个分叉文件只跳过它自己：答题进度照推，且它不会被记成「已同步」', async () => {
+    gh.push('decks.json', '[{"id":"a","name":"旧"}]')
+    const store = new MemoryFileStore()
+    const env = { store, paths, reloadAndVerify: verifyFrom(store) }
+    const first = await runSync(env, creds, emptyBase(), 'full')
+    expect(first.report.pulled).toBe(1) // decks.json 第一次是直接拉下来
+
+    // 两侧各自改 decks.json（JSON 不能按行拼 → blocked），同时本机还有新的答题记录要推
+    await store.writeText(`${ROOT}/decks.json`, '[{"id":"a","name":"本机改的"}]')
+    gh.push('decks.json', '[{"id":"a","name":"远端改的"}]')
+    await store.writeText(`${ROOT}/review-log/2026-09.ndjson`, row({ id: 'r1', cardId: 'a', rating: 3 }))
+
+    const before = gh.refUpdates
+    const second = await runSync(env, creds, first.base, 'full')
+    // 修之前：整次停止（ok=false、什么都没推），本机的答题进度一直备不上去
+    expect(second.report.ok).toBe(true)
+    expect(gh.refUpdates).toBe(before + 1)
+    expect(second.report.pushed).toBe(1)
+    expect(second.report.message).toContain('不能自动合并')
+    const blocked = second.report.files.find((f) => f.path === 'decks.json')
+    expect(blocked?.action).toBe('blocked')
+    // 本机那份保持原样（没被远端盖掉，也没被推上去）
+    expect(await store.readText(`${ROOT}/decks.json`)).toBe('[{"id":"a","name":"本机改的"}]')
+    // 关键：分叉文件必须记进 conflicts，否则下次同步在记账看是"两侧都没变"
+    // （甚至被读成"本地新建的文件"→ 把本机那份推上去盖掉远端），分叉永远不收敛
+    expect(second.base.conflicts).toEqual(['decks.json'])
+  })
+
+  it('被跳过的分叉文件下次同步仍会被判为 blocked（不会静默变成「已同步」）', async () => {
+    gh.push('decks.json', '[{"id":"a","name":"旧"}]')
+    const store = new MemoryFileStore()
+    const env = { store, paths, reloadAndVerify: verifyFrom(store) }
+    const first = await runSync(env, creds, emptyBase(), 'full')
+    await store.writeText(`${ROOT}/decks.json`, '[{"id":"a","name":"本机改的"}]')
+    gh.push('decks.json', '[{"id":"a","name":"远端改的"}]')
+
+    const second = await runSync(env, creds, first.base, 'full')
+    const third = await runSync(env, creds, second.base, 'full')
+    expect(third.report.files.find((f) => f.path === 'decks.json')?.action).toBe('blocked')
+  })
+})
+
+describe('用远端覆盖本机（force-pull）', () => {
+  const corrupt = '[{"id":"a","name":"半写'
+
+  it('点名覆盖：本机读不出来的那份被远端盖掉，不产生 commit，记账随之对齐', async () => {
+    // 这条路径是用来解死局的：本机 decks.json 读不出来时，之前的同步只会在"只本地改了"
+    // 与 blocked 之间来回，本机那份永远救不回来。
+    gh.push('decks.json', '[{"id":"a","name":"远端的"}]')
+    const store = new MemoryFileStore()
+    const env = { store, paths, reloadAndVerify: verifyFrom(store) }
+    await store.writeText(`${ROOT}/decks.json`, corrupt)
+    await store.writeText(`${ROOT}/review-log/2026-09.ndjson`, row({ id: 'r1', cardId: 'a', rating: 3 }))
+
+    const before = gh.refUpdates
+    const out = await runSync(env, creds, emptyBase(), 'force-pull', { forcePaths: ['decks.json'] })
+    expect(out.report.pulled).toBe(1)
+    expect(out.report.pushed).toBe(0)
+    expect(gh.refUpdates).toBe(before) // 只拉不推
+    expect(await store.readText(`${ROOT}/decks.json`)).toBe('[{"id":"a","name":"远端的"}]')
+    // 没点名的文件一根手指都不碰（答题记录还在）
+    expect(await store.readText(`${ROOT}/review-log/2026-09.ndjson`)).toContain('r1')
+    // 记账对齐：这个文件以后不再被判为"只本地改了"
+    expect(out.base.remoteSha['decks.json']).toBeTruthy()
+    expect(out.base.localHash['decks.json']).toBeTruthy()
+    expect(out.base.commit).toBeNull() // 记账的 commit 不推进（远端其余文件这次并没被消费）
+  })
+
+  it('远端没有这个文件 → 报告而不是删本机文件', async () => {
+    const store = new MemoryFileStore()
+    const env = { store, paths, reloadAndVerify: verifyFrom(store) }
+    await store.writeText(`${ROOT}/cards/d9.ndjson`, row({ id: 'x' }))
+    const out = await runSync(env, creds, emptyBase(), 'force-pull', { forcePaths: ['cards/d9.ndjson'] })
+    expect(out.report.pulled).toBe(0)
+    expect(out.report.files[0].reason).toContain('远端没有这个文件')
+    expect(await store.readText(`${ROOT}/cards/d9.ndjson`)).not.toBeNull()
+  })
+
+  it('远端那份也不是合法 JSON → 拒绝覆盖（别把坏文件换个来源）', async () => {
+    gh.push('decks.json', '{坏的')
+    const store = new MemoryFileStore()
+    const env = { store, paths, reloadAndVerify: verifyFrom(store) }
+    await store.writeText(`${ROOT}/decks.json`, '[{"id":"本机的"}]')
+    const out = await runSync(env, creds, emptyBase(), 'force-pull', { forcePaths: ['decks.json'] })
+    expect(out.report.pulled).toBe(0)
+    expect(out.report.files[0].reason).toContain('不是合法 JSON')
+    expect(await store.readText(`${ROOT}/decks.json`)).toBe('[{"id":"本机的"}]')
+  })
+
+  it('没点名任何文件 → 直接报错（这是个调用错误，不是"什么都不做"）', async () => {
+    const store = new MemoryFileStore()
+    const env = { store, paths, reloadAndVerify: verifyFrom(store) }
+    await expect(runSync(env, creds, emptyBase(), 'force-pull', {})).rejects.toThrow('没有点名任何文件')
+  })
+})

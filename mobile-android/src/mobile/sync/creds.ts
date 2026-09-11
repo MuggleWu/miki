@@ -68,7 +68,9 @@ export async function loadBase(): Promise<SyncBase> {
     return {
       commit: parsed.commit ?? null,
       remoteSha: parsed.remoteSha ?? {},
-      localHash: parsed.localHash ?? {}
+      localHash: parsed.localHash ?? {},
+      // 老版本记的账里没有这一项：当作"没有已知分叉"（空数组），别让读旧格式失败
+      conflicts: parsed.conflicts ?? []
     }
   } catch {
     // 记账坏了不影响正确性，只是退化成"没有 base"（前缀判定），不能让它把同步带崩

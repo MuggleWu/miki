@@ -23,10 +23,18 @@ export interface SyncBase {
   remoteSha: Record<string, string>
   /** 上次同步后各文件在本地的内容指纹 */
   localHash: Record<string, string>
+  /**
+   * 上次同步判过"不能自动合并"、至今没对齐的文件。
+   *
+   * 为什么必须记下来：这些文件一旦只是"这次跳过"，下次同步在记账看就是"两侧都没变"
+   * （甚至会被读成"本地新建的文件"）→ 静默跳过或被本机那份推上去盖掉远端，分叉永远不收敛。
+   * 记下来后每次都会按"祖先未知"重新判定，直到真的对齐（或用户手动用远端覆盖）。
+   */
+  conflicts?: string[]
 }
 
 export function emptyBase(): SyncBase {
-  return { commit: null, remoteSha: {}, localHash: {} }
+  return { commit: null, remoteSha: {}, localHash: {}, conflicts: [] }
 }
 
 /** 一次同步的结果（同步结果页与设置页都读它） */

@@ -22,6 +22,7 @@ vi.mock('@capacitor/preferences', () => ({
 
 import { PREF_KEYS } from '../prefs'
 import { applySyncConfig, clearBase, loadBase, loadCreds, saveBase, saveCreds } from './creds'
+import { emptyBase } from './types'
 
 const someBase = () => ({
   commit: 'c1',
@@ -50,14 +51,14 @@ describe('同步目标变更时的记账作废', () => {
     const { switched, creds } = await applySyncConfig('me/new-repo', 'main', null)
     expect(switched).toBe(true)
     expect(creds.repo).toBe('me/new-repo')
-    expect(await loadBase()).toEqual({ commit: null, remoteSha: {}, localHash: {} })
+    expect(await loadBase()).toEqual(emptyBase())
     expect(prefs.get(PREF_KEYS.syncVerify)).toBeUndefined()
   })
 
   it('换了分支：同样作废', async () => {
     const { switched } = await applySyncConfig('me/old-repo', 'drill', null)
     expect(switched).toBe(true)
-    expect(await loadBase()).toEqual({ commit: null, remoteSha: {}, localHash: {} })
+    expect(await loadBase()).toEqual(emptyBase())
   })
 
   it('仓库写法不同但归一化后是同一个：不算换目标，记账保留', async () => {
@@ -69,7 +70,7 @@ describe('同步目标变更时的记账作废', () => {
 
   it('clearBase 只清记账与验证，不动凭据', async () => {
     await clearBase()
-    expect(await loadBase()).toEqual({ commit: null, remoteSha: {}, localHash: {} })
+    expect(await loadBase()).toEqual(emptyBase())
     expect(prefs.get(PREF_KEYS.githubRepo)).toBe('me/old-repo')
     expect(prefs.get(PREF_KEYS.githubPat)).toBe('tok-1')
   })
