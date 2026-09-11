@@ -212,6 +212,26 @@ describe('卡片库编辑自动保存', () => {
     expect(miki.updateCard).toHaveBeenCalledTimes(1)
   })
 
+  // 「串卡」的另一半（前半是上面那条：切卡前必须先落盘）。缓冲不跟着选中行走时，
+  // 编辑区显示的是上一张卡的内容，在它上面打字会写进**新**选中的卡
+  // （目标 id 取自选中行、内容取自旧缓冲）：静默写坏数据。
+  it('切卡后编辑区换成新卡内容，在它上面打字不会把旧卡内容写进新卡', async () => {
+    await mountBrowser()
+    await click(rowFor('正面 A'))
+    expect(editors()[0].value).toBe('正面 A')
+
+    await click(rowFor('正面 B'))
+    expect(editors()[0].value).toBe('正面 B')
+    expect(editors()[1].value).toBe('反面 B')
+
+    await act(async () => {
+      typeInto(editors()[0], 'B 改过')
+    })
+    await wait(PAST_DEBOUNCE)
+    expect(miki.updateCard).toHaveBeenCalledTimes(1)
+    expect(miki.updateCard).toHaveBeenCalledWith('card-b', { front: 'B 改过', back: '反面 B' })
+  })
+
   it('离开卡片库（卸载）时把未落盘的编辑写掉', async () => {
     await mountBrowser()
     await selectAndEdit('正面 A', '离开前的编辑')
