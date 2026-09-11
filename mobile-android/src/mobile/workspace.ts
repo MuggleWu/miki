@@ -158,11 +158,15 @@ export class MobileWorkspace {
       total: t5 - t0,
       eventCount: events
     }
+    const liveDecks = this.decks.filter((d) => !d.deletedAt).length
     console.log(
       `[miki-load] 合计 ${this.loadTiming.total}ms` +
         `（config ${this.loadTiming.config} / 牌组 ${this.loadTiming.decks} / 卡片 ${this.loadTiming.cards}` +
         `（其中读文件 ${cardsRead}）` +
-        ` / 重放 ${this.loadTiming.events}（${events} 条事件）/ 建索引 ${this.loadTiming.index}）`
+        ` / 重放 ${this.loadTiming.events}（${events} 条事件）/ 建索引 ${this.loadTiming.index}）` +
+        // 计数一起打出来：排查"读到的和桌面端不一样"时不必翻 UI，
+        // 也让真机上的对账可以直接读 logcat（不必截图，卡片内容不会外泄）
+        `｜活牌组 ${liveDecks} / 内存卡片 ${this.cards.size} / 事件 ${events}`
     )
   }
 
