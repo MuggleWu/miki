@@ -9,6 +9,7 @@ import { useApp } from '../store'
 import { useWorkspace } from '../use-workspace'
 import { Sheet } from '../components/Sheet'
 import { Confirm } from '../components/Confirm'
+import { Md } from '../md'
 import { CardEditForm } from '../forms/CardEditForm'
 import { fmtDuePreview } from '@shared/format'
 import type { CardRow, CardState } from '@shared/types'
@@ -29,6 +30,7 @@ export function LibraryPage(): JSX.Element {
   const [deckId, setDeckId] = useState<string | null>(null)
   const [limit, setLimit] = useState(PAGE)
   const [openId, setOpenId] = useState<string | null>(null)
+  const [editingCard, setEditingCard] = useState(false)
 
   const decks = ws.deckInfos()
 
@@ -111,10 +113,17 @@ export function LibraryPage(): JSX.Element {
         ) : null}
       </div>
 
-      <Sheet open={openRow !== null} title="卡片详情" onClose={() => setOpenId(null)}>
+      {/* 详情里点编辑 → 同一个弹层切成全屏（键盘起来后长文本要有地方写） */}
+      <Sheet
+        open={openRow !== null}
+        title={editingCard ? '编辑卡片' : '卡片详情'}
+        full={editingCard}
+        onClose={() => setOpenId(null)}
+      >
         {openRow ? (
           <CardDetail
             row={openRow}
+            onEditing={setEditingCard}
             onChanged={() => {
               bump()
               setOpenId(null)
@@ -134,11 +143,14 @@ function dueText(r: CardRow): string {
 
 /** 详情抽屉：先看内容与调度参数，再决定编辑 / 暂停 / 删除 */
 function CardDetail({
+  onEditing,
   row,
   onChanged,
   onNotify
 }: {
   row: CardRow
+  /** 进出编辑态时通知外层（外层据此把弹层切成全屏并改标题） */
+  onEditing(v: boolean): void
   onChanged(): void
   onNotify(msg: string | null): void
 }): JSX.Element {
@@ -152,11 +164,17 @@ function CardDetail({
       <CardEditForm
         cardId={row.id}
         onDone={(changed) => {
-          setEditing(false)
+          setEditingAnd(false)
           if (changed) onChanged()
         }}
       />
     )
+  }
+
+  // 进出编辑态都要告诉外层：外层负责把弹层切成全屏并改标题
+  function setEditingAnd(v: boolean): void {
+    setEditing(v)
+    onEditing(v)
   }
 
   async function act(fn: () => Promise<void>, msg: string): Promise<void> {
@@ -175,9 +193,9 @@ function CardDetail({
   return (
     <div className="detail-form">
       <div className="preview">
-        <p className="preview-front">{row.front}</p>
+        <Md source={row.front} className="preview-front" />
         <hr className="sep" />
-        <p className="preview-back">{row.back}</p>
+        <Md source={row.back} className="preview-back" />
       </div>
       <ul className="kv">
         <li>

@@ -1,4 +1,7 @@
-// 编辑卡片表单：正面 / 反面两个 textarea + 保存。
+// 编辑卡片表单：正面 / 反面两个 textarea + 预览切换 + 保存。
+//
+// 全屏页承载（不是底部抽屉）：手机上写长文本时键盘要占掉半屏，
+// 抽屉里只剩两行可见，改起来要不停滚动。设计文档也是这么定的。
 //
 // 两处用过它：学习页的「更多 → 编辑」底部抽屉、以及卡片库点行进详情（M3）。
 //
@@ -8,6 +11,7 @@
 // 「打开时的内容 + 版本号」一起冻进 ref，之后只用它做比对。
 // 冲突时不写盘，只提示：让用户自己决定要不要用旧内容覆盖。
 import { useState } from 'react'
+import { Md } from '../md'
 import { useApp } from '../store'
 
 interface Props {
@@ -36,6 +40,8 @@ export function CardEditForm({ cardId, onDone }: Props): JSX.Element {
   const [back, setBack] = useState(base?.back ?? '')
   const [busy, setBusy] = useState(false)
   const [conflict, setConflict] = useState(false)
+  // 预览是"看效果"，编辑是"改内容"：手机上两者不能同时可见（宽度不够），所以做切换
+  const [preview, setPreview] = useState(false)
 
   if (!base) {
     return (
@@ -88,14 +94,34 @@ export function CardEditForm({ cardId, onDone }: Props): JSX.Element {
           关掉后重新打开这张卡再编辑。
         </p>
       ) : null}
-      <label className="field">
-        <span>正面</span>
-        <textarea rows={4} value={front} onChange={(e) => setFront(e.target.value)} />
-      </label>
-      <label className="field">
-        <span>背面</span>
-        <textarea rows={4} value={back} onChange={(e) => setBack(e.target.value)} />
-      </label>
+      <div className="seg">
+        <button type="button" className={preview ? '' : 'on'} onClick={() => setPreview(false)}>
+          编辑
+        </button>
+        <button type="button" className={preview ? 'on' : ''} onClick={() => setPreview(true)}>
+          预览
+        </button>
+      </div>
+
+      {preview ? (
+        <div className="edit-preview">
+          <Md source={front} className="preview-front" />
+          <hr className="sep" />
+          <Md source={back} className="preview-back" />
+          <p className="muted">预览用的是渲染后的效果（公式、加粗、列表都会显示出来）。</p>
+        </div>
+      ) : (
+        <>
+          <label className="field">
+            <span>正面</span>
+            <textarea rows={5} value={front} onChange={(e) => setFront(e.target.value)} />
+          </label>
+          <label className="field">
+            <span>背面</span>
+            <textarea rows={5} value={back} onChange={(e) => setBack(e.target.value)} />
+          </label>
+        </>
+      )}
       <div className="row-btns">
         <button className="btn" type="button" onClick={() => onDone(false)}>
           取消

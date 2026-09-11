@@ -12,6 +12,7 @@ import { MobilePaths } from '@mobile/paths'
 import { MobileWorkspace } from '@mobile/workspace'
 import { WORKSPACE_DIR } from '@mobile/constants'
 import { PREF_KEYS, prefGet, prefSet } from '@mobile/prefs'
+import { prefetchMarkdown } from './md'
 import type { FontScale, ThemePref } from '@mobile/theme'
 
 /** 本机显示偏好（不是工作区数据，换手机不会跟着走） */
@@ -72,6 +73,8 @@ export const useApp = create<AppState>((set, get) => ({
       // 从脚本开始执行到工作区就绪的墙钟差：这是"打开应用要等多久"的实际口径
       console.log(`[miki-boot] JS 启动 → 工作区就绪：${Math.round(performance.now())}ms`)
       set({ ws, bootError: null })
+      // 工作区就绪后再预取 markdown 管线：首屏不受它影响，进牌组时通常已经就位
+      prefetchMarkdown()
     } catch (e) {
       set({ bootError: e instanceof Error ? e.message : String(e) })
     }

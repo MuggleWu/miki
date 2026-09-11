@@ -1,4 +1,4 @@
-// 底部弹层：抽屉式操作菜单与新增表单共用。
+// 弹层：抽屉式操作菜单、新增表单、编辑页共用。
 // 用 <dialog> 而不是自己撸遮罩：原生元素自带焦点陷阱与 Esc 关闭，Android 返回键也会先关它。
 import { useEffect, useRef, type ReactNode } from 'react'
 
@@ -7,9 +7,15 @@ interface Props {
   title: string
   onClose(): void
   children: ReactNode
+  /**
+   * 全屏形态：编辑长文本用。
+   * 手机上键盘一弹就占掉半屏，底部抽屉里只剩两行可见，写解析要不停滚动。
+   * 全屏仍然用 <dialog>（不换成路由）：换路由会卸载学习页，把当前会话的刷题进度丢掉。
+   */
+  full?: boolean
 }
 
-export function Sheet({ open, title, onClose, children }: Props): JSX.Element | null {
+export function Sheet({ open, title, onClose, children, full = false }: Props): JSX.Element | null {
   const ref = useRef<HTMLDialogElement>(null)
 
   useEffect(() => {
@@ -22,7 +28,7 @@ export function Sheet({ open, title, onClose, children }: Props): JSX.Element | 
   return (
     <dialog
       ref={ref}
-      className="sheet"
+      className={full ? 'sheet sheet-full' : 'sheet'}
       onCancel={(e) => {
         e.preventDefault()
         onClose()

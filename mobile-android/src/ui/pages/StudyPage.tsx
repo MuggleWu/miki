@@ -6,9 +6,10 @@ import { useMemo, useRef, useState } from 'react'
 import { useApp } from '../store'
 import { StudySession, type StudyState } from '@mobile/study-session'
 import { Sheet } from '../components/Sheet'
-import { Confirm } from '../components/Confirm'
 import { CardEditForm } from '../forms/CardEditForm'
+import { Confirm } from '../components/Confirm'
 import { useLongPress } from '../use-long-press'
+import { Md } from '../md'
 import { RATING_LABEL } from '@shared/format'
 import type { Rating } from '@shared/types'
 
@@ -101,11 +102,11 @@ export function StudyPage({ deckId }: { deckId: string }): JSX.Element {
             onPointerUp={longPress.onPointerUp}
             onPointerCancel={longPress.onPointerCancel}
           >
-            <div className="face front">{card.front}</div>
+            <Md source={card.front} className="face front" />
             {state.revealed ? (
               <>
                 <hr className="sep" />
-                <div className="face back">{card.back}</div>
+                <Md source={card.back} className="face back" />
               </>
             ) : (
               <p className="hint muted">点按显示答案 · 长按编辑</p>
@@ -183,7 +184,7 @@ export function StudyPage({ deckId }: { deckId: string }): JSX.Element {
         }}
       />
 
-      <Sheet open={editing} title="编辑卡片" onClose={() => setEditing(false)}>
+      <Sheet open={editing} title="编辑卡片" full onClose={() => setEditing(false)}>
         {card ? (
           <CardEditForm
             cardId={card.id}

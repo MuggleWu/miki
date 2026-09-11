@@ -850,3 +850,137 @@ code {
   text-align: left;
   line-height: 1.45;
 }
+
+/* ---------- 全屏弹层（编辑长文本） ---------- */
+
+/* 手机上写卡片时键盘占掉半屏，底部抽屉里只剩两行可见。
+   全屏形态让弹层自己滚动，输入框贴键盘上方。 */
+.sheet-full {
+  width: 100%;
+  max-width: 100%;
+  height: 100%;
+  max-height: 100%;
+  margin: 0;
+  border-radius: 0;
+  top: 0;
+  transform: none;
+}
+
+.sheet-full .sheet-inner {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.sheet-full .sheet-body {
+  flex: 1;
+  overflow-y: auto;
+  /* 键盘弹出时（visualViewport 缩小）不要被顶飞，让内容自己滚 */
+  padding-bottom: 24px;
+}
+
+/* ---------- markdown 渲染（与桌面端同一份管线） ---------- */
+
+.md {
+  word-break: break-word;
+}
+
+/* 渲染器未就绪时的纯文本回退：保住换行（markdown 那边是 breaks: true）
+   与连续空格，否则会挤成一行，看起来像渲染错了 */
+.md-plain {
+  white-space: pre-wrap;
+}
+
+.md > :first-child {
+  margin-top: 0;
+}
+
+.md > :last-child {
+  margin-bottom: 0;
+}
+
+.md p {
+  margin: 0 0 8px;
+  line-height: 1.65;
+}
+
+.md h1,
+.md h2,
+.md h3,
+.md h4 {
+  /* 卡面标题不该比正文大太多：手机上 h1 默认 2em 会把一张卡撑成两屏 */
+  margin: 12px 0 6px;
+  font-size: 1.05em;
+  line-height: 1.4;
+}
+
+.md ul,
+.md ol {
+  margin: 0 0 8px;
+  padding-left: 22px;
+}
+
+.md li {
+  margin: 2px 0;
+}
+
+.md code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--line) 45%, transparent);
+  font-size: 0.9em;
+}
+
+.md pre {
+  margin: 0 0 8px;
+  padding: 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--line) 45%, transparent);
+  /* 长代码行横向滚动，不要撑破卡面 */
+  overflow-x: auto;
+}
+
+.md pre code {
+  padding: 0;
+  background: none;
+}
+
+.md blockquote {
+  margin: 0 0 8px;
+  padding-left: 10px;
+  border-left: 3px solid var(--line);
+  color: var(--muted);
+}
+
+.md table {
+  border-collapse: collapse;
+  margin: 0 0 8px;
+  display: block;
+  overflow-x: auto;
+}
+
+.md th,
+.md td {
+  border: 1px solid var(--line);
+  padding: 4px 8px;
+}
+
+.md img {
+  max-width: 100%;
+}
+
+.md a {
+  color: var(--accent);
+}
+
+/* KaTeX 行间公式在窄屏上会溢出：让它自己横向滚，不要顶破卡面 */
+.md .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 2px 0;
+}
+
+/* 行内公式跟随字号缩放（KaTeX 内部用的是 em，这里只需保证不额外放大） */
+.md .katex {
+  font-size: 1.05em;
+}
