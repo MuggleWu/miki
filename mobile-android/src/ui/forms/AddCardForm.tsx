@@ -5,6 +5,29 @@ import { useApp } from '../store'
 import { useWorkspace } from '../use-workspace'
 import { PREF_KEYS, prefGet, prefSet } from '@mobile/prefs'
 
+/**
+ * 这一刻该往哪个牌组加卡。优先级：用户选过的（还在）> 上次用的（还在）> 第一个。
+ *
+ * 为什么抽成纯函数：这段判断原来散在一个 effect 里（异步读偏好后无条件 setDeckId），
+ * 而 deckInfos() 每次渲染都返回新数组、被当成依赖，于是每次渲染都重放一遍，
+ * 用户选完牌组一打字就被弹回「上次用的牌组」。手机端**没有**「移动牌组」功能（桌面端有），
+ * 卡片落错牌组只能删了重建——所以这条优先级值得能在 node 里穷举。
+ * 收成一个入参对象而不是三个位置参数：chosenId / lastUsedId 都是 string | null，位置写反了
+ * 编译器一句话都不会说，而写反的语义正好就是这个 bug（偏好盖掉用户的选择）。
+ * 另外，已选/上次用的牌组都可能已被删除，两个都要重新确认还在列表里才认。
+ */
+export function pickDeckId(input: {
+  deckIds: readonly string[]
+  chosenId: string | null
+  lastUsedId: string | null
+}): string {
+  const { deckIds, chosenId, lastUsedId } = input
+  if (deckIds.length === 0) return ''
+  if (chosenId !== null && deckIds.includes(chosenId)) return chosenId
+  if (lastUsedId !== null && deckIds.includes(lastUsedId)) return lastUsedId
+  return deckIds[0]
+}
+
 export function AddCardForm({ onDone }: { onDone(): void }): JSX.Element {
   const ws = useWorkspace()
   const bump = useApp((s) => s.bump)
@@ -13,21 +36,30 @@ export function AddCardForm({ onDone }: { onDone(): void }): JSX.Element {
   // 每次渲染直接算：卡片是往哪个牌组加，取决于这一刻有哪些牌组，
   // 缓存它反而会在"先建牌组再开抽屉"的路径上给出过期的空列表
   const decks = ws.deckInfos()
-  const [deckId, setDeckId] = useState(() => decks[0]?.id ?? '')
+  // 用户在下拉里选过的牌组（null = 还没选过）。它与「上次用的牌组」分开存，是为了把
+  // 「谁说了算」落在 state 结构里：显式选择一旦落地，迟到的偏好就再也覆盖不了它
+  const [chosenId, setChosenId] = useState<string | null>(null)
+  const [lastUsedId, setLastUsedId] = useState<string | null>(null)
   const [front, setFront] = useState('')
   const [back, setBack] = useState('')
   const [busy, setBusy] = useState(false)
 
-  // 默认选上次用过的牌组（拿不到就用第一个）
+  // 当前牌组在渲染期派生，不落 state：一旦让某个 effect 去写它，就得再回答「用户选过没有」，
+  // 而这个答案用 ref 记还是会跟迟到的异步结果赛跑。派生以后只有用户的 onChange 能改它
+  const deckId = pickDeckId({ deckIds: decks.map((d) => d.id), chosenId, lastUsedId })
+
+  // 「上次用的牌组」只是还没得选时的兜底：挂载时读一次就够——抽屉内容是按需挂载的
+  // （每次打开都是一次新挂载，见 DecksPage 那处的注释），所以「打开即读一次」正是想要的粒度。
+  // 读回来不写 deckId，交给 pickDeckId 按优先级决定；别把 decks 加进依赖，每次渲染都是新数组引用
   useEffect(() => {
     let alive = true
     void prefGet(PREF_KEYS.lastDeckId).then((last) => {
-      if (alive && last && decks.some((d) => d.id === last)) setDeckId(last)
+      if (alive) setLastUsedId(last)
     })
     return () => {
       alive = false
     }
-  }, [decks])
+  }, [])
 
   const canSave = deckId !== '' && front.trim() !== '' && !busy
 
@@ -68,7 +100,7 @@ export function AddCardForm({ onDone }: { onDone(): void }): JSX.Element {
     >
       <label className="field">
         <span>牌组</span>
-        <select value={deckId} onChange={(e) => setDeckId(e.target.value)}>
+        <select value={deckId} onChange={(e) => setChosenId(e.target.value)}>
           {decks.map((d) => (
             <option key={d.id} value={d.id}>
               {d.name}
