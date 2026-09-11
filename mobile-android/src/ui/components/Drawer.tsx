@@ -1,10 +1,15 @@
 // 左上汉堡打开的左侧抽屉：牌组 / 卡片库 / 统计 / 设置。
 // 用 showModal() 而不是 open 属性：只有模态对话框才有遮罩层与焦点陷阱，
 // 而「点遮罩关闭」这个手势正是移动端抽屉的默认期待。
+//
+// 开合有两种来源，都由 store 统一表达：
+// - 点汉堡 / 菜单键：drawerDrag === null，交给 CSS 的滑入动画；
+// - 手指拖动（左边缘拉出、抽屉内左滑收回）：drawerDrag 是当前偏移，跟手；松手后 store
+//   把偏移设成落点并打开过渡，滑完再改 open。手势识别在 use-edge-swipe.ts。
 import { useEffect, useRef } from 'react'
 import { useApp, type Route } from '../store'
 import { useWorkspace } from '../use-workspace'
-import { shouldCloseDrawer } from '../edge-swipe'
+import { drawerProgress } from '../edge-swipe'
 
 const ITEMS: { label: string; kind: Route['kind']; note: string }[] = [
   { label: '牌组', kind: 'decks', note: '主页' },
@@ -19,8 +24,10 @@ export function Drawer({ open, onClose }: { open: boolean; onClose(): void }): J
   const route = useApp((s) => s.route)
   // 从抽屉换页 = 重置导航栈：这些是"同级页"，返回键该回主页而不是回到上一个同级页
   const reset = useApp((s) => s.reset)
-  // 抽屉内左滑关闭的手势起点。阈值口径与 use-edge-swipe 一致（见那里的注释）
-  const swipe = useRef<{ x: number; y: number } | null>(null)
+  const drag = useApp((s) => s.drawerDrag)
+  const dragging = useApp((s) => s.drawerDragging)
+  const width = useApp((s) => s.drawerWidth)
+  const setDrawerWidth = useApp((s) => s.setDrawerWidth)
 
   useEffect(() => {
     const el = ref.current
@@ -29,32 +36,33 @@ export function Drawer({ open, onClose }: { open: boolean; onClose(): void }): J
     if (!open && el.open) el.close()
   }, [open])
 
+  // CSS 里宽度是 min(78vw, 320px)，公式在 JS 侧也有一份（手势开始时抽屉还没挂载、量不到）。
+  // 挂载后实测一次，让两边以后不会因为改 CSS 而悄悄错位。
+  useEffect(() => {
+    const el = ref.current
+    if (!open || !el) return
+    setDrawerWidth(el.getBoundingClientRect().width)
+  }, [open, setDrawerWidth])
+
+  // 遮罩跟着拖动进度变淡变浓。::backdrop 读的是**根元素**上的自定义属性
+  // （规范里 ::backdrop 继承自 dialog，实现上老版本继承自根元素，写在根元素两边都认）。
+  useEffect(() => {
+    const root = document.documentElement
+    if (open && drag !== null) root.style.setProperty('--scrim', String(drawerProgress(drag, width)))
+    else root.style.removeProperty('--scrim')
+  }, [open, drag, width])
+
   return (
     <dialog
       ref={ref}
-      className="drawer"
+      className={`drawer${dragging ? ' dragging' : ''}`}
+      style={drag === null ? undefined : { transform: `translateX(${drag}px)` }}
       onCancel={(e) => {
         e.preventDefault()
         onClose()
       }}
       onClick={(e) => {
         if (e.target === ref.current) onClose()
-      }}
-      onTouchStart={(e) => {
-        if (e.touches.length !== 1) return
-        swipe.current = { x: e.touches[0].clientX, y: e.touches[0].clientY }
-      }}
-      onTouchMove={(e) => {
-        const s = swipe.current
-        if (!s || e.touches.length !== 1) return
-        const now = { x: e.touches[0].clientX, y: e.touches[0].clientY }
-        if (shouldCloseDrawer(s, now)) {
-          swipe.current = null
-          onClose()
-        }
-      }}
-      onTouchEnd={() => {
-        swipe.current = null
       }}
     >
       <nav className="drawer-inner">

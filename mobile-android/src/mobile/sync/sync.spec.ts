@@ -12,7 +12,7 @@ import { emptyBase, type SyncBase, type SyncCreds } from './types'
 
 const ROOT = 'miki-base'
 const paths = new MobilePaths(ROOT)
-const creds: SyncCreds = { repo: 'me/miki-base', branch: 'main', token: 't0ken' }
+const creds: SyncCreds = { repo: 'me/data-repo', branch: 'main', token: 't0ken' }
 
 /** 假 GitHub：只实现 runSync 用到的端点，但语义与真的一致（尤其 422 冲突与 blob 内容） */
 class FakeGithub {

@@ -1,40 +1,88 @@
-// 左边缘右滑唤出抽屉（Android 上的标准手势）。
+// 抽屉手势：从/关闭状态/左边缘拉出，在打开状态下左拖收回，全程跟手。
 //
-// 为什么不用 CSS/浏览器手势：WebView 里没有原生抽屉手势，只能自己从触摸事件里判。
-// 判定规则在 edge-swipe.ts（纯函数、有单测），这里只负责接事件与决定"当前能不能开"。
+// 判定规则在 edge-swipe.ts（纯函数、有单测），这里只负责接事件、维护一次拖动的状态机，
+// 以及把偏移写进 store（Drawer 组件照着它渲染 transform）。
+//
+// 为什么用触摸事件而不是 CSS 手势：WebView 里没有现成的侧滑抽屉手势，也没法用
+// 纯 CSS 表达"跟手 + 松手吸附"，只能自己算。
 import { useEffect } from 'react'
 import { useApp } from './store'
-import { shouldOpenDrawer, type Point } from './edge-swipe'
+import { dragAxis, dragOffsetFromClosed, dragOffsetFromOpen, inEdgeZone, type Point } from './edge-swipe'
+
+/** 与 styles.css 里 .drawer 的 width 保持一致；抽屉挂载后会实测覆盖 */
+export function drawerWidth(): number {
+  return Math.min(window.innerWidth * 0.78, 320)
+}
 
 export function useEdgeSwipeDrawer(): void {
   useEffect(() => {
     let start: Point | null = null
+    /** undecided = 还不知道是拖抽屉还是滚页面；其余表示已经决定了 */
+    let mode: 'undecided' | 'open' | 'closing' | 'aborted' | null = null
+    let fromOpen = false
 
-    const canOpen = (): boolean => {
-      const { route, drawerOpen } = useApp.getState()
-      // 学习页是"专注屏"，边缘滑动在这里只会打断刷卡；弹层（弹窗/表单）打开时不接管，
-      // 免得两层手势互相打架
-      if (drawerOpen || route.kind === 'study') return false
-      return !document.querySelector('dialog[open]')
+    const reset = (): void => {
+      start = null
+      mode = null
     }
 
     const onStart = (e: TouchEvent): void => {
-      start = null
-      if (e.touches.length !== 1 || !canOpen()) return
-      start = { x: e.touches[0].clientX, y: e.touches[0].clientY }
+      reset()
+      if (e.touches.length !== 1) return
+      const { drawerOpen, route } = useApp.getState()
+      const target = e.target as Element | null
+      const x = e.touches[0].clientX
+
+      if (drawerOpen) {
+        // 抽屉开着时：手指落在抽屉面板上才接管（点在遮罩上由遮罩自己处理关闭）
+        fromOpen = !!target?.closest('.drawer')
+        if (!fromOpen) return
+      } else {
+        // 抽屉关着时：只有学习页与弹层场景不接管，免得两层手势打架
+        if (route.kind === 'study' || document.querySelector('dialog[open]')) return
+        if (!inEdgeZone(x)) return
+        fromOpen = false
+      }
+      start = { x, y: e.touches[0].clientY }
+      mode = 'undecided'
     }
 
     const onMove = (e: TouchEvent): void => {
-      if (!start || e.touches.length !== 1) return
-      const now = { x: e.touches[0].clientX, y: e.touches[0].clientY }
-      if (shouldOpenDrawer(start, now, true)) {
-        start = null
-        useApp.getState().setDrawer(true)
+      if (!start || mode === null || mode === 'aborted') return
+      if (e.touches.length !== 1) {
+        reset()
+        return
       }
+      const now = { x: e.touches[0].clientX, y: e.touches[0].clientY }
+      const st = useApp.getState()
+
+      if (mode === 'undecided') {
+        const axis = dragAxis(start, now)
+        if (axis === 'vertical') {
+          mode = 'aborted' // 让页面/抽屉自己滚，不抢
+          return
+        }
+        if (axis !== 'horizontal') return
+        if (fromOpen) {
+          mode = 'closing'
+        } else {
+          mode = 'open'
+          st.setDrawer(true) // 先把抽屉挂上（此时偏移 = 全收起），后面的 move 才开始跟手
+          st.setDrawerDrag(-st.drawerWidth)
+        }
+      }
+
+      const width = st.drawerWidth
+      const offset = fromOpen
+        ? dragOffsetFromOpen(now.x - start.x, width)
+        : dragOffsetFromClosed(now.x - start.x, width)
+      st.setDrawerDrag(offset)
     }
 
     const onEnd = (): void => {
-      start = null
+      const decided = mode === 'open' || mode === 'closing'
+      reset()
+      if (decided) useApp.getState().settleDrawer()
     }
 
     // 被动监听：这里只读坐标，不能 preventDefault，也就不会挡住页面滚动

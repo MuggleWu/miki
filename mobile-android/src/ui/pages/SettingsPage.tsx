@@ -1,13 +1,15 @@
-// 设置页：本机偏好 + 工作区信息（只读）+ 数据健康 + 设备自检入口 + 同步。
+// 设置页：本机偏好 + 数据健康 + 设备自检入口 + 同步。
 //
 // 同步区把"凭据能改、结果看得见、坏了能退"三件事都放进来：
 // 仓库/分支/PAT 可改可清、上次同步时间与结论、连接验证结果、以及逐文件的同步明细
 // （明细很重要：行合并是自动的，用户得有地方核对它到底做了什么）。
+//
+// 刻意不放"工作区"那块信息（本机路径、加载耗时、日志条数、压实建议）：那是给自己看的
+// 诊断口径，不是给用户看的设置项——本机绝对路径、事件条数、压实这些词对一个只想知道
+// "怎么同步/怎么换字号"的人全是噪音。启动耗时仍在 logcat 里（`[miki-boot]`）。
 import { useEffect, useState } from 'react'
 import { useApp } from '../store'
 import { useWorkspace } from '../use-workspace'
-import { CapacitorFileStore } from '@mobile/fs'
-import { WORKSPACE_DIR } from '@mobile/constants'
 import { PREF_KEYS, prefRemove } from '@mobile/prefs'
 import { Sheet } from '../components/Sheet'
 import { SyncConfigForm } from '../forms/SyncConfigForm'
@@ -30,26 +32,8 @@ export function SettingsPage(): JSX.Element {
   useEffect(() => {
     void loadSyncInfo()
   }, [loadSyncInfo])
-  // 实际落盘位置由原生插件解析（形如 file:///data/user/0/<包名>/files/…）：
-  // 只显示相对路径 "miki-base" 等于没说——用户要的是"我的数据在哪儿"。
-  const [realPath, setRealPath] = useState<string>('')
-
-  useEffect(() => {
-    let alive = true
-    void new CapacitorFileStore()
-      .uri(WORKSPACE_DIR)
-      .then((u) => {
-        if (alive) setRealPath(u)
-      })
-      .catch(() => undefined)
-    return () => {
-      alive = false
-    }
-  }, [])
 
   const dmg = ws.damageReport()
-  const decks = ws.deckInfos()
-  const timing = ws.loadTimingReport()
 
   return (
     <>
@@ -96,41 +80,6 @@ export function SettingsPage(): JSX.Element {
               onChange={(e) => void setPref('keepAwake', e.target.checked)}
             />
           </label>
-        </section>
-
-        <section className="card">
-          <h2>工作区（只读）</h2>
-          <ul className="kv">
-            <li>
-              <span>牌组</span>
-              <b>{decks.length}</b>
-            </li>
-            <li>
-              <span>卡片</span>
-              <b>{decks.reduce((n, d) => n + d.counts.total, 0)}</b>
-            </li>
-            <li>
-              <span>今日已学</span>
-              <b>{ws.todayCount()} 次</b>
-            </li>
-            <li>
-              <span>累计答题</span>
-              <b>{ws.totalAnswered()} 次</b>
-            </li>
-          </ul>
-          <p className="muted">本机路径（应用私有目录，别的应用读不到，文件管理器也看不见）：</p>
-          <p className="mono">{realPath || WORKSPACE_DIR}</p>
-          {timing ? (
-            <>
-              <p className="muted">
-                上次启动加载耗时 <b>{timing.total}ms</b>（config {timing.config} / 牌组 {timing.decks} / 卡片{' '}
-                {timing.cards} / 重放 {timing.events}（{timing.eventCount} 条事件）/ 建索引 {timing.index}）
-              </p>
-              <p className="muted">
-                日志越大这一段越慢——涨到几万条事件（约 2MB）时这里能看出量级，届时需要在桌面端压实。
-              </p>
-            </>
-          ) : null}
         </section>
 
         <section className="card">

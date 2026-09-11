@@ -40,6 +40,14 @@
     var(--native-inset-bottom, 0px)
   );
   --inset-left: max(env(safe-area-inset-left, 0px), var(--safe-area-inset-left, 0px), var(--native-inset-left, 0px));
+  /*
+   * 屏幕底部"被系统或键盘占掉"的那一条：不是键盘就是导航栏，两者不会同时占着可见区域，
+   * 所以取最大值而不是相加。凡是贴在屏幕底部的内容（弹层底部内边距等）都用它，
+   * 不要再单独写 var(--kb) 或 var(--inset-bottom)——这里踩过坑：同一个选择器在文件后面
+   * 又写了一条 padding-bottom: calc(16px + var(--kb))，把前面带安全区的那条覆盖掉了，
+   * 于是弹层最后一项永远压在三大金刚下面，而源码里"看着"是有安全区的。
+   */
+  --bottom-blocked: max(var(--kb, 0px), var(--inset-bottom, 0px));
 }
 
 /*
@@ -378,7 +386,7 @@ select {
 }
 
 .sheet-body {
-  padding: 12px 14px calc(16px + var(--inset-bottom));
+  padding: 12px 14px 16px;
   overflow-y: auto;
 }
 
@@ -597,10 +605,39 @@ code {
   border-radius: 0 16px 16px 0;
   background: var(--bg);
   color: var(--fg);
+  /* 点汉堡打开：滑入（关着的 dialog 是 display:none，每次打开都会重播这段动画）。
+     手指拖动时加 .dragging，动画与过渡都关掉，让 transform 完全跟手。 */
+  animation: drawer-in 0.22s cubic-bezier(0.22, 0.61, 0.36, 1);
+  transition: transform 0.2s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+.drawer.dragging {
+  animation: none;
+  transition: none;
+}
+
+@keyframes drawer-in {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
 }
 
 .drawer::backdrop {
-  background: rgb(0 0 0 / 40%);
+  /* --scrim 由 Drawer 在拖动时写在根元素上（0…1），没在拖时用默认的 1 */
+  background: rgb(0 0 0 / calc(40% * var(--scrim, 1)));
+  animation: drawer-scrim 0.22s ease;
+}
+
+@keyframes drawer-scrim {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .drawer-inner {
@@ -919,15 +956,17 @@ code {
 }
 
 /* 头固定、中间滚、底部的操作按钮跟着一起滚到底部可见 */
+/* 弹层底部内边距**只在这一处**定义（两条规则都指向同一个变量，避免互相覆盖）：
+   键盘弹起时让开键盘，否则让开导航栏——否则最后一项会压在三大金刚下面。 */
 .sheet-full .sheet-body {
   flex: 1;
   overflow-y: auto;
-  padding-bottom: calc(24px + var(--kb, 0px));
-  scroll-padding-bottom: calc(24px + var(--kb, 0px));
+  padding-bottom: calc(24px + var(--bottom-blocked));
+  scroll-padding-bottom: calc(24px + var(--bottom-blocked));
 }
 
 .sheet-body {
-  padding-bottom: calc(16px + var(--kb, 0px));
+  padding-bottom: calc(16px + var(--bottom-blocked));
 }
 
 /* ---------- markdown 渲染（与桌面端同一份管线） ---------- */

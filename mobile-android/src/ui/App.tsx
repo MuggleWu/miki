@@ -26,7 +26,7 @@ export function App(): JSX.Element {
   const boot = useApp((s) => s.boot)
   const loadPrefs = useApp((s) => s.loadPrefs)
   const drawerOpen = useApp((s) => s.drawerOpen)
-  const setDrawer = useApp((s) => s.setDrawer)
+  const closeDrawer = useApp((s) => s.closeDrawer)
 
   useEffect(() => {
     void boot()
@@ -164,7 +164,8 @@ export function App(): JSX.Element {
       {route.kind === 'stats' ? <StatsPage /> : null}
       {route.kind === 'settings' ? <SettingsPage /> : null}
       {route.kind === 'selfcheck' ? <SelfCheckPage /> : null}
-      <Drawer open={drawerOpen} onClose={() => setDrawer(false)} />
+      {/* 关闭一律走 closeDrawer：它会先播放收起动画再改 open，点遮罩/返回键/选中条目都一致 */}
+      <Drawer open={drawerOpen} onClose={closeDrawer} />
       {toast ? <div className="toast">{toast}</div> : null}
     </div>
   )

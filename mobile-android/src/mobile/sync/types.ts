@@ -5,7 +5,7 @@ export interface SyncCreds {
   /** owner/repo */
   repo: string
   branch: string
-  /** 细粒度 PAT：只勾 miki-base 一个仓库的 Contents: Read and write。
+  /** 细粒度 PAT：只勾**你要同步的那一个**私有数据仓的 Contents: Read and write。
    *  它只存在本机 Preferences，**绝不进工作区**（工作区会被推到 GitHub） */
   token: string
 }

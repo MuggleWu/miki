@@ -8,7 +8,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { GithubClient } from './github'
 import type { SyncCreds } from './types'
 
-const creds: SyncCreds = { repo: 'me/miki-base', branch: 'main', token: 't0ken' }
+const creds: SyncCreds = { repo: 'me/data-repo', branch: 'main', token: 't0ken' }
 
 describe('GithubClient 请求', () => {
   it('所有请求都带 cache: no-store（否则 WebView 会复用旧响应）', async () => {

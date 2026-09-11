@@ -31,6 +31,10 @@ import { runSync } from '@mobile/sync'
 import { GithubClient } from '@mobile/sync/github'
 import type { SyncReport } from '@mobile/sync/types'
 import type { FontScale, ThemePref } from '@mobile/theme'
+import { shouldSnapOpen } from './edge-swipe'
+
+/** 与 styles.css 里 .drawer 的 transition 时长一致：吸附动画跑完再改 open 状态 */
+const DRAWER_SETTLE_MS = 200
 
 /** 本机显示偏好（不是工作区数据，换手机不会跟着走） */
 export interface Prefs {
@@ -73,6 +77,12 @@ interface AppState {
   toast: string | null
   /** 左侧抽屉是否打开。放在全局而不是某个页面里：汉堡按钮与「左边缘右滑」都要能拉起它 */
   drawerOpen: boolean
+  /** 抽屉宽度（px）。CSS 写的是 min(78vw, 320px)，挂载后由 Drawer 实测写回 */
+  drawerWidth: number
+  /** 拖动中的横向偏移：0 = 全开，-drawerWidth = 全收起。null = 没在拖（交给 CSS 动画） */
+  drawerDrag: number | null
+  /** 手指是否还按着。按着时不能有过渡，否则跟手会滞后一帧 */
+  drawerDragging: boolean
   /** 写操作计数器：页面把它放进 useMemo 依赖，驱动派生数据重算 */
   version: number
   sync: SyncUiState
@@ -86,6 +96,12 @@ interface AppState {
   back(): void
   notify(msg: string | null): void
   setDrawer(open: boolean): void
+  setDrawerDrag(offset: number, dragging?: boolean): void
+  setDrawerWidth(width: number): void
+  /** 松手：按落点吸附——过半算打开，否则收回，两个方向都带动画 */
+  settleDrawer(): void
+  /** 点遮罩 / 返回键 / 选中条目：动画收起 */
+  closeDrawer(): void
   bump(): void
 
   /** 读本机同步配置与上次结果（启动、进设置页时调用） */
@@ -105,6 +121,9 @@ export const useApp = create<AppState>((set, get) => ({
   stack: [],
   toast: null,
   drawerOpen: false,
+  drawerWidth: 320,
+  drawerDrag: null,
+  drawerDragging: false,
   version: 0,
   sync: { status: null, verify: null, report: null, lastSyncAt: null, busy: false, lastError: null },
 
@@ -113,8 +132,15 @@ export const useApp = create<AppState>((set, get) => ({
       const store = new CapacitorFileStore()
       const ws = new MobileWorkspace(store, new MobilePaths(WORKSPACE_DIR))
       await ws.init()
-      // 从脚本开始执行到工作区就绪的墙钟差：这是"打开应用要等多久"的实际口径
-      console.log(`[miki-boot] JS 启动 → 工作区就绪：${Math.round(performance.now())}ms`)
+      // 从脚本开始执行到工作区就绪的墙钟差：这是"打开应用要等多久"的实际口径。
+      // 分阶段数字只进日志、不进界面——设置页以前把它们摊给用户看，属于暴露过多内部信息。
+      const t = ws.loadTimingReport()
+      console.log(
+        `[miki-boot] JS 启动 → 工作区就绪：${Math.round(performance.now())}ms` +
+          (t
+            ? `（config ${t.config} / 牌组 ${t.decks} / 卡片 ${t.cards} / 重放 ${t.events}（${t.eventCount} 条事件）/ 建索引 ${t.index}）`
+            : '')
+      )
       set({ ws, bootError: null })
       // 工作区就绪后再预取 markdown 管线：首屏不受它影响，进牌组时通常已经就位
       prefetchMarkdown()
@@ -168,7 +194,39 @@ export const useApp = create<AppState>((set, get) => ({
     set({ toast: msg })
   },
   setDrawer(open) {
-    set({ drawerOpen: open })
+    // 点汉堡/菜单键进来：清掉拖动痕迹，让 CSS 的滑入动画接管
+    set({ drawerOpen: open, drawerDrag: null, drawerDragging: false })
+  },
+
+  setDrawerWidth(width) {
+    if (width > 0 && Math.abs(width - get().drawerWidth) > 1) set({ drawerWidth: width })
+  },
+
+  setDrawerDrag(offset, dragging = true) {
+    set({ drawerDrag: offset, drawerDragging: dragging })
+  },
+
+  settleDrawer() {
+    const { drawerDrag, drawerWidth, setDrawerDrag } = get()
+    if (drawerDrag === null) return
+    const open = shouldSnapOpen(drawerDrag, drawerWidth)
+    const target = open ? 0 : -drawerWidth
+    setDrawerDrag(target, false) // 松手后开过渡，滑到落点
+    window.setTimeout(() => {
+      // 动画期间用户又动了（偏移已不是那个落点）就不要覆盖他的状态
+      if (get().drawerDrag !== target) return
+      set({ drawerDrag: null, drawerDragging: false, drawerOpen: open })
+    }, DRAWER_SETTLE_MS)
+  },
+
+  closeDrawer() {
+    const { drawerOpen, drawerWidth, setDrawerDrag } = get()
+    if (!drawerOpen) return
+    setDrawerDrag(-drawerWidth, false)
+    window.setTimeout(() => {
+      if (get().drawerDrag !== -drawerWidth) return
+      set({ drawerOpen: false, drawerDrag: null, drawerDragging: false })
+    }, DRAWER_SETTLE_MS)
   },
 
   async loadSyncInfo() {
