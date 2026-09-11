@@ -6,6 +6,8 @@
 //   ② 凭据只进 Capacitor Preferences（应用私有 SharedPreferences），绝不进工作区——
 //      工作区会被整份推到 GitHub，token 跟着就泄露了。
 import { PREF_KEYS, prefGet, prefRemove, prefSet } from '../prefs'
+import type { FailureKind } from './github'
+import { normalizeRepo } from './repo-input'
 import { DEFAULT_BRANCH, DEFAULT_REPO, emptyBase, type SyncBase } from './types'
 
 export interface SyncCredsStatus {
@@ -20,6 +22,8 @@ export interface VerifyRecord {
   at: number
   ok: boolean
   message: string
+  /** 失败大类：界面据此区分"网络不通"和"凭据/仓库不对"，不把它们混成一句"凭据失效" */
+  kind?: FailureKind | null
 }
 
 /** token 脱敏：只留前缀与末 4 位。PAT 长度短于 8 位时全遮 */
@@ -30,7 +34,10 @@ export function maskToken(token: string | null): string | null {
 }
 
 export async function loadCreds(): Promise<{ repo: string; branch: string; token: string | null }> {
-  const repo = (await prefGet(PREF_KEYS.githubRepo)) ?? DEFAULT_REPO
+  const raw = (await prefGet(PREF_KEYS.githubRepo)) ?? DEFAULT_REPO
+  // 读的时候也归一化一遍：早期版本允许把浏览器地址整串存进来，那种值只会在 API 层
+  // 变成一个必然 404 的路径。存量脏值在这里就地救回，不用让用户重新手打一遍。
+  const repo = normalizeRepo(raw) ?? raw
   const branch = (await prefGet(PREF_KEYS.githubBranch)) ?? DEFAULT_BRANCH
   const token = await prefGet(PREF_KEYS.githubPat)
   return { repo, branch, token }
@@ -42,7 +49,8 @@ export async function credsStatus(): Promise<SyncCredsStatus> {
 }
 
 export async function saveCreds(repo: string, branch: string, token: string | null): Promise<void> {
-  await prefSet(PREF_KEYS.githubRepo, repo.trim())
+  // 存之前归一化：能认出来的就存成 owner/repo，认不出来的原样留着（界面会提示该填什么）
+  await prefSet(PREF_KEYS.githubRepo, normalizeRepo(repo) ?? repo.trim())
   await prefSet(PREF_KEYS.githubBranch, branch.trim() || DEFAULT_BRANCH)
   if (token !== null && token.trim() !== '') await prefSet(PREF_KEYS.githubPat, token.trim())
 }

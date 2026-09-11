@@ -21,6 +21,45 @@ export class GithubError extends Error {
   }
 }
 
+/** 失败的大类。只为让界面说人话：网络不通 ≠ 凭据不对 ≠ 仓库填错 */
+export type FailureKind = 'network' | 'auth' | 'permission' | 'not-found' | 'conflict' | 'other'
+
+/** 网络层失败（fetch 直接抛错，压根没拿到 HTTP 状态）用 -1 表示；0 留给"非 HTTP 的内部错误" */
+export const NETWORK_STATUS = -1
+
+export function classifyFailure(status: number, detail: string): FailureKind {
+  if (status === NETWORK_STATUS) return 'network'
+  if (status === 401) return 'auth'
+  if (status === 422) return 'conflict'
+  if (status === 403) return /rate limit|secondary rate/i.test(detail) ? 'other' : 'permission'
+  if (status === 404) return 'not-found'
+  return 'other'
+}
+
+/**
+ * 把 GitHub 的状态码翻成"下一步该做什么"。
+ * 特别注意 404：GitHub 对"仓库不存在"和"这个 token 没被授权访问它"**一律**返回 404，
+ * 不区分。用户按字面理解成"仓库名打错了"就会反复改仓库名，实际是 token 的 Repository
+ * access 没勾上那个仓库。所以这句话必须把两种可能都写出来。
+ */
+export function explainFailure(kind: FailureKind, detail: string, repo: string): string {
+  const raw = detail ? `（GitHub 原话：${detail}）` : ''
+  switch (kind) {
+    case 'network':
+      return '连不上 api.github.com：手机当前网络到不了 GitHub，这不是凭据问题。换个网络（Wi-Fi / 蜂窝）或走代理再试'
+    case 'auth':
+      return `PAT 无效或已过期${raw}。去 GitHub 重新生成一个细粒度 token，粘回下面那一栏`
+    case 'permission':
+      return `这个 PAT 没有做这件事的权限${raw}。检查两处：Repository access 勾了要同步的那个仓；Permissions 给了 Contents: Read and write`
+    case 'not-found':
+      return `找不到仓库「${repo}」${raw}。两种可能：① 仓库名填错了（要 owner/repo，不是浏览器地址）；② 这个 PAT 没被授权访问它——GitHub 对没权限的私有仓也只回 404，不会告诉你"存在但没权限"`
+    case 'conflict':
+      return '远端在你读完之后又被推过（不是快进），为避免覆盖已停下。先去桌面端同步一次，再回来重试'
+    default:
+      return detail || '请求 GitHub 失败'
+  }
+}
+
 export interface TreeEntry {
   path: string
   sha: string
@@ -31,24 +70,30 @@ export class GithubClient {
   constructor(private readonly creds: SyncCreds) {}
 
   private async req<T>(method: string, path: string, body?: unknown): Promise<T> {
-    const res = await fetch(`${API}${path}`, {
-      method,
-      // 必须显式禁掉 HTTP 缓存：GitHub 的 REST 响应带 `cache-control: private, max-age=60`，
-      // WebView 的私有缓存会在这 60 秒内直接复用**没有重新请求**的旧响应。真机演练里就是这么炸的：
-      // 一次同步开头读分支头（缓存），40 秒后推送完再读回，拿到的是推送前那个头，
-      // 于是"推送成功却报读回不一致"。Node 侧的 undici 没有 HTTP 缓存，所以只有真机看得见。
-      cache: 'no-store',
-      headers: {
-        Authorization: `Bearer ${this.creds.token}`,
-        Accept: 'application/vnd.github+json',
-        'X-GitHub-Api-Version': '2022-11-28',
-        ...(body ? { 'Content-Type': 'application/json' } : {})
-      },
-      body: body ? JSON.stringify(body) : undefined
-    })
+    let res: Response
+    try {
+      res = await fetch(`${API}${path}`, {
+        method,
+        // 必须显式禁掉 HTTP 缓存：GitHub 的 REST 响应带 `cache-control: private, max-age=60`，
+        // WebView 的私有缓存会在这 60 秒内直接复用**没有重新请求**的旧响应。真机演练里就是这么炸的：
+        // 一次同步开头读分支头（缓存），40 秒后推送完再读回，拿到的是推送前那个头，
+        // 于是"推送成功却报读回不一致"。Node 侧的 undici 没有 HTTP 缓存，所以只有真机看得见。
+        cache: 'no-store',
+        headers: {
+          Authorization: `Bearer ${this.creds.token}`,
+          Accept: 'application/vnd.github+json',
+          'X-GitHub-Api-Version': '2022-11-28',
+          ...(body ? { 'Content-Type': 'application/json' } : {})
+        },
+        body: body ? JSON.stringify(body) : undefined
+      })
+    } catch {
+      // fetch 抛错 = 压根没拿到 HTTP 响应（DNS/连接/证书/被拦）。这条以前会原样抛成
+      // "Failed to fetch"，用户看到四个英文单词，无从判断是网络还是凭据——分开报。
+      throw new GithubError(NETWORK_STATUS, explainFailure('network', '', this.creds.repo))
+    }
     if (!res.ok) {
-      // 401/403 是凭据问题（要引导用户去换 token），422 是 fast-forward 失败（冲突），
-      // 其余按普通失败处理。错误信息里带上 GitHub 的原话，避免我们二次转述失真。
+      // 把状态码翻成"下一步做什么"，并保留 GitHub 原话与具体请求，便于排查时不被二次转述失真。
       let detail = ''
       try {
         const j = (await res.json()) as { message?: string }
@@ -56,13 +101,17 @@ export class GithubClient {
       } catch {
         detail = await res.text().catch(() => '')
       }
-      throw new GithubError(res.status, `GitHub ${method} ${path} 失败（${res.status}）：${detail}`)
+      const kind = classifyFailure(res.status, detail)
+      throw new GithubError(
+        res.status,
+        `${explainFailure(kind, detail, this.creds.repo)}［${method} ${path} → HTTP ${res.status}］`
+      )
     }
     return (await res.json()) as T
   }
 
   /** 凭据与仓库可达性验证（设置页的"验证连接"用） */
-  async verify(): Promise<{ ok: boolean; message: string }> {
+  async verify(): Promise<{ ok: boolean; message: string; kind: FailureKind | null }> {
     try {
       const repo = await this.req<{ full_name: string; private: boolean; default_branch: string }>(
         'GET',
@@ -74,10 +123,16 @@ export class GithubClient {
       )
       return {
         ok: true,
-        message: `${repo.full_name}（${repo.private ? '私有' : '公开'}）分支 ${this.creds.branch} @ ${ref.object.sha.slice(0, 7)}`
+        message: `${repo.full_name}（${repo.private ? '私有' : '公开'}）分支 ${this.creds.branch} @ ${ref.object.sha.slice(0, 7)}`,
+        kind: null
       }
     } catch (e) {
-      return { ok: false, message: e instanceof Error ? e.message : String(e) }
+      const status = e instanceof GithubError ? e.status : 0
+      return {
+        ok: false,
+        message: e instanceof Error ? e.message : String(e),
+        kind: classifyFailure(status, e instanceof Error ? e.message : '')
+      }
     }
   }
 

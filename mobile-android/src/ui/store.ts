@@ -183,7 +183,7 @@ export const useApp = create<AppState>((set, get) => ({
     const { repo: r, branch: b, token: t } = await loadCreds()
     if (t) {
       const res = await new GithubClient({ repo: r, branch: b, token: t }).verify()
-      const rec: VerifyRecord = { at: Date.now(), ok: res.ok, message: res.message }
+      const rec: VerifyRecord = { at: Date.now(), ok: res.ok, message: res.message, kind: res.kind }
       await saveVerify(rec)
       set({ sync: { ...get().sync, verify: rec } })
     }

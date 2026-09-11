@@ -34,7 +34,9 @@ export function DecksPage(): JSX.Element {
 
       {sync.status?.configured && sync.verify && !sync.verify.ok ? (
         <button className="banner" onClick={() => go({ kind: 'settings' })}>
-          GitHub 凭据失效（同步没在跑）：点这里去设置页换 PAT
+          {sync.verify.kind === 'network'
+            ? '连不上 GitHub（网络问题，凭据没坏）：点这里看详情'
+            : 'GitHub 凭据或仓库配置有问题（同步没在跑）：点这里改'}
         </button>
       ) : null}
 

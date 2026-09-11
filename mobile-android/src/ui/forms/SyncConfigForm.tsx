@@ -2,8 +2,12 @@
 //
 // 这里刻意把"怎么生成 PAT"写全（三步），因为这是整个方案里唯一必须用户自己在
 // GitHub 网页上做的事——写不清楚就会卡在第一步。
+//
+// 仓库那一栏要能直接吃下浏览器地址栏里那串 URL：用户手上只有那个，让他自己剪成
+// owner/repo 是把活推给他，剪错了还只会得到一个看不懂的 404。
 import { useState } from 'react'
 import { useApp } from '../store'
+import { explainRepoProblem, parseRepoInput } from '../../mobile/sync/repo-input'
 
 export function SyncConfigForm({ onDone }: { onDone(): void }): JSX.Element {
   const sync = useApp((s) => s.sync)
@@ -14,13 +18,16 @@ export function SyncConfigForm({ onDone }: { onDone(): void }): JSX.Element {
   const [advanced, setAdvanced] = useState(false)
   const [busy, setBusy] = useState(false)
 
-  const canSave = repo.trim().includes('/') && token.trim().length > 0
+  const parsed = parseRepoInput(repo)
+  const canSave = parsed.repo !== null && token.trim().length > 0
+  // 认出来了、但填的不是最终形态（比如粘的是整串 URL）→ 明确告诉他会存成什么
+  const willStore = parsed.repo && parsed.repo !== repo.trim() ? parsed.repo : null
 
   async function save(): Promise<void> {
     setBusy(true)
     try {
-      // 留空表示"不改 token"：用户只改仓库时不该被迫重新粘贴
-      await saveSyncConfig(repo, branch, token.trim() === '' ? null : token.trim())
+      // 归一化后保存；留空表示"不改 token"（用户只改仓库时不该被迫重新粘贴）
+      await saveSyncConfig(parsed.repo ?? repo, branch, token.trim() === '' ? null : token.trim())
     } finally {
       setBusy(false)
       onDone()
@@ -36,9 +43,11 @@ export function SyncConfigForm({ onDone }: { onDone(): void }): JSX.Element {
       }}
     >
       <label className="field">
-        <span>仓库（owner/repo）</span>
+        <span>仓库（owner/repo，也可以直接粘仓库地址）</span>
         <input value={repo} onChange={(e) => setRepo(e.target.value)} autoCapitalize="off" autoCorrect="off" />
       </label>
+      {parsed.problem && repo.trim() !== '' ? <p className="note">{explainRepoProblem(parsed.problem)}</p> : null}
+      {willStore ? <p className="muted">将存为 {willStore}</p> : null}
 
       <label className="field">
         <span>细粒度 PAT</span>
