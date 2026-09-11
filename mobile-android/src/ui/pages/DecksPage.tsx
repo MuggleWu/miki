@@ -19,6 +19,7 @@ export function DecksPage(): JSX.Element {
   // 每次渲染直接算：卡片计数由调度索引增量维护，这里是 O(牌组数)
   const decks = ws.deckInfos()
   const today = ws.todayCount()
+  const dmg = ws.damageReport()
 
   return (
     <>
@@ -29,6 +30,14 @@ export function DecksPage(): JSX.Element {
         <h1>牌组</h1>
         <span className="head-note">今日已学 {today} 次</span>
       </div>
+
+      {dmg.damagedLines > 0 ? (
+        <button className="banner" onClick={() => go({ kind: 'settings' })}>
+          加载时跳过 {dmg.damagedLines} 条坏行
+          {dmg.truncatedFiles.length > 0 ? `（${dmg.truncatedFiles.length} 个文件被截断）` : ''}
+          ，点这里看细节
+        </button>
+      ) : null}
 
       <div className="page-body">
         {decks.length === 0 ? (

@@ -36,6 +36,7 @@ export function SettingsPage(): JSX.Element {
 
   const dmg = ws.damageReport()
   const decks = ws.deckInfos()
+  const timing = ws.loadTimingReport()
 
   return (
     <>
@@ -106,6 +107,17 @@ export function SettingsPage(): JSX.Element {
           </ul>
           <p className="muted">本机路径（应用私有目录，别的应用读不到，文件管理器也看不见）：</p>
           <p className="mono">{realPath || WORKSPACE_DIR}</p>
+          {timing ? (
+            <>
+              <p className="muted">
+                上次启动加载耗时 <b>{timing.total}ms</b>（config {timing.config} / 牌组 {timing.decks} / 卡片{' '}
+                {timing.cards} / 重放 {timing.events}（{timing.eventCount} 条事件）/ 建索引 {timing.index}）
+              </p>
+              <p className="muted">
+                日志越大这一段越慢——涨到几万条事件（约 2MB）时这里能看出量级，届时需要在桌面端压实。
+              </p>
+            </>
+          ) : null}
         </section>
 
         <section className="card">

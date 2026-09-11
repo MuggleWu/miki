@@ -69,6 +69,8 @@ export const useApp = create<AppState>((set, get) => ({
       const store = new CapacitorFileStore()
       const ws = new MobileWorkspace(store, new MobilePaths(WORKSPACE_DIR))
       await ws.init()
+      // 从脚本开始执行到工作区就绪的墙钟差：这是"打开应用要等多久"的实际口径
+      console.log(`[miki-boot] JS 启动 → 工作区就绪：${Math.round(performance.now())}ms`)
       set({ ws, bootError: null })
     } catch (e) {
       set({ bootError: e instanceof Error ? e.message : String(e) })

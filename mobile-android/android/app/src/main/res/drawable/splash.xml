@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  启动画面：品牌蓝底 + 居中的卡片 logo。
+  用 layer-list 而不是一张大位图：位图会被系统按窗口尺寸拉伸变形，
+  而 logo 用 gravity="center" 摆放可以保持比例（它是在画布上居中，不是铺满）。
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@color/splash_background" />
+    <item>
+        <bitmap
+            android:src="@drawable/splash_logo"
+            android:gravity="center"
+            android:filter="true" />
+    </item>
+</layer-list>

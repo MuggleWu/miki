@@ -8,6 +8,7 @@ import { useEffect, useState } from 'react'
 import { useApp } from '../store'
 import { useWorkspace } from '../use-workspace'
 import { Sheet } from '../components/Sheet'
+import { Confirm } from '../components/Confirm'
 import { CardEditForm } from '../forms/CardEditForm'
 import { fmtDuePreview } from '@shared/format'
 import type { CardRow, CardState } from '@shared/types'
@@ -143,6 +144,7 @@ function CardDetail({
 }): JSX.Element {
   const ws = useWorkspace()
   const [editing, setEditing] = useState(false)
+  const [confirming, setConfirming] = useState(false)
   const [busy, setBusy] = useState(false)
 
   if (editing) {
@@ -212,10 +214,21 @@ function CardDetail({
         >
           暂停
         </button>
-        <button className="btn danger" disabled={busy} onClick={() => void act(() => ws.deleteCard(row.id), '已删除')}>
+        <button className="btn danger" disabled={busy} onClick={() => setConfirming(true)}>
           删除
         </button>
       </div>
+      <Confirm
+        open={confirming}
+        title="删除这张卡？"
+        detail="删除会写进事件日志。撤销只在学习页的当前会话内有效，退出应用后就要靠桌面端的 git 历史找回。"
+        confirmText="删除"
+        onCancel={() => setConfirming(false)}
+        onConfirm={() => {
+          setConfirming(false)
+          void act(() => ws.deleteCard(row.id), '已删除')
+        }}
+      />
     </div>
   )
 }

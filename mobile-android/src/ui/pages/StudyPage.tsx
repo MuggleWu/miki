@@ -6,7 +6,9 @@ import { useMemo, useRef, useState } from 'react'
 import { useApp } from '../store'
 import { StudySession, type StudyState } from '@mobile/study-session'
 import { Sheet } from '../components/Sheet'
+import { Confirm } from '../components/Confirm'
 import { CardEditForm } from '../forms/CardEditForm'
+import { useLongPress } from '../use-long-press'
 import { RATING_LABEL } from '@shared/format'
 import type { Rating } from '@shared/types'
 
@@ -25,9 +27,18 @@ export function StudyPage({ deckId }: { deckId: string }): JSX.Element {
   const [state, setState] = useState<StudyState>(() => session.start())
   const [menu, setMenu] = useState(false)
   const [editing, setEditing] = useState(false)
+  const [confirming, setConfirming] = useState(false)
   const busy = useRef(false)
 
   const deckName = ws.deckNameOf(deckId)
+
+  // 长按卡面 = 桌面端的 E（编辑）；抬手后那次 tap 要被吞掉，否则会顺带显示答案
+  const longPress = useLongPress({ onLongPress: () => setEditing(true) })
+
+  function tapCard(): void {
+    if (longPress.shouldSwallowClick()) return
+    setState(session.reveal())
+  }
 
   async function rate(rating: Rating): Promise<void> {
     if (busy.current) return
@@ -82,7 +93,14 @@ export function StudyPage({ deckId }: { deckId: string }): JSX.Element {
             <p className="muted">今日已学 {state.todayCount} 次。</p>
           </section>
         ) : (
-          <div className="card-face" onClick={() => setState(session.reveal())}>
+          <div
+            className="card-face"
+            onClick={tapCard}
+            onPointerDown={longPress.onPointerDown}
+            onPointerMove={longPress.onPointerMove}
+            onPointerUp={longPress.onPointerUp}
+            onPointerCancel={longPress.onPointerCancel}
+          >
             <div className="face front">{card.front}</div>
             {state.revealed ? (
               <>
@@ -90,7 +108,7 @@ export function StudyPage({ deckId }: { deckId: string }): JSX.Element {
                 <div className="face back">{card.back}</div>
               </>
             ) : (
-              <p className="hint muted">点按显示答案</p>
+              <p className="hint muted">点按显示答案 · 长按编辑</p>
             )}
           </div>
         )}
@@ -140,18 +158,30 @@ export function StudyPage({ deckId }: { deckId: string }): JSX.Element {
           disabled={card === null}
           onClick={() => {
             setMenu(false)
-            void (async () => {
-              if (!card) return
-              await ws.deleteCard(card.id)
-              bump()
-              notify('已删除（可用 ↺ 撤销）')
-              setState(session.start())
-            })()
+            setConfirming(true)
           }}
         >
           删除
         </button>
       </Sheet>
+
+      <Confirm
+        open={confirming}
+        title="删除这张卡？"
+        detail="删除会写进事件日志（可被后面的同步推到桌面端）。删完可以用顶部的 ↺ 撤销，但一旦退出应用，撤销栈就没了——这张卡就只能靠桌面端的 git 历史找回。"
+        confirmText="删除"
+        onCancel={() => setConfirming(false)}
+        onConfirm={() => {
+          setConfirming(false)
+          void (async () => {
+            if (!card) return
+            await ws.deleteCard(card.id)
+            bump()
+            notify('已删除（可用 ↺ 撤销）')
+            setState(session.start())
+          })()
+        }}
+      />
 
       <Sheet open={editing} title="编辑卡片" onClose={() => setEditing(false)}>
         {card ? (

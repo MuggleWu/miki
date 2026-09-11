@@ -55,6 +55,19 @@ function newId(): string {
   return globalThis.crypto.randomUUID()
 }
 
+/** 一次全量加载的分段耗时（毫秒） */
+export interface LoadTiming {
+  config: number
+  decks: number
+  cards: number
+  events: number
+  index: number
+  total: number
+  eventCount: number
+}
+
+const now = (): number => Math.round(performance.now())
+
 export class MobileWorkspace {
   config!: MikiConfig
   decks: Deck[] = []
@@ -72,6 +85,8 @@ export class MobileWorkspace {
   private deckCheckpoints = new Map<string, number>()
   private hiddenCache: Set<string> | null = null
   private loadIssues: LoadIssues = newLoadIssues()
+  /** 最近一次全量加载的分段耗时（启动速度的观测口） */
+  private loadTiming: LoadTiming | null = null
 
   // 统计聚合（对应桌面端 StatsLedger 的运行期部分，没有 stats.json 检查点与落盘）
   private dailyAgg: DailyAgg = new Map()
@@ -109,15 +124,41 @@ export class MobileWorkspace {
   }
 
   private async loadAll(): Promise<void> {
+    // 逐段计时：手机上"启动慢"只可能慢在这四段里，不把数字打出来就只能靠猜
+    const t0 = now()
     this.config = await this.loadConfig()
     this.scheduler = this.buildScheduler(this.config)
     this.previewScheduler = this.buildScheduler(this.config, true)
+    const t1 = now()
     await this.loadDecks()
+    const t2 = now()
     this.loadIssues = newLoadIssues()
     await this.loadCardsWithCheckpoint(this.loadIssues)
-    await this.streamEvents(this.loadIssues)
+    const t3 = now()
+    const events = await this.streamEvents(this.loadIssues)
+    const t4 = now()
     // 跨天检测：首次调用即全量建索引（tie 分配 + 各牌组计数）
     this.sched.ensureDay()
+    const t5 = now()
+    this.loadTiming = {
+      config: t1 - t0,
+      decks: t2 - t1,
+      cards: t3 - t2,
+      events: t4 - t3,
+      index: t5 - t4,
+      total: t5 - t0,
+      eventCount: events
+    }
+    console.log(
+      `[miki-load] 合计 ${this.loadTiming.total}ms` +
+        `（config ${this.loadTiming.config} / 牌组 ${this.loadTiming.decks} / 卡片 ${this.loadTiming.cards}` +
+        ` / 重放 ${this.loadTiming.events}（${events} 条事件）/ 建索引 ${this.loadTiming.index}）`
+    )
+  }
+
+  /** 最近一次加载的分段耗时；自检页与设置页用它显示"启动都花在哪了" */
+  loadTimingReport(): LoadTiming | null {
+    return this.loadTiming
   }
 
   /** 读 config.json 并补齐默认值。移动端**不写回**这个文件（机器本地字段由桌面端管） */
@@ -252,7 +293,8 @@ export class MobileWorkspace {
    * seq 不持久（文件里那个字段被丢弃、按「文件名序 + 行序」重派），跨机合并的正确性来自
    * 文件内行序，不来自 seq 值。
    */
-  private async streamEvents(issues: LoadIssues): Promise<void> {
+  private async streamEvents(issues: LoadIssues): Promise<number> {
+    let eventCount = 0
     this.session = new SessionLog()
     this.dailyAgg = new Map()
     this.todayAnswers = 0
@@ -282,6 +324,7 @@ export class MobileWorkspace {
           continue
         }
         ev.seq = this.session.nextSeq()
+        eventCount++
         const card = this.cards.get(ev.cardId)
         const wEntry = ev.action === 'undo' && ev.targetSeq != null ? (win.get(ev.targetSeq) ?? null) : null
         if (card && ev.seq > (card.seqApplied ?? 0)) {
@@ -309,6 +352,7 @@ export class MobileWorkspace {
         }
       }
     }
+    return eventCount
   }
 
   // ---------- 统计聚合（对应桌面端 StatsLedger 的运行期语义） ----------
@@ -399,6 +443,11 @@ export class MobileWorkspace {
 
   totalAnswered(): number {
     return this.totalAnsweredCount
+  }
+
+  /** 卡片总量（设置页与自检显示用） */
+  cardCount(): number {
+    return this.cards.size
   }
 
   /** 本会话还能撤销几步（撤销按钮的可用态；重启后为 0，这是有意的） */
