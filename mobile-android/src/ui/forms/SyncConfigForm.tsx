@@ -58,6 +58,11 @@ export function SyncConfigForm({ onDone }: { onDone(): void }): JSX.Element {
           placeholder={sync.status?.tokenMask ? `已存 ${sync.status.tokenMask}，留空则不改` : 'github_pat_…'}
           autoCapitalize="off"
           autoCorrect="off"
+          // 输入法是能看到你敲/粘贴进去的内容的：device 上的第三方输入法可能把它学进词库。
+          // type=password 已经让多数输入法关掉个性化学习，这里再显式关掉自动填充与拼写检查，
+          // 免得 token 被存进 WebView 的自动填充里。
+          autoComplete="off"
+          spellCheck={false}
         />
       </label>
 
