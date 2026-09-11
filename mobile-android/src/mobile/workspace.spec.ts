@@ -4,7 +4,7 @@
 //   写路径（内存先行 → 追加落盘）之后 reload()（读文件 → 重放）得到的内存态，
 //   必须与写路径当场得到的内存态逐字段一致。
 // 这是跨机同步的正确性前提——手机写的行，桌面端重放后必须看到同样的调度状态。
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { MemoryFileStore } from './fs'
 import { MobilePaths } from './paths'
 import { MobileWorkspace, sortDecksByName } from './workspace'
@@ -281,11 +281,18 @@ describe('移动版工作区：写入 → 重载 的往返一致性', () => {
   })
 
   it('评级预览给出四档 due，且关掉 fuzz 后重复调用稳定', async () => {
-    const a = ws.previewIntervals('c1')
-    const b = ws.previewIntervals('c1')
-    expect(a).toHaveLength(4)
-    expect(a).toEqual(b)
-    expect(a[0]).toBeLessThan(a[3])
+    // previewIntervals 内部取 Date.now()：两次调用跨毫秒就会差 1ms。这里把时钟钉住，
+    // 校验的才是「同一时刻重复调用确定」这条真命题（关 fuzz 的意义所在）
+    const spy = vi.spyOn(Date, 'now').mockReturnValue(1_800_000_000_000)
+    try {
+      const a = ws.previewIntervals('c1')
+      const b = ws.previewIntervals('c1')
+      expect(a).toHaveLength(4)
+      expect(a).toEqual(b)
+      expect(a[0]).toBeLessThan(a[3])
+    } finally {
+      spy.mockRestore()
+    }
   })
 
   it('软删牌组：其下卡片不进首页/卡片库（与桌面端 hiddenDeckIds 同口径）', async () => {
