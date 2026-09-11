@@ -7,7 +7,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { MemoryFileStore } from './fs'
 import { MobilePaths } from './paths'
-import { MobileWorkspace } from './workspace'
+import { MobileWorkspace, sortDecksByName } from './workspace'
 import type { Card } from '@shared/types'
 
 const ROOT = 'miki-base'
@@ -330,5 +330,30 @@ describe('移动版工作区：写入 → 重载 的往返一致性', () => {
       expect(w.deckInfos()[0].counts).toMatchObject({ new: 3, total: 3 })
       expect(w.cards.size).toBe(3)
     })
+  })
+})
+
+// 牌组排序必须与桌面端 sortedDecks 完全一致（同一个 localeCompare 调用）：同一个牌组
+// 在两端要落在同一个位置。真实踩到的是数字顺序——按字典序「第 10 章」会排到「第 2 章」前面。
+describe('牌组排序（与桌面端一致）', () => {
+  it('数字按数值大小，中文按拼音，且不改动传入数组', () => {
+    const input = ['第 10 章', '第 2 章', 'b 组', 'A 组', '叠词'].map((name) => ({ name }))
+    const sorted = sortDecksByName(input).map((d) => d.name)
+    // 顺序由 ICU 的 zh collation 决定，与桌面端同一调用、同一结果（汉字在拉丁字母之前）
+    expect(sorted).toEqual(['第 2 章', '第 10 章', '叠词', 'A 组', 'b 组'])
+    expect(input.map((d) => d.name)).toEqual(['第 10 章', '第 2 章', 'b 组', 'A 组', '叠词'])
+  })
+
+  it('deckInfos 返回的就是排好序的列表', async () => {
+    const f = new MemoryFileStore()
+    f.seed(
+      `${ROOT}/decks.json`,
+      JSON.stringify([
+        { id: 'd2', name: '第 10 章', order: 0, createdAt: 1, deletedAt: null },
+        { id: 'd1', name: '第 2 章', order: 1, createdAt: 2, deletedAt: null }
+      ])
+    )
+    const w = await openWorkspace(f)
+    expect(w.deckInfos().map((d) => d.name)).toEqual(['第 2 章', '第 10 章'])
   })
 })

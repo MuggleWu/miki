@@ -61,11 +61,14 @@ export function App(): JSX.Element {
     }
   }, [route.kind, prefs.keepAwake])
 
-  // Android 返回键 → 路由后退；已经在首页且无栈时交还给系统（= 退出应用）
+  // Android 返回键 → 关弹层 → 路由后退；已经在首页且无栈时交还给系统（= 退出应用）
   useEffect(() => {
     let handle: { remove(): Promise<void> } | undefined
     void CapApp.addListener('backButton', () => {
-      const { route: cur, stack } = useApp.getState()
+      const { route: cur, stack, closeTopSheet } = useApp.getState()
+      // 弹层/抽屉开着时先关它。原生返回键不会触发 <dialog> 的 cancel，不这样处理的话
+      // 用户在编辑卡片时按返回会直接把整个学习页退掉，输入的进度也一起没了。
+      if (closeTopSheet()) return
       if (stack.length > 0 || cur.kind !== 'decks') back()
       else void CapApp.exitApp()
     }).then((h) => {

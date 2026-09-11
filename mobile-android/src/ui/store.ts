@@ -85,6 +85,12 @@ interface AppState {
   drawerDragging: boolean
   /** 入场动画的代号：任何一次拖动/吸附都会 ++，用于作废尚未落地的入场回调 */
   enterSeq: number
+  /**
+   * 已打开弹层（含抽屉）的"关闭"回调，后进先出。返回键要先关最上面这层，再退路由——
+   * 否则弹层开着按返回会直接退出整个页面，用户得重新点进来。弹层是各页面自己的 state，
+   * 返回键（原生事件）看不到，只能由弹层自己登记。
+   */
+  sheetStack: (() => void)[]
   /** 写操作计数器：页面把它放进 useMemo 依赖，驱动派生数据重算 */
   version: number
   sync: SyncUiState
@@ -104,6 +110,11 @@ interface AppState {
   settleDrawer(release?: { velocity: number; travelled: number }): void
   /** 点遮罩 / 返回键 / 选中条目：动画收起 */
   closeDrawer(): void
+  /** 弹层打开/关闭时登记，配合返回键使用 */
+  pushSheet(close: () => void): void
+  popSheet(close: () => void): void
+  /** 关掉最上面的弹层；没有弹层时返回 false（调用方接着按路由后退处理） */
+  closeTopSheet(): boolean
   bump(): void
 
   /** 读本机同步配置与上次结果（启动、进设置页时调用） */
@@ -127,6 +138,7 @@ export const useApp = create<AppState>((set, get) => ({
   drawerDrag: null,
   drawerDragging: false,
   enterSeq: 0,
+  sheetStack: [],
   version: 0,
   sync: { status: null, verify: null, report: null, lastSyncAt: null, busy: false, lastError: null },
 
@@ -355,6 +367,21 @@ export const useApp = create<AppState>((set, get) => ({
       if (manual) get().notify(`同步失败：${msg}`)
       return null
     }
+  },
+
+  pushSheet(close) {
+    set({ sheetStack: [...get().sheetStack, close] })
+  },
+
+  popSheet(close) {
+    set({ sheetStack: get().sheetStack.filter((c) => c !== close) })
+  },
+
+  closeTopSheet() {
+    const stack = get().sheetStack
+    if (stack.length === 0) return false
+    stack[stack.length - 1]() // 回调自己会把这一层从栈里摘掉
+    return true
   },
 
   bump() {

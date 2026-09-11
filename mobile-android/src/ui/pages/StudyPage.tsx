@@ -33,6 +33,14 @@ export function StudyPage({ deckId }: { deckId: string }): JSX.Element {
 
   const deckName = ws.deckNameOf(deckId)
 
+  // 刷卡字体跟随桌面端设置（config.json 的 study.fontFamily / study.fontSize，桌面端只把它
+  // 作用在刷卡卡片上，这里保持一致）。fontFamily 为空 = 跟随系统，就是桌面端的默认状态。
+  const studyFont = ws.config.study
+  const cardStyle = {
+    '--study-fs': `${studyFont.fontSize}px`,
+    fontFamily: studyFont.fontFamily || undefined
+  } as React.CSSProperties
+
   // 长按卡面 = 桌面端的 E（编辑）；抬手后那次 tap 要被吞掉，否则会顺带显示答案
   const longPress = useLongPress({ onLongPress: () => setEditing(true) })
 
@@ -96,6 +104,7 @@ export function StudyPage({ deckId }: { deckId: string }): JSX.Element {
         ) : (
           <div
             className="card-face"
+            style={cardStyle}
             onClick={tapCard}
             onPointerDown={longPress.onPointerDown}
             onPointerMove={longPress.onPointerMove}

@@ -28,6 +28,10 @@ export function Drawer({ open, onClose }: { open: boolean; onClose(): void }): J
   const dragging = useApp((s) => s.drawerDragging)
   const width = useApp((s) => s.drawerWidth)
   const setDrawerWidth = useApp((s) => s.setDrawerWidth)
+  const pushSheet = useApp((s) => s.pushSheet)
+  const popSheet = useApp((s) => s.popSheet)
+  // onClose 是内联函数，用 ref 取最新的，避免每次渲染都重新登记
+  const closeRef = useRef(onClose)
 
   useEffect(() => {
     const el = ref.current
@@ -35,6 +39,19 @@ export function Drawer({ open, onClose }: { open: boolean; onClose(): void }): J
     if (open && !el.open) el.showModal()
     if (!open && el.open) el.close()
   }, [open])
+
+  // 抽屉也登记进弹层栈：返回键先关抽屉，再退路由（原生返回键到不了 <dialog> 的 cancel）
+  // 在 effect 里同步最新回调（渲染期间不写 ref），登记只做一次
+  useEffect(() => {
+    closeRef.current = onClose
+  }, [onClose])
+
+  useEffect(() => {
+    if (!open) return
+    const close = (): void => closeRef.current()
+    pushSheet(close)
+    return () => popSheet(close)
+  }, [open, pushSheet, popSheet])
 
   // CSS 里宽度是 min(78vw, 320px)，公式在 JS 侧也有一份（手势开始时抽屉还没挂载、量不到）。
   // 挂载后实测一次，让两边以后不会因为改 CSS 而悄悄错位。

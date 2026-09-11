@@ -48,11 +48,11 @@ export function DecksPage(): JSX.Element {
         </button>
       ) : null}
 
-      <div className="page-body">
+      <div className="page-body with-fab">
         {decks.length === 0 ? (
           <section className="empty">
             <p>还没有牌组。</p>
-            <p className="muted">移动端 v1 的工作区由同步拉取建立；也可以先点右下角 + 新建一个牌组试试。</p>
+            <p className="muted">点右下角 ＋ 新建一个；想用电脑上已有的牌组，先到设置里配好同步再拉取。</p>
           </section>
         ) : (
           <ul className="deck-list">
@@ -60,10 +60,11 @@ export function DecksPage(): JSX.Element {
               <li key={d.id}>
                 <button className="deck-row" onClick={() => go({ kind: 'study', deckId: d.id })}>
                   <span className="deck-name">{d.name}</span>
+                  {/* 三个数与桌面端同序（总数 / 未学习 / 到期）、同色，为 0 时同样不显示 */}
                   <span className="deck-counts">
-                    <b className="c-new">{d.counts.new}</b>
-                    <b className="c-due">{d.counts.due}</b>
-                    <span className="c-total">{d.counts.total}</span>
+                    {d.counts.total > 0 ? <span className="count count-total">{d.counts.total}</span> : null}
+                    {d.counts.new > 0 ? <span className="count count-new">{d.counts.new}</span> : null}
+                    {d.counts.due > 0 ? <span className="count count-due">{d.counts.due}</span> : null}
                   </span>
                 </button>
               </li>
@@ -71,7 +72,9 @@ export function DecksPage(): JSX.Element {
           </ul>
         )}
         <p className="legend muted">
-          <b className="c-new">新</b> 未学 · <b className="c-due">待复习</b> · <span className="c-total">总数</span>
+          <span className="count count-total">总数</span>
+          <span className="count count-new">未学习</span>
+          <span className="count count-due">到期</span>
         </p>
       </div>
 

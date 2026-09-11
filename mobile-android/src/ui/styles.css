@@ -83,6 +83,12 @@ body,
   margin: 0;
 }
 
+html {
+  /* 双击不缩放（点答案/评级时最怕误触缩放），双指缩放仍可用 */
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
 body {
   background: var(--bg);
   color: var(--fg);
@@ -154,14 +160,17 @@ select {
 .study-body {
   display: flex;
   flex-direction: column;
-  justify-content: center;
+  justify-content: flex-start;
+  /* 页面底用 --card（浅色下浅灰），刷卡面用 --bg（白），与桌面端"灰底 + 白面板"的关系一致 */
+  background: var(--card);
   padding-bottom: 96px;
 }
 
 .icon-btn {
   flex: 0 0 auto;
-  width: 40px;
-  height: 40px;
+  /* 44×44：Material 建议 48、iOS 44，原来 40 在真机上容易点空 */
+  width: 44px;
+  height: 44px;
   font-size: 20px;
   line-height: 1;
   border: none;
@@ -216,37 +225,69 @@ select {
 
 .deck-counts {
   display: flex;
-  gap: 10px;
+  gap: 8px;
   font-size: 14px;
   font-variant-numeric: tabular-nums;
 }
 
-.c-new {
-  color: var(--accent);
+/*
+ * 三个计数器：与桌面端 .badge-total / .badge-new / .badge-due 一一对应——同一个颜色、同一个
+ * "13% 同色底 + 圆角药丸"的渲染。原来移动端是"未学习=青、到期=红"的裸数字，与桌面端反着来
+ * （桌面端到期是绿色），看起来像两套 UI。
+ */
+.count {
+  display: inline-block;
+  min-width: 26px;
+  text-align: center;
+  padding: 1px 9px;
+  border-radius: 999px;
 }
-.c-due {
-  color: var(--fail);
-}
-.c-total {
+
+.count-total {
   color: var(--muted);
+  background: color-mix(in srgb, var(--muted) 13%, transparent);
+}
+
+.count-new {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+}
+
+.count-due {
+  color: var(--pass);
+  background: color-mix(in srgb, var(--pass) 15%, transparent);
 }
 
 .legend {
   margin-top: 12px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
 }
 
 /* ---------- 学习页 ---------- */
 
+/*
+ * 刷卡面：与桌面端 .cardbox 同版式——**正面在最上面、左对齐**，白底面板，显示答案后一条虚线
+ * 分隔、下面是答案。原来是"垂直居中 + 灰底"的大卡片，看着像弹窗而不是卡。
+ * 字体也走桌面端的设置（config.study.fontFamily/fontSize），字重固定 400：原来 500 在
+ * Android 的 Noto Sans CJK 上就是"黑体"观感，用户 反馈"非常不好看"。
+ */
 .card-face {
-  font-size: calc(20px * var(--fs-scale));
-  background: var(--card);
+  font-size: calc(var(--study-fs, 16px) * var(--fs-scale));
+  font-weight: 400;
+  background: var(--bg); /* 面板：与桌面端 --panel 同角色（浅色下为白），页面底另用 --card */
   border: 1px solid var(--line);
   border-radius: 16px;
-  padding: 22px 18px;
-  min-height: 40vh;
+  padding: 20px 18px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
-  justify-content: center;
+  justify-content: flex-start;
+  align-items: stretch;
   gap: 14px;
   line-height: 1.6;
   white-space: pre-wrap;
@@ -254,7 +295,9 @@ select {
 }
 
 .card-face .front {
-  font-weight: 500;
+  /* 与桌面端一致：正面不做加粗。原来这里是 500，Android 的 Noto Sans CJK 没有 500 档，
+     会被合成加重，整屏看着就是"黑体"，这也是 用户 说"非常不好看"的直接原因。 */
+  font-weight: 400;
 }
 
 .card-face .back {
@@ -265,6 +308,10 @@ select {
   border: none;
   border-top: 1px dashed var(--line);
   margin: 0;
+}
+
+.card-face > .hint {
+  margin-top: auto; /* 提示贴到卡片底部，正面保持在最上面 */
 }
 
 .hint {
@@ -941,6 +988,9 @@ code {
 
 .sheet-full .sheet-inner {
   height: 100%;
+  /* fixed 定位的元素不受 body 的 padding 影响，顶部安全区必须自己让一次——
+     编辑卡片是全屏弹层，原来标题栏正好压在状态栏/挖孔下面 */
+  padding-top: var(--inset-top);
   max-height: 100%;
   display: flex;
   flex-direction: column;
@@ -1129,4 +1179,32 @@ code {
 .form details summary {
   padding: 8px 0;
   color: var(--muted);
+}
+
+/* 悬浮按钮会盖住列表最后一条：给它留出按钮高度 + 安全区的空间 */
+.page-body.with-fab {
+  padding-bottom: calc(96px + var(--bottom-blocked));
+}
+
+/*
+ * 触屏反馈：这个 APP 关掉了系统点击高亮（-webkit-tap-highlight-color: transparent，
+ * 否则每次点按都闪一块灰），所以必须自己给按下状态，不然点起来像没反应。
+ */
+.deck-row:active,
+.sheet-item:active,
+.icon-btn:active:not(:disabled),
+.rate-btn:active:not(:disabled),
+.fab:active,
+.tab:active {
+  background-color: var(--line);
+}
+
+/* 系统开了"减弱动态效果"就不要动画 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }
