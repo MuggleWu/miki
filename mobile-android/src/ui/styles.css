@@ -1,4 +1,7 @@
 :root {
+  /* 字号档位：只作用在正文类文本上（见下面 calc(... * var(--fs-scale)) 的几处），
+     不会连带放大按钮高度与间距——单手够到底部评级按钮是硬约束 */
+  --fs-scale: 1;
   --bg: #ffffff;
   --fg: #1c1c1e;
   --muted: #6b7280;
@@ -15,22 +18,25 @@
   --safe-bottom: env(safe-area-inset-bottom, 0px);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #111214;
-    --fg: #e8e8ea;
-    --muted: #9ca3af;
-    --card: #1b1d21;
-    --line: #2a2d33;
-    --accent: #60a5fa;
-    --pass: #4ade80;
-    --fail: #f87171;
-    --skip: #fbbf24;
-    --r1: #f87171;
-    --r2: #fbbf24;
-    --r3: #60a5fa;
-    --r4: #4ade80;
-  }
+/*
+ * 深色主题挂在 <html data-theme='dark'> 上，而不是用 prefers-color-scheme 媒体查询：
+ * 「跟随系统」是用户设置里的一个选项，需要能被设置页覆盖，媒体查询做不到这件事。
+ * 解析由 mobile/theme.ts 的 applyAppearance 负责（系统切换时会重新解析）。
+ */
+:root[data-theme='dark'] {
+  --bg: #111214;
+  --fg: #e8e8ea;
+  --muted: #9ca3af;
+  --card: #1b1d21;
+  --line: #2a2d33;
+  --accent: #60a5fa;
+  --pass: #4ade80;
+  --fail: #f87171;
+  --skip: #fbbf24;
+  --r1: #f87171;
+  --r2: #fbbf24;
+  --r3: #60a5fa;
+  --r4: #4ade80;
 }
 
 * {
@@ -158,6 +164,7 @@ select {
 }
 
 .deck-name {
+  font-size: calc(16px * var(--fs-scale));
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
@@ -189,6 +196,7 @@ select {
 /* ---------- 学习页 ---------- */
 
 .card-face {
+  font-size: calc(20px * var(--fs-scale));
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: 16px;
@@ -198,7 +206,6 @@ select {
   flex-direction: column;
   justify-content: center;
   gap: 14px;
-  font-size: 20px;
   line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-word;
@@ -531,4 +538,298 @@ code {
   color: #fff;
   font-size: 14px;
   z-index: 10;
+}
+
+/* ---------- 左侧抽屉 ---------- */
+
+.drawer {
+  position: fixed;
+  inset: 0 auto 0 0;
+  width: min(78vw, 320px);
+  max-width: 320px;
+  max-height: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 0 16px 16px 0;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.drawer::backdrop {
+  background: rgb(0 0 0 / 40%);
+}
+
+.drawer-inner {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: max(14px, env(safe-area-inset-top)) 0 calc(14px + var(--safe-bottom));
+}
+
+.drawer-head {
+  padding: 6px 18px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.drawer-head h2 {
+  margin: 0 0 4px;
+  font-size: 20px;
+}
+
+.drawer-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 14px 18px;
+  border: none;
+  border-left: 3px solid transparent;
+  background: transparent;
+  color: var(--fg);
+  text-align: left;
+}
+
+.drawer-item.active {
+  border-left-color: var(--accent);
+  background: var(--card);
+}
+
+.drawer-label {
+  font-size: 16px;
+}
+
+.drawer-note {
+  font-size: 12px;
+  margin: 0;
+}
+
+.drawer-foot {
+  margin-top: auto;
+  padding: 14px 18px 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* ---------- 筛选条 ---------- */
+
+.filter-bar {
+  display: flex;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  flex: 0 0 auto;
+}
+
+.filter-bar .search {
+  flex: 2 1 0;
+  min-width: 0;
+}
+
+.filter-bar select {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.filter-bar .search,
+.filter-bar select {
+  padding: 9px 10px;
+  font-size: 15px;
+  font-family: inherit;
+  color: var(--fg);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+}
+
+/* ---------- 卡片列表 ---------- */
+
+.card-list {
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.card-row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 8px;
+  padding: 12px 13px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+  color: var(--fg);
+  text-align: left;
+  font-size: calc(15px * var(--fs-scale));
+}
+
+.row-front {
+  grid-column: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row-meta {
+  grid-column: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.row-deck {
+  grid-column: 1 / -1;
+  font-size: 11.5px;
+  margin: 0;
+}
+
+.st {
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  font-size: 11px;
+}
+
+.st.new {
+  color: var(--accent);
+}
+.st.learning {
+  color: var(--r2);
+}
+.st.review {
+  color: var(--pass);
+}
+
+/* ---------- 详情 / 键值表 ---------- */
+
+.detail-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.preview {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: calc(16px * var(--fs-scale));
+  line-height: 1.55;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+.preview p {
+  margin: 0;
+}
+
+.kv {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.kv li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 0;
+  font-size: 13.5px;
+  border-bottom: 1px solid var(--line);
+}
+
+.kv li:last-child {
+  border-bottom: none;
+}
+
+.kv span {
+  color: var(--muted);
+}
+
+.kv b {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 分段控件 / 开关 ---------- */
+
+.seg {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.seg-btn {
+  flex: 1 1 0;
+  padding: 10px 4px;
+  font-size: 14px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.seg-btn.on {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+.switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 4px;
+  font-size: 14px;
+}
+
+.switch-row em {
+  display: block;
+  font-style: normal;
+  font-size: 12px;
+  line-height: 1.4;
+  margin-top: 2px;
+}
+
+.switch-row input {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  accent-color: var(--accent);
+}
+
+/* ---------- 图表 ---------- */
+
+.chart-card h2 {
+  margin-bottom: 6px;
+}
+
+.chart {
+  width: 100%;
+}
+
+.chart-foot {
+  margin: 8px 0 0;
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+
+/* ---------- 危险动作 ---------- */
+
+.btn.danger {
+  border-color: var(--fail);
+  color: var(--fail);
 }

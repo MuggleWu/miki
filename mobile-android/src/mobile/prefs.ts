@@ -11,6 +11,9 @@ import { Preferences } from '@capacitor/preferences'
 /** 偏好键名集中在此，避免各处写字面量拼错 */
 export const PREF_KEYS = {
   lastDeckId: 'miki.lastDeckId',
+  theme: 'miki.display.theme',
+  fontScale: 'miki.display.fontScale',
+  keepAwake: 'miki.display.keepAwake',
   githubRepo: 'miki.sync.repo',
   githubPat: 'miki.sync.pat',
   lastSyncAt: 'miki.sync.lastAt'

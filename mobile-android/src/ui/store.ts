@@ -11,6 +11,17 @@ import { CapacitorFileStore } from '@mobile/fs'
 import { MobilePaths } from '@mobile/paths'
 import { MobileWorkspace } from '@mobile/workspace'
 import { WORKSPACE_DIR } from '@mobile/constants'
+import { PREF_KEYS, prefGet, prefSet } from '@mobile/prefs'
+import type { FontScale, ThemePref } from '@mobile/theme'
+
+/** 本机显示偏好（不是工作区数据，换手机不会跟着走） */
+export interface Prefs {
+  theme: ThemePref
+  fontScale: FontScale
+  keepAwake: boolean
+}
+
+const DEFAULT_PREFS: Prefs = { theme: 'system', fontScale: 'medium', keepAwake: true }
 
 /** 路由：够用就好的自研栈（页面数量是个位数，不值得引入 react-router） */
 export type Route =
@@ -26,6 +37,7 @@ interface AppState {
   ws: MobileWorkspace | null
   /** 启动失败（工作区打不开这类硬错误）：整屏显示，不做静默降级 */
   bootError: string | null
+  prefs: Prefs
   route: Route
   stack: Route[]
   toast: string | null
@@ -33,7 +45,11 @@ interface AppState {
   version: number
 
   boot(): Promise<void>
+  loadPrefs(): Promise<void>
+  setPref<K extends keyof Prefs>(key: K, value: Prefs[K]): Promise<void>
   go(route: Route): void
+  /** 抽屉里换页：直接落位并把返回栈清空（同级页之间不该来回叠栈） */
+  reset(route: Route): void
   back(): void
   notify(msg: string | null): void
   bump(): void
@@ -42,6 +58,7 @@ interface AppState {
 export const useApp = create<AppState>((set, get) => ({
   ws: null,
   bootError: null,
+  prefs: DEFAULT_PREFS,
   route: { kind: 'decks' },
   stack: [],
   toast: null,
@@ -58,11 +75,39 @@ export const useApp = create<AppState>((set, get) => ({
     }
   },
 
+  async loadPrefs() {
+    const [theme, fontScale, keepAwake] = await Promise.all([
+      prefGet(PREF_KEYS.theme),
+      prefGet(PREF_KEYS.fontScale),
+      prefGet(PREF_KEYS.keepAwake)
+    ])
+    set({
+      prefs: {
+        theme: theme === 'light' || theme === 'dark' || theme === 'system' ? theme : DEFAULT_PREFS.theme,
+        fontScale:
+          fontScale === 'small' || fontScale === 'medium' || fontScale === 'large'
+            ? fontScale
+            : DEFAULT_PREFS.fontScale,
+        keepAwake: keepAwake === null ? DEFAULT_PREFS.keepAwake : keepAwake === '1'
+      }
+    })
+  },
+
+  async setPref(key, value) {
+    set({ prefs: { ...get().prefs, [key]: value } })
+    // 落盘失败不影响本次生效（本次会话已经改过了），只是下次启动会回到旧值
+    await prefSet(PREF_KEYS[key], typeof value === 'boolean' ? (value ? '1' : '0') : String(value))
+  },
+
   go(route) {
     const cur = get().route
     // 编辑页记着来路：保存返回时回到原来那一屏（可能是学习页，也可能是卡片库）
     const entry = route.kind === 'cardEdit' ? route.from : cur
     set({ route, stack: [...get().stack, entry], toast: null })
+  },
+
+  reset(route) {
+    set({ route, stack: [], toast: null })
   },
 
   back() {

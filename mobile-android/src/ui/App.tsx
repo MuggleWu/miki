@@ -1,4 +1,4 @@
-// 应用外壳：boot 工作区 → 按路由渲染页面 → 接系统返回键。
+// 应用外壳：boot 工作区与偏好 → 按路由渲染页面 → 接系统返回键 → 维持屏幕常亮。
 //
 // 自研路由而不是 react-router：页面是个位数，且需要跟 Android 返回键一对一绑定，
 // 引一个路由库反而要写更多适配代码。
@@ -7,22 +7,54 @@ import { App as CapApp } from '@capacitor/app'
 import { useApp } from './store'
 import { DecksPage } from './pages/DecksPage'
 import { StudyPage } from './pages/StudyPage'
+import { LibraryPage } from './pages/LibraryPage'
+import { StatsPage } from './pages/StatsPage'
+import { SettingsPage } from './pages/SettingsPage'
 import { SelfCheckPage } from './pages/SelfCheckPage'
+import { applyAppearance, acquireWakeLock, watchSystemDark } from '@mobile/theme'
 
 export function App(): JSX.Element {
   const ws = useApp((s) => s.ws)
   const bootError = useApp((s) => s.bootError)
   const route = useApp((s) => s.route)
   const toast = useApp((s) => s.toast)
+  const prefs = useApp((s) => s.prefs)
   const notify = useApp((s) => s.notify)
   const back = useApp((s) => s.back)
   const boot = useApp((s) => s.boot)
+  const loadPrefs = useApp((s) => s.loadPrefs)
 
   useEffect(() => {
     void boot()
-  }, [boot])
+    void loadPrefs()
+  }, [boot, loadPrefs])
 
-  // Android 返回键 → 路由后退；已经在首页时交还给系统（= 退出应用）
+  // 主题与字号：写到 <html> 上，CSS 只认 data-theme 与 --fs-scale 两个入口
+  useEffect(() => {
+    const dark = window.matchMedia('(prefers-color-scheme: dark)').matches
+    applyAppearance(prefs.theme, prefs.fontScale, dark)
+    // 「跟随系统」要在系统切换时跟着变——只在启动时读一次 matchMedia 是不够的
+    if (prefs.theme !== 'system') return
+    return watchSystemDark((nowDark) => applyAppearance('system', prefs.fontScale, nowDark))
+  }, [prefs.theme, prefs.fontScale])
+
+  // 学习页常亮：只在学习页请求，离开就释放——别的页面常亮只是费电
+  useEffect(() => {
+    if (route.kind !== 'study' || !prefs.keepAwake) return
+    let release: (() => void) | null = null
+    let cancelled = false
+    void acquireWakeLock().then((fn) => {
+      // 请求是异步的：在途期间已经离开学习页就立刻释放，别把锁漏掉
+      if (cancelled) fn?.()
+      else release = fn
+    })
+    return () => {
+      cancelled = true
+      release?.()
+    }
+  }, [route.kind, prefs.keepAwake])
+
+  // Android 返回键 → 路由后退；已经在首页且无栈时交还给系统（= 退出应用）
   useEffect(() => {
     let handle: { remove(): Promise<void> } | undefined
     void CapApp.addListener('backButton', () => {
@@ -70,9 +102,12 @@ export function App(): JSX.Element {
 
   return (
     <div className="app">
-      {route.kind === 'decks' ? <DecksPage /> : null}
       {/* key 绑定 deckId：换牌组就重挂载学习页，会话状态自然重置，不需要在 effect 里纠正 */}
+      {route.kind === 'decks' ? <DecksPage /> : null}
       {route.kind === 'study' ? <StudyPage key={route.deckId} deckId={route.deckId} /> : null}
+      {route.kind === 'library' ? <LibraryPage /> : null}
+      {route.kind === 'stats' ? <StatsPage /> : null}
+      {route.kind === 'settings' ? <SettingsPage /> : null}
       {route.kind === 'selfcheck' ? <SelfCheckPage /> : null}
       {toast ? <div className="toast">{toast}</div> : null}
     </div>

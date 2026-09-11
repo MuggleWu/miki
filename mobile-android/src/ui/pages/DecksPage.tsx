@@ -4,12 +4,14 @@ import { useState } from 'react'
 import { useApp } from '../store'
 import { useWorkspace } from '../use-workspace'
 import { Sheet } from '../components/Sheet'
+import { Drawer } from '../components/Drawer'
 import { AddCardForm } from '../forms/AddCardForm'
 import { AddDeckForm } from '../forms/AddDeckForm'
 
 export function DecksPage(): JSX.Element {
   const ws = useWorkspace()
   const go = useApp((s) => s.go)
+  const [drawer, setDrawer] = useState(false)
   const [menu, setMenu] = useState(false)
   const [addCard, setAddCard] = useState(false)
   const [addDeck, setAddDeck] = useState(false)
@@ -21,7 +23,7 @@ export function DecksPage(): JSX.Element {
   return (
     <>
       <div className="page-head">
-        <button className="icon-btn" onClick={() => go({ kind: 'selfcheck' })} aria-label="菜单">
+        <button className="icon-btn" onClick={() => setDrawer(true)} aria-label="菜单">
           ☰
         </button>
         <h1>牌组</h1>
@@ -58,6 +60,8 @@ export function DecksPage(): JSX.Element {
       <button className="fab" onClick={() => setMenu(true)} aria-label="新增">
         ＋
       </button>
+
+      <Drawer open={drawer} onClose={() => setDrawer(false)} />
 
       <Sheet open={menu} title="新增" onClose={() => setMenu(false)}>
         <button
