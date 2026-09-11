@@ -97,9 +97,11 @@ export function LibraryPage(): JSX.Element {
                 <button className="card-row" onClick={() => setOpenId(r.id)}>
                   <span className="row-front">{r.front}</span>
                   <span className="row-meta">
-                    <span className={`st st${r.state}`}>{STATE_LABEL[r.state]}</span>
+                    {/* 暂停优先于调度状态：暂停卡仍带着 fsrs 快照与到期时间，照原样显示会写着
+                        「待复习 + 到期 +N 天」，让人以为它还在排队等复习（桌面端同口径） */}
+                    <span className={`st st${r.state}`}>{r.suspended ? '⏸ 已暂停' : STATE_LABEL[r.state]}</span>
                     {/* 新卡没有到期时间：状态标签已经写着"未学习"，再跟一句"未学"是重复 */}
-                    {r.state !== 'new' && <span className="muted">{dueText(r)}</span>}
+                    {!r.suspended && r.state !== 'new' && <span className="muted">{dueText(r)}</span>}
                   </span>
                   <span className="row-deck muted">{r.deckName}</span>
                 </button>
@@ -142,7 +144,7 @@ function dueText(r: CardRow): string {
   return `到期 ${fmtDuePreview(r.due)}`
 }
 
-/** 详情抽屉：先看内容与调度参数，再决定编辑 / 暂停 / 删除 */
+/** 详情抽屉：先看内容与调度参数，再决定编辑 / 暂停或解除暂停 / 删除 */
 function CardDetail({
   onEditing,
   row,
@@ -205,11 +207,13 @@ function CardDetail({
         </li>
         <li>
           <span>状态</span>
-          <b>{STATE_LABEL[row.state]}</b>
+          <b>{row.suspended ? '⏸ 已暂停（不计入调度）' : STATE_LABEL[row.state]}</b>
         </li>
         <li>
           <span>到期</span>
-          <b>{row.due === null ? '—' : fmtDuePreview(row.due)}</b>
+          {/* 暂停卡不参与调度，那个到期时间此刻没有意义（桌面端 due 列同样显示 —）：
+              解除暂停后它会重新参与计算，所以这里只是不显示，不是清掉 */}
+          <b>{row.suspended || row.due === null ? '—' : fmtDuePreview(row.due)}</b>
         </li>
         <li>
           <span>间隔</span>
@@ -226,13 +230,26 @@ function CardDetail({
         <button className="btn primary" onClick={() => setEditing(true)} disabled={busy}>
           编辑
         </button>
-        <button
-          className="btn"
-          disabled={busy}
-          onClick={() => void act(() => ws.setCardSuspended(row.id, true).then(() => undefined), '已暂停')}
-        >
-          暂停
-        </button>
+        {/* 暂停 / 解除暂停必须是同一个入口的两态：学习页菜单那条「恢复学习」永远轮不到暂停卡
+            （调度器按 card.suspended 过滤，暂停卡不会成为当前学习卡），
+            只挂「暂停」等于在手机上把卡做成一次性的 */}
+        {row.suspended ? (
+          <button
+            className="btn"
+            disabled={busy}
+            onClick={() => void act(() => ws.setCardSuspended(row.id, false).then(() => undefined), '已解除暂停')}
+          >
+            解除暂停
+          </button>
+        ) : (
+          <button
+            className="btn"
+            disabled={busy}
+            onClick={() => void act(() => ws.setCardSuspended(row.id, true).then(() => undefined), '已暂停')}
+          >
+            暂停
+          </button>
+        )}
         <button className="btn danger" disabled={busy} onClick={() => setConfirming(true)}>
           删除
         </button>
