@@ -167,6 +167,32 @@ describe('runSync 编排', () => {
     expect(gh.blobs.get(remoteSha)!.trim().split('\n')).toHaveLength(2)
   })
 
+  // 真机演练抓到的 bug：contents 是按 toPush 生成的，却按 files（全量）的下标去取，
+  // 于是只要有别的文件排在前面（cards/* 排在 review-log/* 前面），计数就永远落在别人身上 → 0。
+  it('推送计数按文件对齐：目录里有其他文件时也要算对（回归）', async () => {
+    const card = row({ id: 'c1', front: 'q' })
+    const ev1 = row({ action: 'answer', cardId: 'c1', t: 1, rating: 3 })
+    gh.push('cards/d1.ndjson', card)
+    gh.push('review-log/2026-09.ndjson', ev1)
+    const store = new MemoryFileStore()
+    await store.writeText(`${ROOT}/cards/d1.ndjson`, card)
+    await store.writeText(`${ROOT}/review-log/2026-09.ndjson`, ev1)
+    const first = await runSync({ store, paths, reloadAndVerify: verifyFrom(store) }, creds, emptyBase())
+    expect(first.report.pushed).toBe(0)
+
+    // 手机上答了一题：只有 review-log 该被推，它排在 cards/d1.ndjson 后面
+    await store.appendText(
+      `${ROOT}/review-log/2026-09.ndjson`,
+      row({ action: 'answer', cardId: 'c2', t: 2, rating: 4 })
+    )
+    const second = await runSync({ store, paths, reloadAndVerify: verifyFrom(store) }, creds, first.base)
+
+    expect(second.report.ok).toBe(true)
+    expect(second.report.pushed).toBe(1)
+    expect(second.report.reviews).toBe(1)
+    expect(gh.commitMessages[0]).toContain('1 reviews')
+  })
+
   it('两端各自追加 → 行合并后推上去，两侧内容一致', async () => {
     const shared = row({ action: 'answer', cardId: 'c0', t: 0, rating: 3 })
     gh.push('review-log/2026-09.ndjson', shared)

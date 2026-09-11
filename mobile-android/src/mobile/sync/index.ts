@@ -171,7 +171,10 @@ export async function runSync(env: SyncEnv, creds: SyncCreds, base: SyncBase): P
       pushedPaths.push(f.path)
     }
 
-    const stats = countLinesToPush(files, await Promise.all(toPush.map(async (f) => await localOf(f.path))))
+    // 计数只对**要推的那几个**文件算：contents 是按 toPush 生成的数组，
+    // 早先这里传的是 files（全量），于是 contents[i] 与 files[i] 根本不是同一个文件，
+    // 结果 commit message 永远写 0（真机演练里推了 2 条答题却写着 "0 reviews"）。
+    const stats = countLinesToPush(toPush, await Promise.all(toPush.map(async (f) => await localOf(f.path))))
     const message = `mobile: sync ${new Date(at).toISOString().slice(0, 16)} (${stats.reviews} reviews, ${stats.cards} cards)`
 
     const tree = await client.createTree(head.tree, blobs)

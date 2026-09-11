@@ -33,6 +33,11 @@ export class GithubClient {
   private async req<T>(method: string, path: string, body?: unknown): Promise<T> {
     const res = await fetch(`${API}${path}`, {
       method,
+      // 必须显式禁掉 HTTP 缓存：GitHub 的 REST 响应带 `cache-control: private, max-age=60`，
+      // WebView 的私有缓存会在这 60 秒内直接复用**没有重新请求**的旧响应。真机演练里就是这么炸的：
+      // 一次同步开头读分支头（缓存），40 秒后推送完再读回，拿到的是推送前那个头，
+      // 于是"推送成功却报读回不一致"。Node 侧的 undici 没有 HTTP 缓存，所以只有真机看得见。
+      cache: 'no-store',
       headers: {
         Authorization: `Bearer ${this.creds.token}`,
         Accept: 'application/vnd.github+json',
