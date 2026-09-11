@@ -80,6 +80,40 @@ export async function saveBase(base: SyncBase): Promise<void> {
   await prefSet(PREF_KEYS.syncBase, JSON.stringify(base))
 }
 
+/**
+ * 作废同步记账（换仓库/换分支时必须调）。
+ *
+ * 记账是按「仓库 + 分支」记的：换了目标却留着旧 base，新仓库里**不存在**的文件会走
+ * `?? baseRemoteSha` 兜底，被判成「远端有这个文件且内容没变」→ skip；随后 base 又被
+ * 重写成新仓库的 head + 当前本地指纹，于是之后每次都继续 skip —— 本地数据永远推不上去，
+ * 而界面一直报「已是最新」。宁可退化成"没有 base"（全量比一遍），也不能安静地假备份。
+ */
+export async function clearBase(): Promise<void> {
+  await prefRemove(PREF_KEYS.syncBase)
+  // 连接验证是上一次目标的结果，留着会显示成新仓库的「已验证」
+  await prefRemove(PREF_KEYS.syncVerify)
+}
+
+/**
+ * 保存同步目标（仓库/分支/PAT）并处理"换目标"的后果。
+ *
+ * 单独成函数（而不是塞在 UI store 里）是为了能被测试：这条链上最容易出错的一步
+ * ——「换了仓库却没作废记账」——必须由测试钉住，而不是靠人记得调 clearBase。
+ * token 传 null = 不改已存的 PAT（表单留空就是这个语义）。
+ */
+export async function applySyncConfig(
+  repo: string,
+  branch: string,
+  token: string | null
+): Promise<{ switched: boolean; creds: { repo: string; branch: string; token: string | null } }> {
+  const before = await loadCreds()
+  await saveCreds(repo, branch, token)
+  const creds = await loadCreds()
+  const switched = before.repo !== creds.repo || before.branch !== creds.branch
+  if (switched) await clearBase()
+  return { switched, creds }
+}
+
 export async function loadVerify(): Promise<VerifyRecord | null> {
   const raw = await prefGet(PREF_KEYS.syncVerify)
   if (!raw) return null

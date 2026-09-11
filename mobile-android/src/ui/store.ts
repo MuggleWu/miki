@@ -14,6 +14,7 @@ import { WORKSPACE_DIR } from '@mobile/constants'
 import { PREF_KEYS, prefGet, prefSet } from '@mobile/prefs'
 import { prefetchMarkdown } from './md'
 import {
+  applySyncConfig,
   clearCreds,
   credsStatus,
   loadBase,
@@ -21,7 +22,6 @@ import {
   loadLastSyncAt,
   loadVerify,
   saveBase,
-  saveCreds,
   saveLastSyncAt,
   saveVerify,
   type SyncCredsStatus,
@@ -295,12 +295,12 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   async saveSyncConfig(repo, branch, token) {
-    await saveCreds(repo, branch, token)
+    // 换仓库/分支的后果（作废同步记账）封装在 applySyncConfig 里，并有测试钉住
+    const { creds } = await applySyncConfig(repo, branch, token)
     await get().loadSyncInfo()
     // 存了就去验一次：让用户立刻知道这串 token 到底能不能用，而不是等到刷卡后同步失败
-    const { repo: r, branch: b, token: t } = await loadCreds()
-    if (t) {
-      const res = await new GithubClient({ repo: r, branch: b, token: t }).verify()
+    if (creds.token) {
+      const res = await new GithubClient({ repo: creds.repo, branch: creds.branch, token: creds.token }).verify()
       const rec: VerifyRecord = { at: Date.now(), ok: res.ok, message: res.message, kind: res.kind }
       await saveVerify(rec)
       set({ sync: { ...get().sync, verify: rec } })
