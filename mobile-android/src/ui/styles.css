@@ -318,7 +318,13 @@ select {
   align-items: stretch;
   gap: 14px;
   line-height: 1.6;
-  white-space: pre-wrap;
+  /*
+   * 这里原来有 white-space: pre-wrap，本意是给"渲染管线未就绪时的纯文本回退"保住换行，
+   * 但它作用在**整张卡面**上：markdown-it 生成的 HTML 每个块之间都有换行，于是
+   * `<p>a</p>\n<p>b</p>` 之间多出一个整行高、松列表的每个 `<li>` 里也多出两行——
+   * 用户 报的"列表和空行分段的间距特别大"就是这么来的（实测：单行 li 高 85.6px）。
+   * 换行语义现在只加在纯文本回退上（.md.md-plain），渲染后的内容按正常空白处理。
+   */
   word-break: break-word;
 }
 
@@ -911,7 +917,6 @@ code {
   font-size: calc(16px * var(--fs-scale));
   line-height: 1.55;
   word-break: break-word;
-  white-space: pre-wrap;
 }
 
 .preview p {
@@ -1082,11 +1087,14 @@ code {
 
 .md {
   word-break: break-word;
+  /* 已渲染的 HTML 按正常空白处理：换行只属于纯文本回退（.md.md-plain，见下） */
+  white-space: normal;
 }
 
 /* 渲染器未就绪时的纯文本回退：保住换行（markdown 那边是 breaks: true）
    与连续空格，否则会挤成一行，看起来像渲染错了 */
-.md-plain {
+.md.md-plain {
+  /* 特意写两层选择器：只写 .md-plain 与上面的 .md 权重相同、靠"后写者赢"太脆，这里直接压过 */
   white-space: pre-wrap;
 }
 

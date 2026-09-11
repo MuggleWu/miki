@@ -7,7 +7,6 @@ import { useApp } from '../store'
 import { StudySession, type StudyState } from '@mobile/study-session'
 import { Sheet } from '../components/Sheet'
 import { CardEditForm } from '../forms/CardEditForm'
-import { Confirm } from '../components/Confirm'
 import { useLongPress } from '../use-long-press'
 import { Md } from '../md'
 import { RATING_LABEL } from '@shared/format'
@@ -28,7 +27,6 @@ export function StudyPage({ deckId }: { deckId: string }): JSX.Element {
   const [state, setState] = useState<StudyState>(() => session.start())
   const [menu, setMenu] = useState(false)
   const [editing, setEditing] = useState(false)
-  const [confirming, setConfirming] = useState(false)
   const busy = useRef(false)
 
   const deckName = ws.deckNameOf(deckId)
@@ -198,30 +196,20 @@ export function StudyPage({ deckId }: { deckId: string }): JSX.Element {
           disabled={card === null}
           onClick={() => {
             setMenu(false)
-            setConfirming(true)
+            void (async () => {
+              if (!card) return
+              // 不弹二次确认：删卡是高频操作，每次确认太烦。顶部 ↺ 能撤销（答题与删除都可撤），
+              // 提示条也明说了可以撤销——需要"再想一下"的场景由撤销兜底，而不是每次都拦一道。
+              await ws.deleteCard(card.id)
+              bump()
+              notify('已删除（可用顶部的 ↺ 撤销）')
+              setState(session.start())
+            })()
           }}
         >
           删除
         </button>
       </Sheet>
-
-      <Confirm
-        open={confirming}
-        title="删除这张卡？"
-        detail="删除会写进事件日志（可被后面的同步推到桌面端）。删完可以用顶部的 ↺ 撤销，但一旦退出应用，撤销栈就没了——这张卡就只能靠桌面端的 git 历史找回。"
-        confirmText="删除"
-        onCancel={() => setConfirming(false)}
-        onConfirm={() => {
-          setConfirming(false)
-          void (async () => {
-            if (!card) return
-            await ws.deleteCard(card.id)
-            bump()
-            notify('已删除（可用 ↺ 撤销）')
-            setState(session.start())
-          })()
-        }}
-      />
 
       <Sheet open={editing} title="编辑卡片" full onClose={() => setEditing(false)}>
         {card ? (
