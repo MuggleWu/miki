@@ -194,8 +194,35 @@ export const useApp = create<AppState>((set, get) => ({
     set({ toast: msg })
   },
   setDrawer(open) {
-    // 点汉堡/菜单键进来：清掉拖动痕迹，让 CSS 的滑入动画接管
-    set({ drawerOpen: open, drawerDrag: null, drawerDragging: false })
+    // 点汉堡/菜单键进来：从屏幕外滑到位。
+    //
+    // 这里用**过渡**而不是 CSS keyframe 动画，是有教训的：动画期间拖动要把它关掉
+    // （.dragging 上写 animation: none），而松手时 .dragging 一移除，animation-name 从
+    // none 变回 drawer-in 会被浏览器当成一段**新动画**重新开始——面板先跳回屏幕外再滑进来，
+    // 用户看到的就是"松手时抖动"。改成一进一出都走 transform 过渡后，同一条机制没有
+    // 可被重启的动画，松手只会从当前位置平滑滑到落点。
+    if (!open) {
+      set({ drawerOpen: false, drawerDrag: null, drawerDragging: false })
+      return
+    }
+    if (get().drawerOpen) {
+      // 已经开着（比如手势拖动中又调了一次）：不要重播入场
+      set({ drawerDragging: false })
+      return
+    }
+    const width = get().drawerWidth
+    set({ drawerOpen: true, drawerDrag: -width, drawerDragging: false })
+    // 双 rAF：第一帧让浏览器真正把"停在屏幕外"渲染出来，第二帧再改目标值，
+    // 过渡才有起点。合成一次更新的话过渡不会触发，会直接"啪"地出现。
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (!get().drawerOpen || get().drawerDrag !== -width) return // 手势已经接管
+        set({ drawerDrag: 0 })
+        window.setTimeout(() => {
+          if (get().drawerOpen && get().drawerDrag === 0) set({ drawerDrag: null })
+        }, DRAWER_SETTLE_MS)
+      })
+    })
   },
 
   setDrawerWidth(width) {

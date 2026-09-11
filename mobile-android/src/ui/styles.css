@@ -605,24 +605,15 @@ code {
   border-radius: 0 16px 16px 0;
   background: var(--bg);
   color: var(--fg);
-  /* 点汉堡打开：滑入（关着的 dialog 是 display:none，每次打开都会重播这段动画）。
-     手指拖动时加 .dragging，动画与过渡都关掉，让 transform 完全跟手。 */
-  animation: drawer-in 0.22s cubic-bezier(0.22, 0.61, 0.36, 1);
-  transition: transform 0.2s cubic-bezier(0.22, 0.61, 0.36, 1);
+  /* 入场与吸附共用 transform 过渡（入场由 store 先把偏移停在屏外、下一帧再改目标值）。
+     这里刻意**不用** keyframe 动画：拖动时要临时关掉动画，而松手移除 .dragging 会让
+     animation-name 从 none 变回具名动画、被浏览器当成一段新动画重新开始，面板先跳回屏外
+     再滑进来——用户看到的就是"拖到中间松手会抖动"。只留过渡就没有能被重启的东西。 */
+  transition: transform 0.22s cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
 .drawer.dragging {
-  animation: none;
   transition: none;
-}
-
-@keyframes drawer-in {
-  from {
-    transform: translateX(-100%);
-  }
-  to {
-    transform: translateX(0);
-  }
 }
 
 .drawer::backdrop {
