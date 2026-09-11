@@ -8,7 +8,7 @@
 // 收进来之后，新加一种事件只需要在这里决定「要不要进撤销栈」。
 //
 // 注意 events 只装本会话事件：历史事件在启动时流式重放完即丢（需求 §19 L1，见 minevents.spec）。
-import type { ReviewEvent } from '../shared/types'
+import type { ReviewEvent } from './types'
 
 export class SessionLog {
   /** 本会话事件（undo 查找用）；历史事件重放后不驻留 */

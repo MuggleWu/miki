@@ -5,3 +5,18 @@ dist/
 .DS_Store
 .idea/
 release/
+
+# 移动端子工程：Android 生成物与 SDK 本机路径（android/.gitignore 已覆盖大部分，
+# 这里补它覆盖不到的顶层目录）
+mobile-android/android/local.properties
+mobile-android/android/.gradle/
+mobile-android/android/build/
+mobile-android/android/app/build/
+mobile-android/android/capacitor-cordova-android-plugins/
+
+# 隐私与凭据红线（设计文档「公开仓库红线」）：这些一律不进公开仓库
+.env
+.env.*
+*.local
+.dev-pat
+fixtures/local/

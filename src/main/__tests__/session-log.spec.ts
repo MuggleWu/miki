@@ -1,7 +1,7 @@
 // SessionLog 的不变量：events 与 seq 索引同生同灭、撤销栈只收该收的、每卡最近 suspend 索引。
 // 这些原先靠 workspace.ts 里「两行挨着写」维持，现在有了独立单元可以正面钉住。
 import { describe, expect, it } from 'vitest'
-import { SessionLog } from '../session-log'
+import { SessionLog } from '../../shared/session-log'
 import type { ReviewEvent } from '../../shared/types'
 
 const evOf = (seq: number, over: Partial<ReviewEvent> = {}): ReviewEvent => ({

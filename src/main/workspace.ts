@@ -31,8 +31,8 @@ import { applyEvent } from '../core/replay'
 import { filterCards, sortByKeys, toRow } from '../core/query'
 import type { MikiConfigPatch } from '../shared/ipc'
 import { endOfLocalDay, localDateKey } from '../core/stats'
-import { ScheduleIndex } from './schedule-index'
-import { SessionLog } from './session-log'
+import { ScheduleIndex } from '../shared/schedule-index'
+import { SessionLog } from '../shared/session-log'
 import { StatsLedger } from './stats-ledger'
 import {
   WorkspacePaths,

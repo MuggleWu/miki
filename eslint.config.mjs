@@ -5,7 +5,9 @@ import reactHooks from 'eslint-plugin-react-hooks'
 import globals from 'globals'
 
 export default tseslint.config(
-  { ignores: ['**/node_modules/**', 'out/**', 'release/**', 'dist/**'] },
+  // mobile-android/ 是独立子工程（自己的 package.json 与 lint 脚本），根目录的 lint 不碰它：
+  // 它的 tsconfig/lib 与桌面端不同，混在一起报的问题归属不清
+  { ignores: ['**/node_modules/**', 'out/**', 'release/**', 'dist/**', 'mobile-android/**'] },
   ...tseslint.configs.recommended,
   {
     files: ['src/**/*.{ts,tsx}', 'scripts/**/*.{js,mjs}', 'electron.vite.config.ts'],

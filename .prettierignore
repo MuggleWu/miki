@@ -12,3 +12,8 @@ tools/
 
 # 手写文档：散文换行属作者风格，格式化只有搅动没有收益
 *.md
+
+# 移动端子工程：自己是独立 npm 工程（有 package.json 与自己的 format 脚本），
+# 且 android/ 下是 Capacitor/Gradle 生成的代码（含构建产物）。
+# 根目录的 prettier 一律不碰它，格式化在 mobile-android/ 里跑。
+mobile-android/

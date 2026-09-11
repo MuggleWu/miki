@@ -4,7 +4,7 @@
 import { MinHeap, type HeapEntry } from '../core/min-heap'
 import { displayState } from '../core/query'
 import { endOfLocalDay, localDateKey } from '../core/stats'
-import type { Card } from '../shared/types'
+import type { Card } from './types'
 
 /** 单牌组索引：learning/review/fresh 三堆 + 口径分明的计数器 */
 export interface DeckIndex {
