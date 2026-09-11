@@ -399,3 +399,35 @@ describe('远端删除的可见性', () => {
     expect(second.report.pushed).toBe(0)
   })
 })
+
+describe('快照时机', () => {
+  it('快照拍在合并落地之前：里面是「合并前」的本地内容，不是合并后的', async () => {
+    // 修之前快照在推送段才拍 —— 那时合并结果已经写进工作区，"安全网"拍到的是改完的状态，
+    // 真合并坏了根本退不回去；写入阶段抛错时更是连快照都没有。
+    gh.push('cards/d1.ndjson', row({ id: 'r1', front: '远端的行' }))
+    const store = new MemoryFileStore()
+    const env = { store, paths, reloadAndVerify: verifyFrom(store) }
+    const first = await runSync(env, creds, emptyBase(), 'full')
+    expect(first.report.pulled).toBe(1)
+
+    // 本机加一行（本机改了）、远端也加一行（远端改了）→ union：两者都要保留，且要推
+    const localBefore = row({ id: 'l1', front: '本机的行' })
+    await store.writeText(`${ROOT}/cards/d1.ndjson`, (await store.readText(`${ROOT}/cards/d1.ndjson`))! + localBefore)
+    gh.push('cards/d1.ndjson', row({ id: 'r1', front: '远端的行' }) + row({ id: 'r2', front: '远端新行' }))
+
+    const textBeforeMerge = (await store.readText(`${ROOT}/cards/d1.ndjson`))!
+    const second = await runSync(env, creds, first.base, 'full')
+    expect(second.report.pushed).toBe(1)
+    expect(second.report.snapshot).toBeTruthy()
+
+    const merged = (await store.readText(`${ROOT}/cards/d1.ndjson`))!
+    expect(merged).toContain('远端新行')
+    expect(merged).toContain('本机的行')
+
+    const snap = (await store.readText(`${ROOT}-backups/${second.report.snapshot}/cards/d1.ndjson`))!
+    expect(snap).toBe(textBeforeMerge)
+    expect(snap).not.toContain('远端新行')
+    // 带毫秒：同一秒内的两次同步不能写进同一个目录
+    expect(second.report.snapshot!.length).toBeGreaterThan(20)
+  })
+})

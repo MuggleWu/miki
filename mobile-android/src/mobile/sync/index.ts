@@ -161,6 +161,12 @@ export async function runSync(env: SyncEnv, creds: SyncCreds, base: SyncBase, mo
     }
   }
 
+  // 要推的文件在**落地之前**就得算出来：合并结果一写进本地，工作区里"合并前的那份"就没了。
+  // 快照必须拍在写入之前，否则它记的是合并后的状态，真出问题时退不回去（写入阶段抛错时更是
+  // 连快照都还没拍）。只拉模式不产生 commit，也就没有要保的"推送前状态"，不拍。
+  const toPush = files.filter((f) => f.action === 'keep-local' || f.action === 'union')
+  const snapshot = mode === 'full' && toPush.length > 0 ? await snapshotWorkspace(env) : null
+
   // ---- 落地：把结果写进本地工作区 ----
   // 只拉模式只写"直接取远端"（take-remote）的文件：合并结果（union）不与推送分离——
   // 那种文件的本地版本会与远端分叉，必须由手动推送一并推上去，静默拉取不碰它。
@@ -237,14 +243,10 @@ export async function runSync(env: SyncEnv, creds: SyncCreds, base: SyncBase, mo
   }
 
   // ---- 推送 ----
-  const toPush = files.filter((f) => f.action === 'keep-local' || f.action === 'union')
   const pushedPaths: string[] = []
   let commit: string | null = null
 
   if (toPush.length > 0) {
-    // 推送前快照：合并异常或推送失败时能退回去
-    const snapshot = await snapshotWorkspace(env)
-
     const shaOf = async (p: string): Promise<string> => {
       const text = (await env.store.readText(`${env.paths.root}/${p}`)) ?? ''
       return client.writeBlob(text)
@@ -289,7 +291,7 @@ export async function runSync(env: SyncEnv, creds: SyncCreds, base: SyncBase, mo
         reviews: stats.reviews,
         cards: stats.cards,
         commit,
-        snapshot
+        snapshot: snapshot ?? undefined
       }
     }
   }
@@ -356,13 +358,17 @@ function countEvents(text: string): number {
 }
 
 /**
- * 推送前快照：整份工作区复制到 `<root>-backups/<时间戳>/`，保留最近 5 份。
+ * 合并落地前的快照：整份工作区复制到 `<root>-backups/<时间戳>/`，保留最近 5 份。
  * 放在工作区**外面**——放里面会被下一次同步推上去，把仓库撑爆。
+ *
+ * 时间戳带毫秒：秒级命名下，同一秒内的两次同步会写进同一个目录，后一次会把残留混进来。
+ * 快照是"手动回退用"的：要回退就把 `<root>-backups/<名字>/` 下的文件拷回 `<root>/`
+ * （App 里目前没有一键恢复，所以这份东西的价值全在于它拍在**改动之前**）。
  */
 export async function snapshotWorkspace(env: SyncEnv, keep = 5): Promise<string> {
   const root = env.paths.root
   const backupsDir = `${root}-backups`
-  const name = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+  const name = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 23)
   const files = await listWorkspaceFiles(env.store, env.paths)
   for (const p of files) {
     const text = await env.store.readText(`${root}/${p}`)
