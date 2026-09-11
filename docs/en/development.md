@@ -39,6 +39,10 @@ src/
 │   └── index.ts     #   startup, IPC registration, window
 ├── preload/         # contextBridge: window.miki
 └── renderer/src/    # React UI (home / study / browser / stats / settings)
+mobile-android/      # Android client (Capacitor shell + React UI reusing core/shared)
+├── src/mobile/      #   mobile implementation: FileStore abstraction, load chain, write path, study session, sync
+├── src/ui/          #   mobile UI (decks / study / browser / stats / settings + drawer navigation)
+└── android/         #   Capacitor's Android project (gradle build, signing, install)
 tools/               # FSRS vector generation scripts (Python, official py-fsrs)
 scripts/mcp-server.mjs  # MCP stdio shim (forwards to the HTTP API)
 docs/                # this directory
@@ -187,6 +191,58 @@ Card base files and review-log grow without bound, so line reading goes through 
 Measured (2026-09-10, 8.86MB card file, standalone node process with `--expose-gc`): old implementation 16.56MB, text-only 14.77MB, streaming 14.77MB — the array's extra cost is about 19% of the file size. Vitest cannot measure this reliably (worker processes and GC timing skew heapUsed by up to 2x), so the memory comparison is recorded here rather than asserted.
 
 The only semantic difference: the new implementation trims whitespace from both ends of each line (which also strips CRLF's `\r`). Every caller passes lines to `JSON.parse`, where trailing whitespace was already ignored; `workspace-io.spec.ts` compares the two implementations sample by sample.
+
+## Android app (mobile-android/)
+
+The same `core/` and `shared/` logic wrapped in a Capacitor shell so it runs on Android: the UI is
+React (a separate touch-oriented set of pages, not a responsive rework of the desktop UI), and the
+data layer is the **same pure functions** plus a `FileStore` abstraction — node:fs on the desktop,
+the Capacitor Filesystem bridge on the phone.
+
+```bash
+cd mobile-android
+npm install
+npm run dev          # develop in a browser (FileStore uses the in-memory implementation)
+npm run build        # emit the web bundle into dist/
+npx cap sync android # copy it into the android/ project
+cd android && ./gradlew assembleDebug   # produces android/app/build/outputs/apk/debug/app-debug.apk
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+```
+
+Pre-commit gates (one step more than the desktop, to prove Capacitor can consume the output):
+
+```bash
+npx tsc --noEmit && npx eslint . && npx vitest run && npm run build
+```
+
+Mobile test suites:
+
+| Suite | Content |
+| --- | --- |
+| `src/mobile/workspace.spec.ts` | Mobile data layer: the **write path (memory first → append to disk) and reload (read files → replay) must be exact inverses** — that is the precondition for cross-device sync correctness |
+| `src/mobile/study-session.spec.ts` | Study-session state machine: pick → show answer → rate → next → undo, including the duration reporting rules |
+| `src/mobile/fs/memory-fs.spec.ts` | In-memory FileStore: same semantics as the on-device bridge (read / write / append / list / rename / remove) |
+| `src/mobile/probes.spec.ts` | Regression for the M0 probe logic on the in-memory implementation (the on-device run lives in the app's "self-check" page) |
+| `src/mobile/theme.spec.ts` | Display-preference pure logic (follow system / light / dark) |
+| `src/mobile/sync/merge.spec.ts` | Merge decisions and line union: the only sync logic where a mistake loses data; covers the compacted-file guard and the whole-document (JSON) guard |
+| `src/mobile/sync/sync.spec.ts` | Sync orchestration integration test (fake GitHub implementing the Git Data API): pull → merge → apply → replay check → snapshot → push → read back, including fast-forward conflicts (422) |
+| `src/mobile/sync/github.spec.ts` | GithubClient request details: **every request must explicitly disable the HTTP cache** (GitHub responses carry `max-age=60` and WebView would replay a stale one) |
+| `src/mobile/sync/real-github.spec.ts` | Real-server drill (skipped by default; needs `MIKI_GITHUB_TOKEN`/`MIKI_GITHUB_REPO`): create an **empty branch start point** → push → read back → pull → both-sides-changed JSON is blocked → stale-head updateRef returns 422; the branch must start with `drill-`, and the endpoint guard rejects main/master |
+| `src/mobile/real-workspace.spec.ts` | Real-workspace cross-check (skipped by default; needs `MIKI_REAL_WS`): run the mobile loader against a real workspace through a read-only FileStore and compare deck counts with the desktop `WorkspaceService`, deck by deck |
+
+Two traps that only a real device exposes — read this before touching sync code (both are pinned by regression tests):
+
+- **The second load on the same day must force-rebuild the scheduling index**: `ensureDay()` means
+  "day-rollover detection" and returns early when called again on the same day, while a reload
+  replaces the card objects and buckets wholesale — so calling only `ensureDay()` leaves stale index
+  counters behind (symptom: after a sync pull or a return to the foreground, the deck list shows 0
+  for "new" and "total" while "due" is still correct, because due counts come from a live bucket scan).
+  The desktop's `reloadFromDisk()` ends with `forceRebuild`; the mobile `loadAll()` must match it.
+- **The network layer must not accept HTTP caching**: GitHub's REST responses carry
+  `cache-control: private, max-age=60`, so the branch head read before a push gets replayed from
+  WebView's private cache after the push, making a successful push report a read-back mismatch —
+  and worse, merge decisions also depend on reading the current remote. Node's undici has no HTTP
+  cache, which is why only a real device catches this.
 
 ## Upgrading FSRS
 

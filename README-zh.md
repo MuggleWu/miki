@@ -85,6 +85,21 @@ npm start            # 运行构建产物
 
 打包版的工作区解析：`MIKI_WORKSPACE` 环境变量 → `~/Library/Application Support/Miki/workspace.json` 的 `current`（同时保存多工作区注册表，旧 `{workspacePath}` 格式自动升级）→ 首次启动引导（建议默认 `~/miki-base`）。打包流程、LaunchServices 注册等工作区配置细节见 [docs/zh/development.md](docs/zh/development.md)「打包」一节。
 
+## Android 移动端
+
+仓库里还有一个 Android 客户端（`mobile-android/`）：复用同一份调度与数据层逻辑，套 Capacitor 壳跑在手机上，界面是面向触屏的另一套页面（牌组 / 学习 / 卡片库 / 统计 / 设置，另有设备自检页）。
+
+```bash
+cd mobile-android && npm install
+npm run build && npx cap sync android
+cd android && ./gradlew assembleDebug   # → android/app/build/outputs/apk/debug/app-debug.apk
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+```
+
+桌面端与手机之间通过**一个私有 git 仓库**同步：手机端做「拉取 → 行合并 → 推送」，两端各自追加的事件按行并集合并；如果两侧都改了同一份 JSON（`decks.json` / `config.json`），同步会停下来要求先去桌面端定夺，绝不猜。在手机的「设置 → 配置同步」里填仓库与细粒度 PAT（需要该仓库的 Contents 读写权限），点「立即同步」即把工作区拉到手机上。
+
+移动端 v1 的边界：只追加、不压实（压实留在桌面端）；工作区由同步建立，也可以先在手机上自建牌组试用。构建、门禁与测试细节见 [docs/zh/development.md](docs/zh/development.md) 的「Android 移动端」一节。
+
 ## HTTP API 与 MCP
 
 Miki 内置本机 HTTP API，供人和 AI 程序化管理牌组与卡片（增删改查，含批量）。只监听 `127.0.0.1:8727`，必须携带 token，拒绝浏览器发起的跨站请求。详见 [docs/zh/api.md](docs/zh/api.md)。

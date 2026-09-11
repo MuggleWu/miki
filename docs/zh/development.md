@@ -39,6 +39,10 @@ src/
 │   └── index.ts     #   启动、IPC 注册、窗口
 ├── preload/         # contextBridge：window.miki
 └── renderer/src/    # React 界面（home / study / browser / stats / settings）
+mobile-android/      # Android 客户端（Capacitor 壳 + 复用 core/shared 的 React 界面）
+├── src/mobile/      #   移动端实现：FileStore 抽象、加载链、写路径、调度会话、同步
+├── src/ui/          #   移动端界面（牌组 / 学习 / 卡片库 / 统计 / 设置 + 抽屉导航）
+└── android/         #   Capacitor 的 Android 工程（gradle 构建、签名、安装）
 tools/               # FSRS 基准向量生成脚本（Python，py-fsrs 官方实现）
 scripts/mcp-server.mjs  # MCP stdio 薄壳（转发 HTTP API）
 docs/                # 本目录
@@ -190,6 +194,54 @@ MIKI_BENCH=1 NODE_OPTIONS=--expose-gc npx vitest run src/main/__tests__/minevent
 
 语义差异只有一处：新实现把行两端空白 trim 掉（顺带挡掉 CRLF 的 `\r`）。全部调用方都是
 `JSON.parse`，尾随空白本来就被忽略；`workspace-io.spec.ts` 里有与旧实现逐样本对拍。
+
+## Android 移动端（mobile-android/）
+
+同一份 `core/` 与 `shared/` 逻辑，套一层 Capacitor 壳跑在 Android 上：界面是 React（另一套
+面向触屏的页面，不是桌面 UI 的响应式改造），数据层是**同一批纯函数**加一个 `FileStore`
+抽象——桌面上是 node:fs，手机上走 Capacitor Filesystem 桥。
+
+```bash
+cd mobile-android
+npm install
+npm run dev          # 浏览器里开发（FileStore 用内存实现）
+npm run build        # 产出 web 产物到 dist/
+npx cap sync android # 同步到 android/ 工程
+cd android && ./gradlew assembleDebug   # 产出 android/app/build/outputs/apk/debug/app-debug.apk
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+```
+
+提交前门禁（比桌面端多一步构建，因为要保证 Capacitor 能吃掉产物）：
+
+```bash
+npx tsc --noEmit && npx eslint . && npx vitest run && npm run build
+```
+
+移动端测试套件：
+
+| 套件 | 内容 |
+| --- | --- |
+| `src/mobile/workspace.spec.ts` | 移动版数据层：**写路径（内存先行 → 追加落盘）与 reload（读文件 → 重放）必须互为逆运算**——这是跨机同步的正确性前提 |
+| `src/mobile/study-session.spec.ts` | 学习会话状态机：出卡 → 显示答案 → 评级 → 下一张 → 撤销，含耗时报数口径 |
+| `src/mobile/fs/memory-fs.spec.ts` | 内存 FileStore：与真机桥同语义的读写/追加/列目录/改名/删除 |
+| `src/mobile/probes.spec.ts` | M0 探针逻辑在内存实现上的回归（真机跑法见设备「自检」页） |
+| `src/mobile/theme.spec.ts` | 显示偏好纯逻辑（跟随系统 / 浅色 / 深色） |
+| `src/mobile/sync/merge.spec.ts` | 合并判定与行并集：这是同步里唯一「错了会丢数据」的逻辑，含压实痕迹拦截与 JSON 整体文档拦截 |
+| `src/mobile/sync/sync.spec.ts` | 同步编排集成测试（假 GitHub 实现 Git Data API）：拉取 → 合并 → 落地 → 重放校验 → 快照 → 推送 → 读回，含 fast-forward 冲突（422） |
+| `src/mobile/sync/github.spec.ts` | GithubClient 请求细节：**所有请求必须显式禁掉 HTTP 缓存**（GitHub 响应带 `max-age=60`，WebView 会复用旧响应） |
+| `src/mobile/sync/real-github.spec.ts` | 真服务器演练（默认跳过，需 `MIKI_GITHUB_TOKEN`/`MIKI_GITHUB_REPO`）：建**空分支起点**→ 推送 → 读回 → 拉取 → 双改 JSON 拦截 → 过期 head 422；分支名必须 `drill-` 开头，端点护栏拒 main/master |
+| `src/mobile/real-workspace.spec.ts` | 真实工作区对账（默认跳过，需 `MIKI_REAL_WS`）：用只读 FileStore 指向真实工作区跑移动端加载器，与桌面端 `WorkspaceService` 的牌组计数逐项比对 |
+
+两个真机才暴露得出来的坑，改同步相关代码前先看一眼（都已有回归测试钉住）：
+
+- **同一天里的第二次加载必须强制重建调度索引**：`ensureDay()` 的语义是「跨天检测」，同日
+  再调用会直接早退；而重载会把卡对象与卡桶整体换新，只调它就会留下过期的索引计数器
+  （表现：同步拉取 / 回前台后，牌组列表的「新 / 总数」显示 0，而「待复习」因为走现场扫桶仍然正确）。
+  桌面端 `reloadFromDisk()` 末尾有 `forceRebuild`，移动端 `loadAll()` 必须对齐。
+- **网络层不能吃 HTTP 缓存**：GitHub 的 REST 响应带 `cache-control: private, max-age=60`，
+  同一次同步里「推送前读的分支头」会被 WebView 的私有缓存复用，导致推送成功却报读回不一致；
+  更危险的是合并判定也依赖「当前远端」的读取。Node 侧（undici）没有 HTTP 缓存，所以这个问题
+  只有真机能测出来。
 
 ## FSRS 升级路径
 `core/fsrs.ts` 是 py-fsrs scheduler 的逐行移植（含 Python banker's rounding 与 timedelta floor 语义的复刻）。py-fsrs 发布新版本后：diff 官方 `scheduler.py`，同步改动，再用基准向量脚本对固定输入重新生成期望输出——向量不一致即移植有误或语义变化。

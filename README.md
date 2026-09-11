@@ -85,6 +85,21 @@ Runs on macOS, Windows and Linux (standard Electron window, no platform-specific
 
 Workspace resolution for the packaged app: `MIKI_WORKSPACE` env → `current` in `~/Library/Application Support/Miki/workspace.json` (which also holds the multi-workspace registry; the legacy `{workspacePath}` format is upgraded automatically) → first-launch onboarding (suggested default `~/miki-base`). For the packaging workflow and LaunchServices registration details, see the "Packaging" section in [docs/en/development.md](docs/en/development.md).
 
+## Android app
+
+The repo also ships an Android client (`mobile-android/`): the same scheduling and data-layer logic wrapped in a Capacitor shell, with a separate touch-oriented set of pages (decks / study / browser / stats / settings, plus a device self-check page).
+
+```bash
+cd mobile-android && npm install
+npm run build && npx cap sync android
+cd android && ./gradlew assembleDebug   # → android/app/build/outputs/apk/debug/app-debug.apk
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+```
+
+The desktop and the phone sync through **a private git repository**: the phone pulls, unions lines, and pushes; events appended on either side are merged by line union. If both sides changed the same JSON document (`decks.json` / `config.json`), sync stops and asks you to settle it on the desktop rather than guessing. On the phone, open Settings → sync configuration, enter the repository plus a fine-grained PAT (Contents read/write on that repository), and tap sync to pull the workspace down.
+
+What v1 is not: the phone only appends and never compacts (compaction stays on the desktop), and the workspace is established by syncing — or start by creating a deck on the phone. Build, gates, and test details: see the "Android app" section in [docs/en/development.md](docs/en/development.md).
+
 ## HTTP API & MCP
 
 Miki ships a local HTTP API for humans and AI agents to manage decks and cards programmatically (CRUD, including batch operations). It listens on `127.0.0.1:8727` only, requires a bearer token, and rejects browser-originated cross-site requests. See [docs/en/api.md](docs/en/api.md).
