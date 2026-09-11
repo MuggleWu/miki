@@ -1,17 +1,20 @@
-// 工作区文件原语：受管文件路径 + NDJSON 行读 + 卡片行序列化。
+// 工作区文件原语：受管文件路径 + NDJSON 行读。
 // 从 WorkspaceService 拆出的纯函数层（不含状态），路径规则集中一处避免散落拼接。
+// 卡片行序列化（contentRow/snapshotRow）与加载损坏记账（LoadIssues/noteDamaged）已搬到
+// src/shared/workspace-io.ts——移动端子工程（WebView，无 node）要复用同一份序列化实现，
+// 两端字节必须一致，不能有第二份。这里按名再导出，既有调用方（workspace.ts）零改动。
 import * as fs from 'node:fs'
 import * as path from 'node:path'
-import type { Card, CardContent, CardSnapshot } from '../shared/types'
+import type { LoadIssues } from '../shared/workspace-io'
 
-/** 压实后的卡片行 = 内容 + 调度检查点快照；旧格式行无 fsrs/reps/lapses 字段（视为零值 + 全量重放）。
- * __mikiSeq：该行调度快照已反映到的事件水位；缺省时回落到基文件 meta 的 __mikiCheckpoint */
-export interface CardCheckpointRow extends CardContent {
-  fsrs?: CardSnapshot | null
-  reps?: number
-  lapses?: number
-  __mikiSeq?: number
-}
+export {
+  contentRow,
+  snapshotRow,
+  noteDamaged,
+  newLoadIssues,
+  type CardCheckpointRow,
+  type LoadIssues
+} from '../shared/workspace-io'
 
 /** 工作区受管文件的路径规则（decks/config/stats + cards/review-log 下各文件） */
 export class WorkspacePaths {
@@ -45,24 +48,6 @@ export class WorkspacePaths {
   }
 }
 
-/** 一次加载里发现的文件级问题（损坏检测用）：非空行无法 JSON.parse / 文件末尾没有换行 */
-export interface LoadIssues {
-  /** file → 无法解析的非空行数 */
-  damaged: Map<string, number>
-  /** file → 末尾缺换行（很可能是追加写被中断，那一行可能已被丢掉） */
-  truncated: Set<string>
-}
-
-export function newLoadIssues(): LoadIssues {
-  return { damaged: new Map(), truncated: new Set() }
-}
-
-/** 记一条无法解析的非空行 */
-export function noteDamaged(issues: LoadIssues | undefined, file: string): void {
-  if (!issues) return
-  issues.damaged.set(file, (issues.damaged.get(file) ?? 0) + 1)
-}
-
 /**
  * 惰性切出 NDJSON 的非空行：每次只产出一个行的子串，不构造「全部行」数组。
  *
@@ -94,16 +79,4 @@ export function* iterateNdjson(file: string, issues?: LoadIssues): Generator<str
 /** 读 NDJSON 非空行（文件缺失返回空数组）。逐行消费请用 iterateNdjson，别先展开成数组 */
 export function readNdjson(file: string): string[] {
   return [...iterateNdjson(file)]
-}
-
-/** 卡片内容行：只序列化内容字段（调度快照走 snapshotRow） */
-export function contentRow(c: Card): string {
-  const { deckId: _d, fsrs: _f, reps: _r, lapses: _l, tie: _t, seqApplied: _s, ...content } = c
-  return JSON.stringify(content)
-}
-
-/** 压实快照行：内容 + 调度状态（不含 deckId/tie/水位） */
-export function snapshotRow(c: Card): string {
-  const { deckId: _d, tie: _t, seqApplied: _s, ...row } = c
-  return JSON.stringify(row)
 }
