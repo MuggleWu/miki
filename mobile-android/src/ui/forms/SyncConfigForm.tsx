@@ -8,7 +8,7 @@ import { useApp } from '../store'
 export function SyncConfigForm({ onDone }: { onDone(): void }): JSX.Element {
   const sync = useApp((s) => s.sync)
   const saveSyncConfig = useApp((s) => s.saveSyncConfig)
-  const [repo, setRepo] = useState(sync.status?.repo ?? 'MuggleWu/miki-base')
+  const [repo, setRepo] = useState(sync.status?.repo ?? '')
   const [branch, setBranch] = useState(sync.status?.branch ?? 'main')
   const [token, setToken] = useState('')
   const [advanced, setAdvanced] = useState(false)
@@ -68,7 +68,7 @@ export function SyncConfigForm({ onDone }: { onDone(): void }): JSX.Element {
           <li>GitHub 网页 → 头像 → Settings → Developer settings</li>
           <li>Fine-grained tokens → Generate new token</li>
           <li>
-            Repository access 只勾 <code>MuggleWu/miki-base</code>；Permissions 只给
+            Repository access 只勾<b>你那个私有数据仓</b>（只勾这一个）；Permissions 只给
             <b> Contents: Read and write</b>；有效期设长一点
           </li>
         </ol>

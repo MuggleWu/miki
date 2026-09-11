@@ -12,6 +12,8 @@ export default defineConfig({
       '@core': dir('../src/core'),
       '@shared': dir('../src/shared'),
       '@mobile': dir('src/mobile'),
+      // 桌面端源码：真实工作区对账测试要直接调桌面端的 WorkspaceService
+      '@desktop': dir('../src'),
       '@ui': dir('src/ui')
     }
   },

@@ -11,7 +11,8 @@ export interface SyncCreds {
 }
 
 /** 默认仓库：预填给用户，避免手打出错 */
-export const DEFAULT_REPO = 'MuggleWu/miki-base'
+// 默认留空：仓库名由用户首次配置时填（不在公开代码里写死私有仓的名字）
+export const DEFAULT_REPO = ''
 export const DEFAULT_BRANCH = 'main'
 
 /** 上次同步的记账：判断"哪一侧变了"靠它，没有它就只能退回前缀判定 */
