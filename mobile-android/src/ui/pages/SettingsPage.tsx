@@ -12,6 +12,7 @@ import { useApp } from '../store'
 import { useWorkspace } from '../use-workspace'
 import { PREF_KEYS, prefRemove } from '@mobile/prefs'
 import { Sheet } from '../components/Sheet'
+import { Confirm } from '../components/Confirm'
 import { SyncConfigForm } from '../forms/SyncConfigForm'
 import type { FontScale, ThemePref } from '@mobile/theme'
 
@@ -21,9 +22,11 @@ export function SettingsPage(): JSX.Element {
   const go = useApp((s) => s.go)
   const prefs = useApp((s) => s.prefs)
   const setPref = useApp((s) => s.setPref)
+  const loadPrefs = useApp((s) => s.loadPrefs)
   const [reset, setReset] = useState<string | null>(null)
   const [configSync, setConfigSync] = useState(false)
   const [showDetail, setShowDetail] = useState(false)
+  const [confirmClear, setConfirmClear] = useState(false)
   const sync = useApp((s) => s.sync)
   const loadSyncInfo = useApp((s) => s.loadSyncInfo)
   const syncNow = useApp((s) => s.syncNow)
@@ -32,6 +35,27 @@ export function SettingsPage(): JSX.Element {
   useEffect(() => {
     void loadSyncInfo()
   }, [loadSyncInfo])
+
+  /**
+   * 「清空本机偏好」：本机显示偏好三项 + 上次用过的牌组。
+   *
+   * 刻意**不含**同步配置与同步记账（github* / syncBase / syncVerify）：它们不是"偏好"，
+   * 顺手清掉等于把同步断了，而按钮看着只是"重置显示"——凭据要用下面那个带确认的按钮清。
+   */
+  async function clearLocalPrefs(): Promise<void> {
+    await Promise.all([
+      prefRemove(PREF_KEYS.theme),
+      prefRemove(PREF_KEYS.fontScale),
+      prefRemove(PREF_KEYS.keepAwake),
+      prefRemove(PREF_KEYS.lastDeckId)
+    ])
+    // 立刻生效：store 把缺失的键回落到默认值（主题/字号再由 App 的 effect 写到 <html> 上）。
+    // 不调这一步就得重启应用才看得出"清空了"，用户会以为按钮没生效。
+    await loadPrefs()
+    setReset(
+      '已清空本机偏好：主题跟随系统、字号中、学习时常亮开，新增卡片不再预选上次那个牌组。工作区数据与同步配置都没动。'
+    )
+  }
 
   const dmg = ws.damageReport()
 
@@ -132,20 +156,14 @@ export function SettingsPage(): JSX.Element {
           )}
           <p className="muted">拉取是自动的（回到前台静默拉一次，只读、不产生提交）；推送只在你点"立即同步"时发生。</p>
           {sync.status?.configured ? (
-            <button
-              className="btn danger"
-              onClick={() => {
-                void clearSyncCreds()
-              }}
-            >
+            <button className="btn danger" onClick={() => setConfirmClear(true)}>
               清空凭据
             </button>
           ) : null}
           <button
             className="btn"
             onClick={() => {
-              void prefRemove(PREF_KEYS.lastDeckId)
-              setReset('已清空本机偏好（工作区数据不受影响）')
+              void clearLocalPrefs()
             }}
           >
             清空本机偏好
@@ -197,6 +215,20 @@ export function SettingsPage(): JSX.Element {
       <Sheet open={configSync} title="同步配置" onClose={() => setConfigSync(false)}>
         {configSync ? <SyncConfigForm onDone={() => setConfigSync(false)} /> : null}
       </Sheet>
+
+      {/* 清凭据是全 App 唯一"删了不可逆、也没法撤销"的设置动作（PAT 删掉只能回 GitHub 重生成），
+          所以和删卡片一样先弹一道确认 */}
+      <Confirm
+        open={confirmClear}
+        title="清空 GitHub 凭据？"
+        detail="PAT 会被删掉，删了就找不回来，必须重新去 GitHub 生成一个再填进来。仓库名与分支会保留，不用重填；清空后自动同步会停到重新填好为止（本机学习数据不受影响）。"
+        confirmText="清空凭据"
+        onCancel={() => setConfirmClear(false)}
+        onConfirm={() => {
+          setConfirmClear(false)
+          void clearSyncCreds()
+        }}
+      />
 
       <Sheet open={showDetail} title="本次同步明细" onClose={() => setShowDetail(false)}>
         {sync.report ? (

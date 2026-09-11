@@ -19,7 +19,11 @@ export function SyncConfigForm({ onDone }: { onDone(): void }): JSX.Element {
   const [busy, setBusy] = useState(false)
 
   const parsed = parseRepoInput(repo)
-  const canSave = parsed.repo !== null && token.trim().length > 0
+  // 已经存过 PAT 时允许留空保存：留空的语义就是"不改 token"（见下面 save 与 creds.ts），
+  // 输入框的 placeholder 也是这么写的。少这一支，「只改仓库名」这条最常见的路径会被按钮封死，
+  // 用户只能重新贴一遍 PAT——而提示语明写着留空就行。首次配置仍然必须填。
+  const configured = sync.status?.configured ?? false
+  const canSave = parsed.repo !== null && (token.trim().length > 0 || configured)
   // 认出来了、但填的不是最终形态（比如粘的是整串 URL）→ 明确告诉他会存成什么
   const willStore = parsed.repo && parsed.repo !== repo.trim() ? parsed.repo : null
 

@@ -7,7 +7,7 @@ import { useApp } from '../store'
 import { CapacitorFileStore } from '@mobile/fs'
 import { MobilePaths } from '@mobile/paths'
 import { probeNdjsonPerf, probePrivateStorage, type ProbeResult } from '@mobile/probes'
-import { runDeviceSelfCheck } from '@mobile/selfcheck'
+import { runDeviceSelfCheck, SELFCHECK_DIR_SUFFIX } from '@mobile/selfcheck'
 import { WORKSPACE_DIR } from '@mobile/constants'
 
 export function SelfCheckPage(): JSX.Element {
@@ -52,8 +52,9 @@ export function SelfCheckPage(): JSX.Element {
       <div className="page-body">
         <section className="card">
           <p className="muted">
-            探针只读写合成假数据，且都在 <code>{WORKSPACE_DIR}__selfcheck/</code> 这类独立目录里，
-            不碰任何真实学习数据，也不需要任何权限；跑完即删。工作区实际路径：
+            探针只读写合成假数据，而且全部跑在 <code>{`${WORKSPACE_DIR}${SELFCHECK_DIR_SUFFIX}/`}</code>{' '}
+            这个旁路目录里：它挨着工作区，但和真实数据是两个独立目录，不碰任何真实学习数据，
+            也不需要任何权限；跑完即删，中途失败也会清掉。工作区实际路径：
           </p>
           <p className="mono">{new MobilePaths(WORKSPACE_DIR).root}</p>
           {results.length > 0 ? (
