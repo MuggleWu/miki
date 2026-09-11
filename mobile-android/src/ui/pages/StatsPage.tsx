@@ -8,7 +8,7 @@ import { useApp } from '../store'
 import { useWorkspace } from '../use-workspace'
 import { Chart, useChartPalette, type ChartPalette } from '../components/Chart'
 import type { StatsPayload } from '@shared/types'
-import type { EChartsOption } from 'echarts'
+import type { BarSeriesOption, EChartsOption } from 'echarts'
 
 type Range = 'year' | 'all'
 
@@ -205,6 +205,20 @@ function heatmapOption(stats: StatsPayload, p: ChartPalette): EChartsOption {
   }
 }
 
+/**
+ * 复习图的两条系列：`评重来` 是 `总答题` 的子集（core/stats 分别累加），两根柱子必须并列。
+ * 为什么不能堆叠：堆叠后柱顶画的是两者之和，重来越多柱子越虚高，读出来的数字直接是错的。
+ * 桌面端同图（src/renderer/src/stats/Stats.tsx 的 reviewsOption）也是并列、不带 stack，本页文件头
+ * 写着「口径与桌面端逐项对齐」，所以这里既不能 stack、也不能把两个数据源接反。
+ * 单独抽出来是为了能在 node 里断言数值（本仓库没有图表挂载测试，组件渲染断言写不出来）。
+ */
+export function reviewsSeries(stats: StatsPayload, p: ChartPalette): BarSeriesOption[] {
+  return [
+    { name: '总答题', type: 'bar', data: stats.reviews.map((r) => r.total), itemStyle: { color: p.accent } },
+    { name: '评重来', type: 'bar', data: stats.reviews.map((r) => r.again), itemStyle: { color: p.danger } }
+  ]
+}
+
 function reviewsOption(stats: StatsPayload, p: ChartPalette): EChartsOption {
   return {
     ...base(p),
@@ -212,22 +226,7 @@ function reviewsOption(stats: StatsPayload, p: ChartPalette): EChartsOption {
     legend: { textStyle: { color: p.dim, fontSize: 11 }, top: 0, right: 0, itemWidth: 12, itemHeight: 8 },
     xAxis: { type: 'category', data: stats.reviews.map((r) => r.label.slice(5)), ...axis(p) },
     yAxis: { type: 'value', ...axis(p) },
-    series: [
-      {
-        name: '总答题',
-        type: 'bar',
-        stack: 'r',
-        data: stats.reviews.map((r) => r.total),
-        itemStyle: { color: p.accent }
-      },
-      {
-        name: '评重来',
-        type: 'bar',
-        stack: 'r',
-        data: stats.reviews.map((r) => r.again),
-        itemStyle: { color: p.danger }
-      }
-    ],
+    series: reviewsSeries(stats, p),
     tooltip: { trigger: 'axis', ...tooltip(p) }
   }
 }
