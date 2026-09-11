@@ -60,11 +60,13 @@ export function DecksPage(): JSX.Element {
               <li key={d.id}>
                 <button className="deck-row" onClick={() => go({ kind: 'study', deckId: d.id })}>
                   <span className="deck-name">{d.name}</span>
-                  {/* 三个数与桌面端同序（总数 / 未学习 / 到期）、同色，为 0 时同样不显示 */}
+                  {/* 三个数与桌面端同序（总数 / 未学习 / 到期）、同色。与桌面端不同的一点：
+                      为 0 时照常显示 0，颜色也不淡化——手机上固定占位比留白好认，扫一眼就知道
+                      这一列是 0 而不是没有。 */}
                   <span className="deck-counts">
-                    {d.counts.total > 0 ? <span className="count count-total">{d.counts.total}</span> : null}
-                    {d.counts.new > 0 ? <span className="count count-new">{d.counts.new}</span> : null}
-                    {d.counts.due > 0 ? <span className="count count-due">{d.counts.due}</span> : null}
+                    <span className="count count-total">{d.counts.total}</span>
+                    <span className="count count-new">{d.counts.new}</span>
+                    <span className="count count-due">{d.counts.due}</span>
                   </span>
                 </button>
               </li>
