@@ -5,6 +5,7 @@ import {
   dragAxis,
   dragOffsetFromClosed,
   dragOffsetFromOpen,
+  dragVelocity,
   drawerProgress,
   inEdgeZone,
   shouldSnapOpen,
@@ -46,11 +47,64 @@ describe('跟手偏移', () => {
 })
 
 describe('松手落点', () => {
-  it('过半就开，没过半就收——两侧各自贴着边界', () => {
+  it('位置判定：过半就开，没过半就收——两侧各自贴着边界', () => {
     expect(shouldSnapOpen(-W + 1, W)).toBe(false) // 刚露出一点点，收回
     expect(shouldSnapOpen(-W / 2 - 1, W)).toBe(false) // 差一点，收回
     expect(shouldSnapOpen(-W / 2 + 1, W)).toBe(true) // 刚刚过半，打开
     expect(shouldSnapOpen(0, W)).toBe(true)
+  })
+
+  it('轻轻一甩就算数：位移远不到半宽，但甩得够快，按方向展开', () => {
+    // 收起状态下往右轻扫 60px 松手（位置仍接近收起）
+    expect(shouldSnapOpen(-W + 60, W, 0.8, 60)).toBe(true)
+  })
+
+  it('反方向同理：全开时往左轻轻一甩就关', () => {
+    // 偏移 -60（离收起还远），但速度向左
+    expect(shouldSnapOpen(-60, W, -0.8, 60)).toBe(false)
+  })
+
+  it('速度不够就还是按位置判定（慢拖到一半松手不会因为速度小就反着来）', () => {
+    expect(shouldSnapOpen(-W + 60, W, 0.1, 60)).toBe(false) // 慢拖 60px，仍在收起的半边
+    expect(shouldSnapOpen(-60, W, -0.1, 60)).toBe(true) // 慢拖 60px，仍在打开的半边
+    expect(shouldSnapOpen(-W + 200, W, 0.2, 200)).toBe(true) // 慢拖但过了半宽
+  })
+
+  it('位移太小不翻状态：挡掉"手指抖一下但瞬时速度很大"', () => {
+    expect(shouldSnapOpen(-W + 8, W, 2.0, 8)).toBe(false)
+    expect(shouldSnapOpen(-8, W, -2.0, 8)).toBe(true)
+  })
+})
+
+describe('速度取样', () => {
+  it('只看最近 100ms：更早的大位移不算"甩"', () => {
+    // t=0 起手，t=300 已经到 200px（早就慢下来了），t=400 在 260px
+    const s = dragVelocity([
+      { x: 0, t: 0 },
+      { x: 200, t: 300 },
+      { x: 260, t: 400 }
+    ])
+    expect(s).toBeCloseTo(0.6, 5) // 60px / 100ms
+  })
+
+  it('采样不足或时间没走，速度为 0（宁可按位置判定）', () => {
+    expect(dragVelocity([])).toBe(0)
+    expect(dragVelocity([{ x: 10, t: 0 }])).toBe(0)
+    expect(
+      dragVelocity([
+        { x: 0, t: 5 },
+        { x: 20, t: 5 }
+      ])
+    ).toBe(0)
+  })
+
+  it('往左甩是负速度', () => {
+    expect(
+      dragVelocity([
+        { x: 300, t: 0 },
+        { x: 240, t: 100 }
+      ])
+    ).toBeCloseTo(-0.6, 5)
   })
 })
 

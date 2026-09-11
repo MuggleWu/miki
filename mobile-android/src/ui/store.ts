@@ -83,6 +83,8 @@ interface AppState {
   drawerDrag: number | null
   /** 手指是否还按着。按着时不能有过渡，否则跟手会滞后一帧 */
   drawerDragging: boolean
+  /** 入场动画的代号：任何一次拖动/吸附都会 ++，用于作废尚未落地的入场回调 */
+  enterSeq: number
   /** 写操作计数器：页面把它放进 useMemo 依赖，驱动派生数据重算 */
   version: number
   sync: SyncUiState
@@ -98,8 +100,8 @@ interface AppState {
   setDrawer(open: boolean): void
   setDrawerDrag(offset: number, dragging?: boolean): void
   setDrawerWidth(width: number): void
-  /** 松手：按落点吸附——过半算打开，否则收回，两个方向都带动画 */
-  settleDrawer(): void
+  /** 松手：甩得够快按方向定，否则按落点（过半）定——两个方向都带动画 */
+  settleDrawer(release?: { velocity: number; travelled: number }): void
   /** 点遮罩 / 返回键 / 选中条目：动画收起 */
   closeDrawer(): void
   bump(): void
@@ -124,6 +126,7 @@ export const useApp = create<AppState>((set, get) => ({
   drawerWidth: 320,
   drawerDrag: null,
   drawerDragging: false,
+  enterSeq: 0,
   version: 0,
   sync: { status: null, verify: null, report: null, lastSyncAt: null, busy: false, lastError: null },
 
@@ -211,15 +214,24 @@ export const useApp = create<AppState>((set, get) => ({
       return
     }
     const width = get().drawerWidth
-    set({ drawerOpen: true, drawerDrag: -width, drawerDragging: false })
+    const seq = get().enterSeq + 1
+    set({ drawerOpen: true, drawerDrag: -width, drawerDragging: false, enterSeq: seq })
     // 双 rAF：第一帧让浏览器真正把"停在屏幕外"渲染出来，第二帧再改目标值，
     // 过渡才有起点。合成一次更新的话过渡不会触发，会直接"啪"地出现。
+    //
+    // 为什么用代号而不是"偏移是否还等于 -width"来判断"期间有没有被接管"：关闭吸附的
+    // 目标值**也是** -width，两者会撞上——真实发生过的竞态是"轻轻一甩本该关闭，抽屉却
+    // 反而弹开"：settle 把偏移设成 -width 之后，这两帧 rAF 才跑到，看到的哨兵正好成立，
+    // 于是把偏移改成 0（= 全开），而 settle 的收尾又因为偏移已被改掉而放弃关闭。
+    // 任何一次拖动或吸附都会递增 enterSeq，过期的回调自己就不干活了。
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-        if (!get().drawerOpen || get().drawerDrag !== -width) return // 手势已经接管
+        const st = get()
+        if (st.enterSeq !== seq || !st.drawerOpen || st.drawerDrag !== -width) return
         set({ drawerDrag: 0 })
-        window.setTimeout(() => {
-          if (get().drawerOpen && get().drawerDrag === 0) set({ drawerDrag: null })
+        setTimeout(() => {
+          const after = get()
+          if (after.enterSeq === seq && after.drawerOpen && after.drawerDrag === 0) set({ drawerDrag: null })
         }, DRAWER_SETTLE_MS)
       })
     })
@@ -230,16 +242,18 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   setDrawerDrag(offset, dragging = true) {
-    set({ drawerDrag: offset, drawerDragging: dragging })
+    // 拖动/吸附一律作废尚未落地的入场动画（见 setDrawer 里那段注释）
+    set({ drawerDrag: offset, drawerDragging: dragging, enterSeq: get().enterSeq + 1 })
   },
 
-  settleDrawer() {
+  settleDrawer(release) {
     const { drawerDrag, drawerWidth, setDrawerDrag } = get()
     if (drawerDrag === null) return
-    const open = shouldSnapOpen(drawerDrag, drawerWidth)
+    // 先看甩动速度（轻轻一甩就按方向定），没有速度才退回"过半"的位置判定
+    const open = shouldSnapOpen(drawerDrag, drawerWidth, release?.velocity ?? 0, release?.travelled ?? 0)
     const target = open ? 0 : -drawerWidth
     setDrawerDrag(target, false) // 松手后开过渡，滑到落点
-    window.setTimeout(() => {
+    setTimeout(() => {
       // 动画期间用户又动了（偏移已不是那个落点）就不要覆盖他的状态
       if (get().drawerDrag !== target) return
       set({ drawerDrag: null, drawerDragging: false, drawerOpen: open })
@@ -250,7 +264,7 @@ export const useApp = create<AppState>((set, get) => ({
     const { drawerOpen, drawerWidth, setDrawerDrag } = get()
     if (!drawerOpen) return
     setDrawerDrag(-drawerWidth, false)
-    window.setTimeout(() => {
+    setTimeout(() => {
       if (get().drawerDrag !== -drawerWidth) return
       set({ drawerOpen: false, drawerDrag: null, drawerDragging: false })
     }, DRAWER_SETTLE_MS)
