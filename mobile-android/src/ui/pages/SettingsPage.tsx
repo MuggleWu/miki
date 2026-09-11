@@ -83,32 +83,6 @@ export function SettingsPage(): JSX.Element {
         </section>
 
         <section className="card">
-          <h2>数据健康</h2>
-          {dmg.damagedLines === 0 && dmg.truncatedFiles.length === 0 ? (
-            <p className="ok-line">加载正常：没有坏行，也没有读到截断的文件。</p>
-          ) : (
-            <>
-              <p className="bad-line">
-                坏行 {dmg.damagedLines} 条
-                {dmg.truncatedFiles.length > 0 ? `，截断文件 ${dmg.truncatedFiles.length} 个` : ''}
-              </p>
-              <p className="muted">
-                坏行会被跳过而不是让整个工作区打不开（这行数据丢了，但它后面的都能读）。
-                出现大量坏行通常意味着同步过程中断了，先在桌面端确认数据完整。
-              </p>
-              <ul className="detail">
-                {dmg.files.map((f) => (
-                  <li key={f}>{f}</li>
-                ))}
-              </ul>
-            </>
-          )}
-          <button className="btn" onClick={() => go({ kind: 'selfcheck' })}>
-            打开设备自检（读写 / 性能 / 往返一致性）
-          </button>
-        </section>
-
-        <section className="card">
           <h2>同步</h2>
           {sync.status?.configured ? (
             <>
@@ -177,6 +151,31 @@ export function SettingsPage(): JSX.Element {
             清空本机偏好
           </button>
           {reset ? <p className="muted">{reset}</p> : null}
+        </section>
+        <section className="card">
+          <h2>数据健康</h2>
+          {dmg.damagedLines === 0 && dmg.truncatedFiles.length === 0 ? (
+            <p className="ok-line">加载正常：没有坏行，也没有读到截断的文件。</p>
+          ) : (
+            <>
+              <p className="bad-line">
+                坏行 {dmg.damagedLines} 条
+                {dmg.truncatedFiles.length > 0 ? `，截断文件 ${dmg.truncatedFiles.length} 个` : ''}
+              </p>
+              <p className="muted">
+                坏行会被跳过而不是让整个工作区打不开（这行数据丢了，但它后面的都能读）。
+                出现大量坏行通常意味着同步过程中断了，先在桌面端确认数据完整。
+              </p>
+              <ul className="detail">
+                {dmg.files.map((f) => (
+                  <li key={f}>{f}</li>
+                ))}
+              </ul>
+            </>
+          )}
+          <button className="btn" onClick={() => go({ kind: 'selfcheck' })}>
+            打开设备自检（读写 / 性能 / 往返一致性）
+          </button>
         </section>
       </div>
 

@@ -258,13 +258,6 @@ select {
   background: color-mix(in srgb, var(--pass) 15%, transparent);
 }
 
-.legend {
-  margin-top: 12px;
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
 /* ---------- 学习页 ---------- */
 
 /*
@@ -494,13 +487,29 @@ select {
   resize: vertical;
 }
 
+/*
+ * 按钮默认是 display: inline-block，两个相邻的 <button> 会排在**同一行**、而且 JSX 换行
+ * 处不产生空格，于是看起来就是两个按钮零间距贴在一起（用户 报的「看本次同步明细」与
+ * 「立即同步」、「清空凭据」与「清空本机偏好」就是这两处）。这里改成块级 + 占满一行，
+ * 并排的场景一律放进 .row-btns（flex）。
+ */
 .btn {
+  display: block;
+  width: 100%;
   padding: 14px;
   font-size: 16px;
   border-radius: 10px;
   border: 1px solid var(--line);
   background: var(--bg);
   color: var(--fg);
+}
+
+/* 竖排的按钮之间留出间隔（按钮之间没有默认外边距） */
+.btn + .btn,
+.btn + .row-btns,
+.row-btns + .btn,
+.row-btns + .row-btns {
+  margin-top: 10px;
 }
 
 .btn.primary {
@@ -520,6 +529,8 @@ select {
 
 .row-btns .btn {
   flex: 1 1 0;
+  width: auto; /* 并排时宽度交给 flex，不受上面的 width: 100% 影响 */
+  margin-top: 0;
 }
 
 /* ---------- 杂项 ---------- */
@@ -530,6 +541,13 @@ select {
   border-radius: 12px;
   padding: 14px;
   margin-bottom: 12px;
+}
+
+/* 卡片内部纵向节奏：相邻块之间至少 10px。
+   原来按钮没有任何外边距，于是「看本次同步明细」紧贴下面的按钮组、「清空凭据」紧贴
+   「清空本机偏好」，两两挨在一起。 */
+.card > * + * {
+  margin-top: 10px;
 }
 
 .card h2,
@@ -546,6 +564,21 @@ select {
   font-size: 13px;
   margin: 0 0 10px;
   line-height: 1.5;
+}
+
+/*
+ * 图例（总数 / 未学习 / 到期 的说明）与最后一个牌组留出间隔。
+ *
+ * 必须写在 .muted 之后并多带一层选择器：这个元素同时带 .legend 和 .muted，两者都是单类
+ * 选择器、权重相同，谁写在后面谁生效——原来 .legend 写在前面，margin-top 被 .muted 的
+ * `margin: 0 0 10px` 整个覆盖，实测间距就是 0px（看着贴在一起）。
+ * 同一个坑在 .sheet-body 上踩过一次，改这类间距前先量计算值，别只看源码。
+ */
+.page-body > .legend {
+  margin-top: 20px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
 }
 
 .mono {
