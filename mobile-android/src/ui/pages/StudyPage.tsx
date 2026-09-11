@@ -2,7 +2,7 @@
 //
 // 状态机在 StudySession 里（可单测），这里只负责画和转发事件。
 // 桌面端的单字母快捷键体系整体取消，唯一保留的肌肉记忆是"点按显示答案"。
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useApp } from '../store'
 import { StudySession, type StudyState } from '@mobile/study-session'
 import { Sheet } from '../components/Sheet'
@@ -43,6 +43,36 @@ export function StudyPage({ deckId }: { deckId: string }): JSX.Element {
 
   // 长按卡面 = 桌面端的 E（编辑）；抬手后那次 tap 要被吞掉，否则会顺带显示答案
   const longPress = useLongPress({ onLongPress: () => setEditing(true) })
+
+  /*
+   * 评级条是 position: fixed（不占布局），所以卡面要自己让出它的高度。
+   * 只在显示答案后才有这条，所以用实测高度写进 --rating-h：字号档位调大、按钮变高也不会漏算。
+   * 量的是"视口底到条顶"再扣掉安全区与页面内边距——那部分本来就不在卡面的可达区域内。
+   */
+  const barRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = barRef.current
+    const root = document.documentElement
+    if (!el) {
+      root.style.removeProperty('--rating-h')
+      return
+    }
+    const apply = (): void => {
+      const insetBottom = Number.parseFloat(getComputedStyle(root).getPropertyValue('--inset-bottom')) || 0
+      const reserve = Math.max(
+        0,
+        Math.round(window.innerHeight - el.getBoundingClientRect().top - insetBottom - 12 + 8)
+      )
+      root.style.setProperty('--rating-h', `${reserve}px`)
+    }
+    apply()
+    const ro = new ResizeObserver(apply)
+    ro.observe(el)
+    return () => {
+      ro.disconnect()
+      root.style.removeProperty('--rating-h')
+    }
+  }, [state.revealed])
 
   function tapCard(): void {
     if (longPress.shouldSwallowClick()) return
@@ -125,7 +155,7 @@ export function StudyPage({ deckId }: { deckId: string }): JSX.Element {
       </div>
 
       {card !== null && state.revealed && state.preview ? (
-        <div className="rating-bar">
+        <div className="rating-bar" ref={barRef}>
           {state.preview.map((p) => (
             <button key={p.rating} className={`rate-btn ${RATING_CLASS[p.rating]}`} onClick={() => void rate(p.rating)}>
               <span className="rate-label">{RATING_LABEL[p.rating]}</span>

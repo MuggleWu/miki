@@ -163,7 +163,13 @@ select {
   justify-content: flex-start;
   /* 页面底用 --card（浅色下浅灰），刷卡面用 --bg（白），与桌面端"灰底 + 白面板"的关系一致 */
   background: var(--card);
-  padding-bottom: 96px;
+  /*
+   * 这里原来固定留 96px 给评级条，导致没显示答案时内容区离屏幕底部还差一大截：手指点在
+   * 下面那一带时，点不到卡面（要先把手指往上挪），显示答案后按钮又出现在最底部，来回挪手。
+   * 现在内容区一直做到屏幕底部，只有显示答案后才由卡面自己让出评级条的高度
+   * （--rating-h，由 StudyPage 实测写入，字号档位变了也不会漏算）。
+   */
+  padding-bottom: 0;
 }
 
 .icon-btn {
@@ -273,6 +279,8 @@ select {
   border: 1px solid var(--line);
   border-radius: 16px;
   padding: 20px 18px;
+  /* 显示答案后评级条固定在底部，卡面底部要给它让位，免得最后几行被挡住 */
+  padding-bottom: calc(20px + var(--rating-h, 0px));
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
