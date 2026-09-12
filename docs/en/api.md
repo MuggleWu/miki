@@ -6,7 +6,7 @@ At startup Miki runs an HTTP API **bound to the local loopback only**, for human
 
 - Address: `http://127.0.0.1:<port>/api`; the port defaults to `8727` (incrementing if taken; the actual port appears in the startup log and is written to the `userData/miki-api.json` runtime file with `port`, `pid` and `nonce` — the nonce matches the value echoed by `/api/health`, so external tools can tell stale files left behind by killed processes)
 - Switch & port: workspace `config.json` fields `api.enabled` / `api.port`; restart the app to apply changes
-- Auth token: workspace `config.json` field `api.token` (generated automatically on first launch, long-lived)
+- Auth token: workspace file `.miki/api-token` (generated automatically on first launch, long-lived; the directory is gitignored and never synced with the workspace repo)
 
 ```bash
 TOKEN=$(python3 -c "import json;print(json.load(open('config.json'))['api']['token'])")

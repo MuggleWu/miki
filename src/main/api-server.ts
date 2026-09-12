@@ -2,7 +2,7 @@
 // 安全边界：
 //   1. 只监听 127.0.0.1，不对局域网开放
 //   2. Host 校验（防 DNS rebinding）、Origin/Referer 一律拒绝（防浏览器跨站请求）
-//   3. 除 /api/health 外必须携带 Bearer token（workspace 首次启动生成，config.json 查看）
+//   3. 除 /api/health 外必须携带 Bearer token（workspace 首次启动生成到 .miki/api-token）
 //   4. 不暴露 answer/undo/配置写等学习与设置动作，只开放牌组与卡片 CRUD + 统计
 import * as http from 'node:http'
 import * as fs from 'node:fs'
@@ -376,7 +376,7 @@ export function startApiServer(ws: WorkspaceService, opts: { runtimeInfoPath?: s
         if (!tokenOk(token, bearer) && !tokenOk(token, header)) {
           return send(401, {
             error:
-              '未授权：缺少或错误的 token。token 存放在当前工作区 config.json 的 api.token；若刚切换过工作区，旧 token 属于另一个工作区，请改读当前工作区的 config.json'
+              '未授权：缺少或错误的 token。token 存放在当前工作区 .miki/api-token；若刚切换过工作区，旧 token 属于另一个工作区，请改读当前工作区的 .miki/api-token'
           })
         }
       }
@@ -418,7 +418,7 @@ export function startApiServer(ws: WorkspaceService, opts: { runtimeInfoPath?: s
         console.error(`[miki] 运行时端口文件写入失败: ${String((err as Error).message ?? err)}`)
       }
     }
-    console.log(`[miki] HTTP API: http://127.0.0.1:${actualPort}/api （token 见 config.json 的 api.token）`)
+    console.log(`[miki] HTTP API: http://127.0.0.1:${actualPort}/api （token 见 .miki/api-token）`)
   })
   server.on('close', () => {
     if (opts.runtimeInfoPath) {

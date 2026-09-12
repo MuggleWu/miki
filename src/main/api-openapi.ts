@@ -6,7 +6,7 @@ export const openApiDoc = {
     title: 'Miki Local API',
     version: '0.2.0',
     description:
-      'Local HTTP API of the Miki spaced-repetition app. Listens on 127.0.0.1 only; browser-originated requests (Origin/Referer) are rejected. All endpoints except GET /api/health require a bearer token from the workspace config.json (api.token).'
+      'Local HTTP API of the Miki spaced-repetition app. Listens on 127.0.0.1 only; browser-originated requests (Origin/Referer) are rejected. All endpoints except GET /api/health require a bearer token from the workspace file .miki/api-token.'
   },
   servers: [
     {
@@ -245,7 +245,7 @@ export const openApiDoc = {
       bearerAuth: {
         type: 'http',
         scheme: 'bearer',
-        description: 'api.token from the active workspace config.json (header x-miki-token also accepted)'
+        description: 'Token from the active workspace .miki/api-token file (header x-miki-token also accepted)'
       }
     }
   }

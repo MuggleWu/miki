@@ -6,10 +6,10 @@ Miki 在启动时内置一个**只监听本机回环地址**的 HTTP API，供�
 
 - 地址：`http://127.0.0.1:<port>/api`，端口默认 `8727`（被占用时依次顺延，实际端口见启动日志，同时写入 `userData/miki-api.json` 运行时文件，含 `port`、`pid` 与 `nonce`——nonce 与 `/api/health` 回显值一致，外部工具用于甄别强杀残留的过期文件）
 - 开关与端口：工作区 `config.json` 的 `api.enabled` / `api.port`，改后重启应用生效
-- 认证 token：工作区 `config.json` 的 `api.token`（首次启动自动生成，长期不变）
+- 认证 token：工作区私有文件 `.miki/api-token`（首次启动自动生成，长期不变；该目录已被 `.gitignore` 排除，不随工作区仓库同步）
 
 ```bash
-TOKEN=$(python3 -c "import json;print(json.load(open('config.json'))['api']['token'])")
+TOKEN=$(cat .miki/api-token)
 curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8727/api/decks
 ```
 
@@ -64,4 +64,4 @@ curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8727/api/decks
 - **批量导入制卡**用 `POST /api/cards/add` 的 `items` 形式，一次几十张，服务端一次落盘。
 - 批量端点对不存在的 ID 返回 `missing` 计数而不是整批失败，方便校对输入。
 - 删除是软删、移动保留进度、重置不可撤销——AI 自动化时优先用前两者。
-- MCP 接入：`node scripts/mcp-server.mjs`。推荐**自动发现**：不设 `MIKI_TOKEN` 时，wrapper 自动定位当前工作区（`MIKI_WORKSPACE` → `userData/workspace.json` 的 `current`）并读取其 `config.json` 拿 token，端口优先读 `userData/miki-api.json` 运行时文件（pid 存活且 nonce 对上才采用，防强杀残留的过期文件）——切换工作区后重启 MCP 即可跟随。也可显式指定 `MIKI_TOKEN`（可选 `MIKI_PORT`）保持旧行为。工具含 `list_decks` / `add_cards` / `search_cards`（默认每页 50，日期参数接受 `YYYY-MM-DD`，按本地零点解析）/ `update_cards`（部分更新）/ `rename_deck` / `set_suspended`（批量）/ `api_schema` 等；批量工具单次最多 500 张卡。另提供只读资源 `miki://decks`、`miki://stats` 与制卡 prompt 模板 `make-cards`（最小知识原则）。
+- MCP 接入：`node scripts/mcp-server.mjs`。推荐**自动发现**：不设 `MIKI_TOKEN` 时，wrapper 自动定位当前工作区（`MIKI_WORKSPACE` → `userData/workspace.json` 的 `current`）并读取其 `.miki/api-token` 拿 token，端口优先读 `userData/miki-api.json` 运行时文件（pid 存活且 nonce 对上才采用，防强杀残留的过期文件）——切换工作区后重启 MCP 即可跟随。也可显式指定 `MIKI_TOKEN`（可选 `MIKI_PORT`）保持旧行为。工具含 `list_decks` / `add_cards` / `search_cards`（默认每页 50，日期参数接受 `YYYY-MM-DD`，按本地零点解析）/ `update_cards`（部分更新）/ `rename_deck` / `set_suspended`（批量）/ `api_schema` 等；批量工具单次最多 500 张卡。另提供只读资源 `miki://decks`、`miki://stats` 与制卡 prompt 模板 `make-cards`（最小知识原则）。

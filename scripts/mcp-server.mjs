@@ -5,7 +5,7 @@
 //   1. 显式模式：环境变量 MIKI_TOKEN（+ 可选 MIKI_PORT）——旧行为，向后兼容
 //   2. 自动发现（推荐，不设 MIKI_TOKEN）：
 //      工作区 = MIKI_WORKSPACE 环境变量 → userData/workspace.json 的 current
-//      token   = 该工作区 config.json 的 api.token
+//      token   = 该工作区私有文件 .miki/api-token
 //      端口    = MIKI_PORT 环境变量 → userData/miki-api.json（实际监听端口，含顺延）→ config.json 的 api.port
 //      userData 可用 MIKI_USER_DATA 覆盖（macOS ~/Library/Application Support/Miki / Windows %APPDATA%/Miki / Linux ~/.config/Miki）
 // 自动发现使 MCP 始终跟随 miki 的当前工作区；切换工作区后重启 MCP 即可（或配 MIKI_WORKSPACE 指定档案）。
@@ -91,8 +91,18 @@ async function resolveConnection() {
     process.exit(1)
   }
   const cfg = readJson(path.join(workspaceDir, 'config.json'))
-  if (!cfg || !cfg.api || !cfg.api.token) {
-    console.error(`miki MCP：工作区 ${workspaceDir} 的 config.json 缺少 api.token（首次启动 miki 后会自动生成）。`)
+  // token 在工作区私有文件里（`.miki/api-token`，不随工作区仓库同步）；旧版本放在 config.json 的作为兜底
+  let token = null
+  try {
+    token = fs.readFileSync(path.join(workspaceDir, '.miki', 'api-token'), 'utf-8').trim() || null
+  } catch {
+    token = null
+  }
+  if (!token && cfg && cfg.api && cfg.api.token) token = cfg.api.token
+  if (!token) {
+    console.error(
+      `miki MCP：工作区 ${workspaceDir} 缺少 API token（首次启动 miki 后会自动生成到 .miki/api-token）。`
+    )
     process.exit(1)
   }
   if (cfg.api.enabled === false) {
@@ -110,7 +120,7 @@ async function resolveConnection() {
     const stale = runtime.nonce ? !(await nonceMatches(candidate, runtime.nonce)) : false
     if (!stale) port = runtime.port
   }
-  return { mode: 'auto', base: `http://127.0.0.1:${port}/api`, workspace: workspaceDir, token: cfg.api.token }
+  return { mode: 'auto', base: `http://127.0.0.1:${port}/api`, workspace: workspaceDir, token }
 }
 
 const conn = await resolveConnection()
@@ -135,7 +145,7 @@ async function call(method, path, body) {
   if (res.status === 401) {
     throw new Error(
       '401 未授权：token 与当前工作区不匹配。若刚在 miki 里切换过工作区，重启本 MCP（自动发现会跟随当前工作区）；' +
-        '或改用当前工作区 config.json 的 api.token 重新配置 MIKI_TOKEN。'
+        '或改用当前工作区 .miki/api-token 的值重新配置 MIKI_TOKEN。'
     )
   }
   if (!res.ok) throw new Error(`HTTP ${res.status}: ${JSON.stringify(json)}`)

@@ -110,7 +110,7 @@ MCP 客户端可用附带的 stdio 薄壳接入——推荐自动发现（无需
 node scripts/mcp-server.mjs
 ```
 
-也可显式指定 token 与端口（旧行为）：`MIKI_TOKEN=<config.json 中的 api.token> node scripts/mcp-server.mjs`。
+也可显式指定 token 与端口（旧行为）：`MIKI_TOKEN=$(`cat <工作区>/.miki/api-token`) node scripts/mcp-server.mjs`。
 
 提供 14 个工具：`list_decks`、`create_decks`、`rename_deck`、`delete_deck`、`search_cards`、`get_cards`、`add_cards`、`update_cards`、`move_cards`、`set_suspended`、`delete_cards`、`reset_progress`、`get_stats`、`api_schema`（最后一个返回本机 HTTP API 的 OpenAPI 描述，供 AI 了解全部端点后直接用 HTTP 调用）。批量工具单次最多 500 张卡；`search_cards` 日期参数接受 `YYYY-MM-DD`，按本地零点解析。
 

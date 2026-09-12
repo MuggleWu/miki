@@ -499,16 +499,35 @@ describe('loadConfig 写盘节流（内容未变不回写）', () => {
   }
   const isBackdated = (d: string) => new Date(fs.statSync(cfgFile(d)).mtimeMs).getFullYear() === 2000
 
-  it('首启生成 config.json（含 token），二次 init 内容逐字节不变且不回写', () => {
+  it('首启生成 config.json 与私有 token 文件，二次 init 内容逐字节不变且不回写', () => {
     const d = tmpKept()
     newWs(d)
-    expect(JSON.parse(readCfg(d)).api.token).not.toBe('')
+    const token = fs.readFileSync(path.join(d, '.miki', 'api-token'), 'utf-8').trim()
+    expect(token).not.toBe('')
+    // token 不进 config.json：那个文件随工作区仓库同步，凭证不能落进去
+    expect(JSON.parse(readCfg(d)).api.token).toBe('')
     const first = readCfg(d)
     backdate(d)
     const w2 = newWs(d)
     expect(readCfg(d)).toBe(first)
     expect(isBackdated(d)).toBe(true) // 未回写：mtime 停在拨回的旧时刻
-    expect(w2.config.api.token).toBe(JSON.parse(first).api.token) // token 保留
+    expect(w2.config.api.token).toBe(token) // 内存里仍持有同一个 token（鉴权要用）
+  })
+
+  it('老工作区迁移：config.json 里的 token 搬到私有文件，盘上那份被抹空', () => {
+    const d = tmpKept()
+    newWs(d)
+    // 造出旧版本留下的盘上状态：token 写在 config.json 里、私有文件不存在
+    const cfgPath = cfgFile(d)
+    const cfg = JSON.parse(readCfg(d))
+    cfg.api.token = 'legacy-token-0001'
+    fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2))
+    fs.rmSync(path.join(d, '.miki', 'api-token'), { force: true })
+
+    const w = newWs(d)
+    expect(w.config.api.token).toBe('legacy-token-0001') // 旧 token 继续生效，不打断已配好的客户端
+    expect(fs.readFileSync(path.join(d, '.miki', 'api-token'), 'utf-8').trim()).toBe('legacy-token-0001')
+    expect(JSON.parse(readCfg(d)).api.token).toBe('') // 盘上不再留凭证
   })
 
   it('热加载链同口径：reloadFromDisk 不动无变化的 config.json', () => {

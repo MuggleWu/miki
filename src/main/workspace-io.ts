@@ -47,6 +47,15 @@ export class WorkspacePaths {
   configJson(): string {
     return path.join(this.root, 'config.json')
   }
+
+  /**
+   * HTTP API 鉴权 token 的存放位置：`.miki/`（应用私有、已 gitignore、不参与同步）。
+   * 刻意不放进 config.json——那是个会被工作区仓库同步走的文件，token 落进去
+   * 等于把本机凭证写进仓库历史；每台机器各自的 token 本来也不该同步。
+   */
+  apiTokenFile(): string {
+    return path.join(this.root, '.miki', 'api-token')
+  }
 }
 
 /**

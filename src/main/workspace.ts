@@ -190,10 +190,12 @@ export class WorkspaceService {
       api,
       workspacePath: this.root
     }
-    // HTTP API 鉴权 token：首次启动生成一次，长期使用
-    if (!config.api.token) config.api.token = randomUUID()
-    // 序列化结果与盘上逐字节一致才跳过回写：init/热加载是读路径，不该无谓翻动 config.json 的 mtime
-    const serialized = JSON.stringify(config, null, 2)
+    // HTTP API 鉴权 token：本机私有文件（`.miki/api-token`）持有，config.json 里恒为空。
+    // 旧版本把 token 写在 config.json 里会被工作区仓库同步/推送到远端，这里读取时顺手迁移一次。
+    config.api.token = this.ensureApiToken(config.api.token)
+    // 序列化结果与盘上逐字节一致才跳过回写：init/热加载是读路径，不该无谓翻动 config.json 的 mtime。
+    // 落盘那份把 token 抹空（内存里的 config 仍持有它，API 鉴权从 ws.config 取）。
+    const serialized = JSON.stringify({ ...config, api: { ...config.api, token: '' } }, null, 2)
     if (raw !== serialized) atomicWrite(file, serialized)
     // 跳过回写时也要收敛老版本的宽松权限（0600 含 token）；chmod 不改 mtime，不惊动变更检测
     try {
@@ -202,6 +204,29 @@ export class WorkspaceService {
       // 平台不支持则跳过
     }
     return config
+  }
+
+  /**
+   * 取本机 API token：优先读 `.miki/api-token`；没有就用 legacy 值（旧版本存在
+   * config.json 里的）迁移落盘，再没有才新生成。写盘失败（只读目录等）时退化成
+   * 一次性 token，不拦住启动。
+   */
+  private ensureApiToken(legacy: string): string {
+    const file = this.paths.apiTokenFile()
+    try {
+      const stored = fs.readFileSync(file, 'utf-8').trim()
+      if (stored) return stored
+    } catch {
+      // 没有/读不了 → 走下面的生成与迁移
+    }
+    const token = legacy || randomUUID()
+    try {
+      fs.mkdirSync(path.dirname(file), { recursive: true })
+      atomicWrite(file, token)
+    } catch {
+      // 落盘失败不影响本次运行，只是下次启动会换一个 token
+    }
+    return token
   }
 
   private buildScheduler(cfg: MikiConfig, noFuzz = false): FsrScheduler {
