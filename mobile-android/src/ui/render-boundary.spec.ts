@@ -85,7 +85,8 @@ describe('渲染错误边界：页面崩了要有可读兜底', () => {
     // 抽屉（切页的唯一入口）不能被任何页面的错误带下去，否则用户没法换页
     const drawer = app.indexOf('<Drawer ')
     expect(drawer).toBeGreaterThan(app.lastIndexOf('</ErrorBoundary>'))
-    expect(app.indexOf('<div className="toast"')).toBeGreaterThan(drawer)
+    // 提示条同样要在边界外：它是"存上了/失败了"的唯一信号
+    expect(app.indexOf('<div ref={toastRef} className="toast"')).toBeGreaterThan(drawer)
   })
 
   it('styles.css 有错误边界的样式，且配色只走主题变量', () => {

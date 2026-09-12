@@ -563,6 +563,18 @@ select {
   opacity: 0.5;
 }
 
+/*
+ * 主按钮禁用时要去掉强调色。只写 opacity 的通用规则在浅色下几乎看不出差别（蓝底变浅蓝），
+ * 用户会把「还不能保存」当成能点——新增卡片保存后正反面清空，按钮就处在禁用态，
+ * 那一下的观感直接决定「还以为卡没存上」。禁用态统一成中性色。
+ */
+.btn.primary:disabled {
+  background: var(--card);
+  border-color: var(--line);
+  color: var(--muted);
+  opacity: 1;
+}
+
 .row-btns {
   display: flex;
   gap: 10px;
@@ -697,18 +709,34 @@ code {
   border-bottom: 1px solid var(--line);
 }
 
+/*
+ * 提示条：popover="manual" + showPopover() 让它进顶层，从而盖在弹层（原生 <dialog>）之上——
+ * 弹层不关时（连续新增卡片）提示才看得见。popover 的 UA 默认样式是 inset:0 + margin:auto，
+ * 所以下面要把 top/right 与 margin 显式写成 auto/0，否则它会被居中到屏幕中间。
+ */
 .toast {
   position: fixed;
   left: 50%;
-  bottom: calc(90px + var(--inset-bottom));
+  top: auto;
+  right: auto;
+  bottom: calc(90px + var(--bottom-blocked));
+  margin: 0;
+  width: fit-content;
+  height: fit-content;
   transform: translateX(-50%);
   max-width: 80vw;
   padding: 10px 16px;
+  border: none;
   border-radius: 999px;
   background: rgb(0 0 0 / 78%);
   color: #fff;
   font-size: 14px;
   z-index: 10;
+}
+
+/* 空提示条（没有消息时）不要占着屏幕底下那一块：它常驻在 DOM 里，靠 popover 开关显隐 */
+.toast:empty {
+  display: none;
 }
 
 /* ---------- 左侧抽屉 ---------- */

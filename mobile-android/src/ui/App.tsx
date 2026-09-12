@@ -2,9 +2,10 @@
 //
 // 自研路由而不是 react-router：页面是个位数，且需要跟 Android 返回键一对一绑定，
 // 引一个路由库反而要写更多适配代码。
-import { useEffect, useRef } from 'react'
+import { useEffect, useLayoutEffect, useRef } from 'react'
 import { App as CapApp } from '@capacitor/app'
 import { useApp } from './store'
+import { syncToastPopover } from './toast-host'
 import { DecksPage } from './pages/DecksPage'
 import { StudyPage } from './pages/StudyPage'
 import { LibraryPage } from './pages/LibraryPage'
@@ -28,6 +29,9 @@ export function App(): JSX.Element {
   const loadPrefs = useApp((s) => s.loadPrefs)
   const drawerOpen = useApp((s) => s.drawerOpen)
   const closeDrawer = useApp((s) => s.closeDrawer)
+
+  // 提示条元素：它同时被提升到顶层（popover），见下面那个 layout effect
+  const toastRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     void boot()
@@ -161,6 +165,15 @@ export function App(): JSX.Element {
     return () => clearTimeout(t)
   }, [toast, notify])
 
+  // 提示条要显示在弹层之上：原生 <dialog>.showModal() 会把对话框提到顶层，挂在 .app 下的
+  // 提示条会被它和遮罩盖住——弹层开着时（比如连续新增卡片）用户等于是完全看不到提示。
+  // 用 popover API 把提示条也提进顶层（不移 DOM，理由见 toast-host.ts）。
+  //
+  // 依赖里带 toast：提示出现时它可能还没进顶层，出现后再同步一次。
+  useLayoutEffect(() => {
+    syncToastPopover(toastRef.current, toast !== null)
+  }, [toast])
+
   if (bootError) {
     return (
       <div className="app">
@@ -223,7 +236,15 @@ export function App(): JSX.Element {
       ) : null}
       {/* 关闭一律走 closeDrawer：它会先播放收起动画再改 open，点遮罩/返回键/选中条目都一致 */}
       <Drawer open={drawerOpen} onClose={closeDrawer} />
-      {toast ? <div className="toast">{toast}</div> : null}
+      {/*
+        提示条：popover="manual" 让它能进顶层、盖在弹层之上（弹层开着时提示才看得见）。
+        属性走展开而不是直接写 popover="manual"：本工程用的 @types/react 还没有 popover
+        的声明（React 18 时代），直接写会被 TS 判成"DOM 上不存在这个属性"——而浏览器认它。
+        升级到 React 19 类型后可改回直写，这一点不可靠就退回普通 fixed 元素（视觉降级）。
+      */}
+      <div ref={toastRef} className="toast" {...{ popover: 'manual' }} aria-live="polite">
+        {toast}
+      </div>
     </div>
   )
 }
