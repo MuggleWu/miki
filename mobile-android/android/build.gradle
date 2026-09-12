@@ -1,8 +1,31 @@
 // Top-level build file where you can add configuration options common to all sub-projects/modules.
 
+// 依赖源：本机直连 Maven Central / dl.google.com 在 Gradle 里是 TLS 握手失败（Remote host
+// terminated the handshake，而 curl 正常），实测（2026-09-12）阿里云 public 16.3MB/s、
+// google 镜像 15.2MB/s，官方 Maven Central 仅 2.6MB/s 且不可用。镜像一律排在官方之前，
+// 镜像缺件时才回落到官方仓库；与 mobile-android/.npmrc 换 npmmirror 同一策略
+// （理由写在这里，免得下次有人当噪声删掉）。
+//
+// 注意：capacitor-android 与 capacitor-cordova-android-plugins 这两个子工程各自声明了
+// buildscript 仓库（前者在 node_modules 里、后者由 cap sync 生成，都不能改），所以下面要用
+// allprojects { buildscript { ... } } 把镜像提前插进它们的 classpath 解析——否则它们的
+// AGP classpath 会直连 dl.google.com 而失败，这个坑只在冷缓存全量构建时才暴露。
+
+def cnMavenMirrors = [
+    'https://maven.aliyun.com/repository/google',
+    'https://maven.aliyun.com/repository/public',
+    'https://maven.aliyun.com/repository/gradle-plugin',
+    'https://mirrors.cloud.tencent.com/nexus/repository/maven-public'
+]
+
 buildscript {
     
     repositories {
+        // 这几条不能引用上面的 cnMavenMirrors：buildscript 块先于脚本主体求值
+        maven { url 'https://maven.aliyun.com/repository/google' }
+        maven { url 'https://maven.aliyun.com/repository/public' }
+        maven { url 'https://maven.aliyun.com/repository/gradle-plugin' }
+        maven { url 'https://mirrors.cloud.tencent.com/nexus/repository/maven-public' }
         google()
         mavenCentral()
     }
@@ -18,7 +41,13 @@ buildscript {
 apply from: "variables.gradle"
 
 allprojects {
+    buildscript {
+        repositories {
+            cnMavenMirrors.each { m -> maven { url m } }
+        }
+    }
     repositories {
+        cnMavenMirrors.each { m -> maven { url m } }
         google()
         mavenCentral()
     }

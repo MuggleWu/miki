@@ -24,6 +24,10 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 改完界面代码后必须走 `npm run build` → `npx cap sync android` → `gradlew` → 安装这一整条链：
 直接改 `android/app/src/main/assets/` 里的产物会在下次 `cap sync` 时被覆盖。
 
+首次构建要装 Android SDK（`platforms;android-36` + `build-tools;36.0.0`），并让 `android/local.properties`
+指向它；依赖源在 `android/build.gradle` 里已配成阿里云镜像优先、官方兜底——Maven Central 在国内直连
+会 TLS 握手失败，换源理由与实测数字见该文件顶部注释。
+
 提交前门禁：
 
 ```bash
