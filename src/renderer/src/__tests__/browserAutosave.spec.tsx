@@ -2,9 +2,12 @@
 // 原缺陷：待存计时只挂在 saveTimer.current 上，切到另一张卡时新卡的 onChange
 // 会 clearTimeout 掉上一张卡的计时，那份编辑静默丢失（无提示）。
 //
-// 用真计时器 + 实等：防抖窗口只有 800ms，实等 ~950ms 即可，比 fake timers 与
-// React effect 调度的组合稳定（fake timers 下计时器注册表与 React 内部调度对不上，
-// 会出现「明明在途却永不触发」的假象）。组件依赖 React 调度与 DOM，需 jsdom。
+// 时序口径：假计时器 + 精确推进（vi.advanceTimersByTimeAsync 包在 act 里）。
+// 早先用真计时器实等，问题有两层：① 全量并行跑（30+ 文件）时同样的等待会被拉长，
+// 「防抖期内还没落盘」这类断言会提前看到保存 → 假失败；② 为躲开它把窗口从 60ms
+// 放大到 300ms，只是把余量做大，机器再慢还会复发。现在窗口只在测试显式推进时才到期，
+// 与机器快慢无关（页面里读 Date.now() 只影响到期窗口显示，与本组断言无关）。
+// 组件依赖 React 调度与 DOM，需 jsdom。
 // @vitest-environment jsdom
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react'
@@ -13,7 +16,7 @@ import { Browser } from '../browser/Browser'
 import { useApp } from '../store'
 import type { CardRow, MikiConfig, QueryResult } from '../../../shared/types'
 
-/** 生产防抖窗口 800ms；测试注入更短窗口以避免整套慢 4s+（实等仍需留余量） */
+/** 生产防抖窗口 800ms；测试注入更短窗口，靠假计时器推进，不产生真实等待 */
 const DEBOUNCE_MS = 60
 const PAST_DEBOUNCE = 90
 
@@ -86,12 +89,13 @@ async function mountBrowser(debounceMs = DEBOUNCE_MS) {
   })
 }
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
-
-/** 真实等待（推进真计时器），并给 React 机会刷新 effect */
+/**
+ * 推进假计时器 ms 毫秒：到期回调在 act 内触发，并连带冲刷它们排出的 Promise 链
+ * （advanceTimersByTimeAsync 会 await 每个回调）。窗口到没到只取决于这里的推进量。
+ */
 async function wait(ms: number) {
   await act(async () => {
-    await sleep(ms)
+    await vi.advanceTimersByTimeAsync(ms)
   })
 }
 
@@ -127,6 +131,9 @@ async function click(el: Element) {
 
 beforeEach(() => {
   ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+  // 时钟交给测试：防抖窗口只在 wait() 推进时到期（见文件头说明）。
+  // 不伪造 Date：组件渲染时要读真实日期算到期窗口，伪造它只会引入与断言无关的差异。
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
   // jsdom 缺口：卡片库用到 scrollTo 与 ResizeObserver，两者 jsdom 都不实现
   Element.prototype.scrollTo = () => {}
   vi.stubGlobal(
@@ -164,6 +171,8 @@ afterEach(() => {
   })
   host.remove()
   vi.restoreAllMocks()
+  // 卸载完成后再交还真时钟：否则卸载清理里排的计时会留在假时钟上不触发
+  vi.useRealTimers()
 })
 
 /** 选中一行、在正面输入框打字，但不让防抖计满 */
@@ -178,15 +187,11 @@ async function selectAndEdit(label: string, text: string) {
 
 describe('卡片库编辑自动保存', () => {
   it('停满防抖窗口才落盘，写的是当前选中卡', async () => {
-    // 这条要断言「防抖期内还没有落盘」，而 mountBrowser/selectAndEdit 本身也是真计时器的异步
-    // 等待：全量并行跑（30+ 文件）时这些等待可能超过 60ms 的防抖窗口，保存提前触发 → 假失败。
-    // 所以这里单独放长防抖窗口，给「未触发」这个断言留足余量（其余用例不受影响）
-    const WINDOW = 300
-    await mountBrowser(WINDOW)
+    await mountBrowser()
     await selectAndEdit('正面 A', 'A 改过')
     expect(miki.updateCard).not.toHaveBeenCalled() // 防抖期内不落盘
 
-    await wait(WINDOW + PAST_DEBOUNCE)
+    await wait(PAST_DEBOUNCE)
     expect(miki.updateCard).toHaveBeenCalledTimes(1)
     expect(miki.updateCard).toHaveBeenCalledWith('card-a', { front: 'A 改过', back: '反面 A' })
   })

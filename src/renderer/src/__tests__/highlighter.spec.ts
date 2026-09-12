@@ -1,7 +1,7 @@
 // Shiki 细粒度高亮回归：token 粒度（方法调用/类型独立着色）、CSS 变量引用、未知语言降级。
 // 懒加载改造后这里还多盯三件事：就绪前 highlightSync 必须返回 null（渲染层据此走纯文本）、
 // 按需 ensureLang 后同一语言立即可同步高亮、引擎就绪信号只通知一次。
-import { beforeAll, describe, expect, it, vi } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   __resetHighlighterForTest,
   ensureLang,
@@ -18,6 +18,25 @@ import { renderMd } from '../md'
 beforeAll(async () => {
   await preloadHighlighter()
   await preloadAllLangs()
+})
+
+/**
+ * 把全局引擎恢复成「就绪 + 全部语言可用」。
+ *
+ * 高亮引擎是**模块级单例**：本文件里多条用例会 __resetHighlighterForTest() 来验证
+ * 「未就绪」路径，而其余用例（含 renderMd 集成那组）依赖「就绪且语言已加载」。
+ * 早先靠每条重置用例末尾自己 await preloadAllLangs() 把状态还回去——那是口头约定：
+ * 机器被挤满时若某条用例中途失败/超时，后面的用例就带着被重置的单例跑，
+ * 于是出现「同步高亮断言偶发看到纯文本」这种与被测代码无关的假失败。
+ * 改成每条用例开始前统一兜底（已就绪时零成本）。
+ */
+async function ensureReadyState(): Promise<void> {
+  if (!isHighlighterReady()) await preloadHighlighter()
+  await preloadAllLangs()
+}
+
+beforeEach(async () => {
+  await ensureReadyState()
 })
 
 describe('highlightSync', () => {
@@ -103,7 +122,7 @@ describe('懒加载（首帧不阻塞）', () => {
 
     await ensureLang('java')
     expect(highlightSync('System.out.println(1);', 'java')).not.toBeNull() // 一到就能同步高亮
-    await preloadAllLangs() // 恢复全局状态，避免影响后续用例
+    await ensureReadyState() // 恢复全局状态（契约见 ensureReadyState 注释）
   })
 
   it('ensureLang 同一语言并发调用合并为一次加载（不重复 import）', async () => {
@@ -113,7 +132,7 @@ describe('懒加载（首帧不阻塞）', () => {
     expect(a).toBeUndefined()
     expect(b).toBeUndefined()
     expect(highlightSync('def f(): pass', 'python')).toContain('color:var(--code-keyword)')
-    await preloadAllLangs()
+    await ensureReadyState()
   })
 
   it('不受支持的语言 ensureLang 立即 resolve，不产生加载', async () => {
@@ -121,7 +140,7 @@ describe('懒加载（首帧不阻塞）', () => {
     await preloadHighlighter()
     await expect(ensureLang('cobol')).resolves.toBeUndefined()
     await expect(ensureLang('')).resolves.toBeUndefined()
-    await preloadAllLangs()
+    await ensureReadyState()
   })
 
   it('subscribeHighlighter：就绪后订阅立即回调，退订后不再回调', async () => {
@@ -137,7 +156,7 @@ describe('懒加载（首帧不阻塞）', () => {
     const late = vi.fn()
     subscribeHighlighter(late)
     expect(late).toHaveBeenCalledTimes(1) // 已就绪：同步补发一次
-    await preloadAllLangs()
+    await ensureReadyState()
   })
 })
 
