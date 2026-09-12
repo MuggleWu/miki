@@ -21,6 +21,8 @@
 // 这里就把 --kb 报成 0（判据是它注入的 --native-kb）。两层都动手会互相触发回调，
 // 页面在键盘弹出期间会反复跳——真机上报的"内容一直在闪"就是这么来的。
 
+import { insetSnapshot, reportDiag } from '@mobile/diag'
+
 /** 键盘高度上限：屏幕顶多被键盘占掉大半，超过这个数一定是量错了（比如把缩放算错） */
 const MAX_KEYBOARD_RATIO = 0.7
 
@@ -69,14 +71,18 @@ export interface ViewportEnv {
 }
 
 /**
- * 原生是否已经按键盘高度把 WebView 顶上去（MainActivity 注入的 --native-kb）。
+ * 原生是否正在负责键盘让位（MainActivity 注入的 --native-kb）。
  *
  * 为什么需要这个信号：原生让位之后 WebView 本身就短了，网页侧再按可视视口算一遍就会
  * **顶两次**；更要命的是两层同时改布局会互相触发对方的回调，键盘弹出期间页面在两三个
  * 位置之间来回跳（真机上报的"内容一直在闪"）。让位只留一层——原生那一层（它把视口真的
  * 缩短了，fixed 元素与滚动都自然跟着走），网页侧在原生接管时把 --kb 归零、不再掺和。
  *
- * 返回 CSS 像素高度；原生没接管时是 0（变量不存在或为 0）。
+ * 这个变量是**开关**（原生侧写 '1px'）而不是键盘高度：WebView 已经被撑短了，网页侧不需要
+ * 知道具体多高；写成随高度变化的数字反而会在输入法自己改高度的瞬间（候选栏出现/收起）
+ * 被误判成"原生交还了"，那一下就是可见的跳动。
+ *
+ * 返回值只用来判断"是否 > 0"；原生没接管时是 0。
  */
 export function nativeKeyboardHeight(): number {
   if (typeof document === 'undefined') return 0
@@ -151,11 +157,14 @@ export function watchKeyboardHeight(opts: KeyboardWatchOptions): () => void {
     if (opts.log) {
       // 排这类问题时用 adb logcat 看这一行就够了：innerHeight 与 vv.height 同步变小
       // 说明 WebView 跟着键盘收缩了（此时 kb=0 是对的，原生已经让过位）
-      console.log(
-        `[miki-kb] layout=${m.layoutHeight} inner=${typeof window === 'undefined' ? '?' : window.innerHeight}` +
-          ` vv=${Math.round(m.visualHeight)} offset=${Math.round(m.visualOffsetTop)}` +
-          ` native=${native} kb=${kb}`
-      )
+      const line =
+        `layout=${m.layoutHeight} inner=${typeof window === 'undefined' ? '?' : window.innerHeight}` +
+        ` vv=${Math.round(m.visualHeight)} offset=${Math.round(m.visualOffsetTop)}` +
+        ` native=${native} kb=${kb}`
+      console.log(`[miki-kb] ${line}`)
+      // 记进环形缓冲并同步到 logcat：键盘闪动这类现象靠"最后几十帧的读数序列"才看得出
+      // 是谁在振荡，事后再连设备只能看到当下的片段（见 diag.ts 与 README 排查一节）
+      reportDiag(`kb ${line} :: ${insetSnapshot()}`)
     }
     if (kb === last) return
     last = kb

@@ -5,6 +5,7 @@ import android.util.Log;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewTreeObserver;
+import android.webkit.JavascriptInterface;
 import android.webkit.WebView;
 
 import androidx.core.graphics.Insets;
@@ -49,6 +50,15 @@ public class MainActivity extends BridgeActivity {
     /** 当前这轮原生让位的高度（CSS 像素）；0 = 没让位，网页侧自己负责 */
     private int keyboardCssPx = 0;
 
+    /** 上一次记下的布局读数，用来跳过没有变化的重复日志（见 reportLayout） */
+    private String lastLayoutSig = "";
+
+    /**
+     * 键盘让位当前归谁管：true = 原生（写 --native-kb 通知网页侧别插手），false = 网页侧自己算。
+     * 这个状态是**latch** 的，不随输入法高度的中间态抖动。
+     */
+    private boolean nativeOwnsKeyboard = false;
+
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -56,6 +66,14 @@ public class MainActivity extends BridgeActivity {
         if (webView == null) return;
 
         installLayoutWatch(webView);
+        // 排查用的桥：网页侧把键盘相关的现场记录送过来，落到 logcat（见 src/mobile/diag.ts）。
+        // 只写日志、不改任何状态，出问题时不必改代码重新装包。
+        webView.addJavascriptInterface(new Object() {
+            @JavascriptInterface
+            public void log(String text) {
+                Log.d(TAG, "web " + text);
+            }
+        }, "MikiDiag");
         // WebView 自己的内边距变化（键盘弹出/收起、切换导航方式、旋转）都要重发一次。
         // 只挂监听、不消费 insets：ViewCompat 的监听器是在 View.onApplyWindowInsets 之后
         // 才被调用，WebView 内部的处理不受影响。
@@ -98,9 +116,30 @@ public class MainActivity extends BridgeActivity {
                     if (bars.top == 0 && bars.bottom == 0 && bars.left == 0 && bars.right == 0) return;
                     applyKeyboardInset(webView, insets);
                     publishInsets();
+                    reportLayout(webView, insets);
                 }
             }
         );
+    }
+
+    /**
+     * 每次布局都把关键读数记一行（只在数值真的变了才写，避免刷屏）。
+     *
+     * 排查"内容快速闪动"这类现象时，这一行是唯一能同时看到"WebView 有多高、原生补了多少、
+     * 输入法报了多少"的地方——三方中的哪一个在振荡，看序列就能定位。
+     */
+    private void reportLayout(WebView webView, WindowInsetsCompat insets) {
+        View parent = (View) webView.getParent();
+        if (parent == null) return;
+        String sig = webView.getHeight() + "/" + parent.getPaddingTop() + "/" + parent.getPaddingBottom()
+            + "/" + insets.isVisible(WindowInsetsCompat.Type.ime())
+            + "/" + insets.getInsets(WindowInsetsCompat.Type.ime()).bottom;
+        if (sig.equals(lastLayoutSig)) return;
+        lastLayoutSig = sig;
+        Log.d(TAG, "layout webH=" + webView.getHeight() + " webY=" + webView.getY()
+            + " parentPad=" + parent.getPaddingTop() + "/" + parent.getPaddingBottom()
+            + " imeRaw=" + insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
+            + " imeOn=" + (insets.isVisible(WindowInsetsCompat.Type.ime()) ? 1 : 0));
     }
 
     /**
@@ -126,8 +165,13 @@ public class MainActivity extends BridgeActivity {
             }
         }
         float density = getResources().getDisplayMetrics().density;
-        // 发给网页前换算成 CSS 像素：网页读的是 CSS 变量，dp 与 px 在这里会差一个密度
+        // 交给网页前换算成 CSS 像素：网页读的是 CSS 变量，dp 与 px 在这里会差一个密度
         keyboardCssPx = target > 0 ? Math.round(target / density) : 0;
+        // 「原生接管键盘」这个状态一旦成立就保持住，直到明确交还（target == 0）为止。
+        // 中间输入法自己改高度（候选栏出现/收起）时，网页侧必须一直认为"不用你管"；
+        // 若改成按当前高度判断，网页侧会在候选栏变化的瞬间抢回让位权，那一下就是可见的跳动。
+        if (target > 0) nativeOwnsKeyboard = true;
+        else if (!keyboard) nativeOwnsKeyboard = false;
         if (parent.getPaddingBottom() == target) return;
         parent.setPadding(
             parent.getPaddingLeft(),
@@ -170,10 +214,12 @@ public class MainActivity extends BridgeActivity {
                 + "document.documentElement.style.setProperty('--native-inset-right','" + right + "px');"
                 + "document.documentElement.style.setProperty('--native-inset-bottom','" + bottomCss + "px');"
                 + "document.documentElement.style.setProperty('--native-inset-left','" + left + "px');"
-                // 让位归属：原生接管着键盘时写非 0，网页侧据此把 --kb 报 0（见 src/ui/viewport.ts）；
-                // 交还时把这个变量清掉，网页侧回到"自己算"。
-                + (keyboardCssPx > 0
-                    ? "document.documentElement.style.setProperty('--native-kb','" + keyboardCssPx + "px');"
+                // 让位归属标记：原生管着键盘时写一个非 0 值，网页侧据此把 --kb 报 0
+                // （见 src/ui/viewport.ts）。它是**开关**不是高度——网页侧不需要知道具体多高
+                // （视口已经被原生撑短了），写成随高度变化的数字反而会在高度抖动时被误判成"交还"。
+                // 交还时清掉变量，网页侧回到自己算。
+                + (nativeOwnsKeyboard
+                    ? "document.documentElement.style.setProperty('--native-kb','1px');"
                     : "document.documentElement.style.removeProperty('--native-kb');")
                 // 网页侧靠这个事件知道"原生改过变量了、重算一次"（写 CSS 变量本身不触发可视区事件）
                 + "window.dispatchEvent(new Event('miki:insets'));";
@@ -183,7 +229,8 @@ public class MainActivity extends BridgeActivity {
             lastCss = script;
             webView.evaluateJavascript(script, null);
             // 排安全区/键盘问题时用 adb logcat -s miki-insets 就能看清"系统报了多少、原生补了多少、
-            // 这次发给网页的是多少"，不用改代码重新装包。
+            // 这次发给网页的是多少"，不用改代码重新装包。网页侧自己的读数会以 "web ..." 前缀
+            // 追加在后面（见 src/mobile/diag.ts），两边的时序能对上。
             Log.d(TAG, "bars=" + bars.top + "/" + bars.bottom + " ime=" + (keyboard ? 1 : 0)
                 + " parentPad=" + parent.getPaddingTop() + "/" + parent.getPaddingBottom()
                 + " -> css=" + top + "/" + bottomCss + " kb=" + keyboardCssPx);
