@@ -11,7 +11,6 @@
 import { describe, expect, it } from 'vitest'
 import {
   keyboardHeight,
-  nativeKeyboardHeight,
   readMetrics,
   watchKeyboardHeight,
   type ViewportEnv,
@@ -80,8 +79,8 @@ class FakeVv implements VisualViewportLike {
   }
 }
 
-function envWith(vv: FakeVv | null, layoutHeight = 852, nativeKb = 0): ViewportEnv {
-  return { layoutHeight: () => layoutHeight, visualViewport: () => vv, nativeKeyboardHeight: () => nativeKb }
+function envWith(vv: FakeVv | null, layoutHeight = 852): ViewportEnv {
+  return { layoutHeight: () => layoutHeight, visualViewport: () => vv }
 }
 
 describe('watchKeyboardHeight：跟着可视视口变化', () => {
@@ -110,54 +109,6 @@ describe('watchKeyboardHeight：跟着可视视口变化', () => {
     vv.height = 552
     vv.emit('resize')
     expect(seen).toEqual([0])
-  })
-
-  // 真机回归：原生按键盘高度把 WebView 顶上去之后（--native-kb 有值），网页侧必须报 0。
-  // 早先这里照样按可视视口算，于是"原生顶一次 + 网页再让一次"，两层还会互相触发回调，
-  // 键盘弹出期间内容在两三个位置之间反复跳。让位只留原生那一层。
-  it('原生已接管键盘（--native-kb 有值）：网页侧报 0，不重复让位', () => {
-    // 关键：这幅读数下网页侧自己算会得到 300（布局视口 852、可见区底 552），而原生同时报了
-    // 300 的 --native-kb，正确结果是 0。断言必须能区分"报 0"和"报 300"——否则用例恒真
-    // （第一版就写错了：给的可视区读数让两边都算成 0，变异测试没抓住这个 bug）。
-    const vv = new FakeVv(552)
-    const seen: number[] = []
-    const env = envWith(vv, 852, 300)
-    expect(keyboardHeight(readMetrics(env))).toBe(300) // 先证明"没有原生接管时会算成 300"
-    watchKeyboardHeight({ env, onChange: (kb) => seen.push(kb), log: false })
-    expect(seen).toEqual([0])
-  })
-
-  it('--native-kb 有值时 browserEnv 能读到真值（原生与网页的接线）', () => {
-    document.documentElement.style.setProperty('--native-kb', '280px')
-    try {
-      expect(nativeKeyboardHeight()).toBe(280)
-      document.documentElement.style.removeProperty('--native-kb')
-      expect(nativeKeyboardHeight()).toBe(0)
-    } finally {
-      document.documentElement.style.removeProperty('--native-kb')
-    }
-  })
-
-  it('原生接管/交还时，可视区没变化也要重算（靠 miki:insets 事件）', () => {
-    const vv = new FakeVv(852)
-    let native = 0
-    const seen: number[] = []
-    watchKeyboardHeight({
-      env: { layoutHeight: () => 852, visualViewport: () => vv, nativeKeyboardHeight: () => native },
-      onChange: (kb) => seen.push(kb),
-      log: false
-    })
-    expect(seen).toEqual([0])
-    // 键盘弹起：原生先接管（写 --native-kb 后派发事件）。可视区读数这时还没变，
-    // 重算结果仍是 0（原生在让位）——不能因为"没变化"就漏掉这次重算。
-    native = 300
-    window.dispatchEvent(new Event('miki:insets'))
-    expect(seen).toEqual([0])
-    // 原生交还（比如键盘收起前先把内边距清了）：这次网页侧要接管，同样只靠事件驱动
-    native = 0
-    vv.height = 552
-    window.dispatchEvent(new Event('miki:insets'))
-    expect(seen).toEqual([0, 300])
   })
 
   it('没有 visualViewport 的旧 WebView：不炸，也不写这个变量（由 CSS 的默认值兜底）', () => {

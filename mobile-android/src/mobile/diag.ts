@@ -53,7 +53,6 @@ export function insetSnapshot(): string {
   return [
     `kb=${get('--kb')}`,
     `blocked=${get('--bottom-blocked')}`,
-    `nativeKb=${get('--native-kb') || '-'}`,
     `sheet=${rect('.sheet[open]')}`,
     `body=${rect('.sheet[open] .sheet-body, .sheet[open] .sheet-inner')}`,
     `focus=${focusRect ? `${Math.round(focusRect.top)},${Math.round(focusRect.bottom)}` : '-'}`,

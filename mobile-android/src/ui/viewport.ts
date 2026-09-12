@@ -16,10 +16,9 @@
 //
 // 这套算法在浏览器里可验证：给 window.visualViewport 装一个替身（vite 下 __mikiKbOverride），
 // 就能把"键盘弹起"这件事完整地模拟出来（见 viewport.spec.ts 与本次提交的自测记录）。
-// 真机上还有一层原生兜底：MainActivity 按输入法内边距把 WebView 顶上去（它把父视图撑高、
-// WebView 真的变短，fixed 元素与滚动都自然跟着走）。**让位只留这一层**：原生一接管，
-// 这里就把 --kb 报成 0（判据是它注入的 --native-kb）。两层都动手会互相触发回调，
-// 页面在键盘弹出期间会反复跳——真机上报的"内容一直在闪"就是这么来的。
+// 真机上还有一层原生兜底：MainActivity 按输入法内边距给 **WebView 自己**加底部外边距
+// （它真的变短，fixed 元素与滚动都自然跟着走），键盘让位只由那一层负责。原生撑短之后，
+// 这里的布局视口与可见区一起变小，算出来自然接近 0——两边不会叠加，也不需要额外的信号协调。
 
 import { insetSnapshot, reportDiag } from '@mobile/diag'
 
@@ -66,38 +65,13 @@ export interface ViewportEnv {
   layoutHeight(): number
   /** 可见视口；没有这个 API 时返回 null（老 WebView） */
   visualViewport(): VisualViewportLike | null
-  /** 原生是否已按键盘高度把 WebView 顶上去（见 nativeKeyboardHeight） */
-  nativeKeyboardHeight(): number
-}
-
-/**
- * 原生是否正在负责键盘让位（MainActivity 注入的 --native-kb）。
- *
- * 为什么需要这个信号：原生让位之后 WebView 本身就短了，网页侧再按可视视口算一遍就会
- * **顶两次**；更要命的是两层同时改布局会互相触发对方的回调，键盘弹出期间页面在两三个
- * 位置之间来回跳（真机上报的"内容一直在闪"）。让位只留一层——原生那一层（它把视口真的
- * 缩短了，fixed 元素与滚动都自然跟着走），网页侧在原生接管时把 --kb 归零、不再掺和。
- *
- * 这个变量是**开关**（原生侧写 '1px'）而不是键盘高度：WebView 已经被撑短了，网页侧不需要
- * 知道具体多高；写成随高度变化的数字反而会在输入法自己改高度的瞬间（候选栏出现/收起）
- * 被误判成"原生交还了"，那一下就是可见的跳动。
- *
- * 返回值只用来判断"是否 > 0"；原生没接管时是 0。
- */
-export function nativeKeyboardHeight(): number {
-  if (typeof document === 'undefined') return 0
-  const raw = getComputedStyle(document.documentElement).getPropertyValue('--native-kb').trim()
-  if (!raw) return 0
-  const n = Number.parseFloat(raw)
-  return Number.isFinite(n) && n > 0 ? n : 0
 }
 
 /** 由 window / document 造出默认环境；读不到就退化成"没有可视区信息" */
 export function browserEnv(): ViewportEnv {
   return {
     layoutHeight: () => document.documentElement.clientHeight,
-    visualViewport: () => (window.visualViewport as unknown as VisualViewportLike | undefined) ?? null,
-    nativeKeyboardHeight
+    visualViewport: () => (window.visualViewport as unknown as VisualViewportLike | undefined) ?? null
   }
 }
 
@@ -150,17 +124,13 @@ export function watchKeyboardHeight(opts: KeyboardWatchOptions): () => void {
   let last = -1
   const apply = (): void => {
     const m = readMetrics(env)
-    // 原生已经按键盘高度把 WebView 顶上去时，这里必须报 0：再报一次键盘高度就是顶两次，
-    // 而且两层互相触发回调会让页面在两三个位置之间反复跳（真机上报的"一直在闪"）。
-    const native = env.nativeKeyboardHeight()
-    const kb = native > 0 ? 0 : keyboardHeight(m)
+    const kb = keyboardHeight(m)
     if (opts.log) {
       // 排这类问题时用 adb logcat 看这一行就够了：innerHeight 与 vv.height 同步变小
       // 说明 WebView 跟着键盘收缩了（此时 kb=0 是对的，原生已经让过位）
       const line =
         `layout=${m.layoutHeight} inner=${typeof window === 'undefined' ? '?' : window.innerHeight}` +
-        ` vv=${Math.round(m.visualHeight)} offset=${Math.round(m.visualOffsetTop)}` +
-        ` native=${native} kb=${kb}`
+        ` vv=${Math.round(m.visualHeight)} offset=${Math.round(m.visualOffsetTop)} kb=${kb}`
       console.log(`[miki-kb] ${line}`)
       // 记进环形缓冲并同步到 logcat：键盘闪动这类现象靠"最后几十帧的读数序列"才看得出
       // 是谁在振荡，事后再连设备只能看到当下的片段（见 diag.ts 与 README 排查一节）

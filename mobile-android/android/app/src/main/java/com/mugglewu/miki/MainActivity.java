@@ -4,7 +4,6 @@ import android.os.Bundle;
 import android.util.Log;
 import android.view.View;
 import android.view.ViewGroup;
-import android.view.ViewTreeObserver;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebView;
 
@@ -28,14 +27,22 @@ import com.getcapacitor.BridgeActivity;
  *
  * ② 输入法避让（真机上报的"呼出键盘后看不见正在输入的内容"）：Android 15+ 起 targetSdk 35+
  * 强制边到边，窗口不再随输入法收缩——`windowSoftInputMode="adjustResize"` 在边到边窗口上等于
- * 失效，键盘直接盖在 WebView 上，WebView 也不会把聚焦的输入框滚出来。这里的做法是按输入法
- * 内边距给 WebView 的父视图留白（WebView 是 match_parent，于是它真的变短），等价于恢复
- * classic adjustResize。判据是「窗口内边距有没有真的落到父视图上」——边到边时父视图底部内边距
- * 是 0 才动手；Android 14 及以下窗口自己会缩，再补一层就是多余空白。
+ * 失效，键盘直接画在 WebView 之上，WebView 也不会把聚焦的输入框滚出来。
  *
- * **键盘让位只由这一层负责**：网页侧一旦看到 --native-kb 就把自己那份让位量报成 0
- * （见 src/ui/viewport.ts）。两层同时改布局会互相触发对方的回调，键盘弹出期间页面会在两三个
- * 位置之间反复跳——真机上报的"内容一直在快速闪动"就是这么来的。
+ * 做法（2026-09-12 按检索到的同类实现改写，两处关键差别）：
+ *
+ * - **改 WebView 自己的 bottomMargin，不改父视图的 padding**。改父视图会让父容器重新测量、
+ *   触发整棵树的 insets 分发与重排，键盘弹出、输入法自己改高度的过程中会连环触发，页面表现
+ *   为来回跳（真机上报的"内容一直在闪"）。改 WebView 的 margin 只影响它自己的边界。
+ * - **insets 监听挂在 decor view 上，不挂在 WebView 上**。Capacitor 的 CoordinatorLayout 会把
+ *   insets 吞掉：挂在 WebView 上的监听读到的永远是 0（Ionic 论坛有 decor 66 / WebView 0 的
+ *   实测日志），挂在 decor view 上才是真值。
+ *
+ * 已知坑（同类实现里踩过并修好的）：**输入法在 App 启动前就可见时**直接设 margin 会出问题，
+ * 所以 margin 要夹住 parent 的高度（见 applyKeyboardMargin）。
+ *
+ * 键盘让位**只由这一层负责**：WebView 被撑短之后，网页侧按可视视口算出的键盘高度自然就是 0
+ * （布局视口与可见区一起变小），不需要再有第二个信号来协调。
  */
 public class MainActivity extends BridgeActivity {
 
@@ -47,17 +54,11 @@ public class MainActivity extends BridgeActivity {
      */
     private String lastCss = "";
 
-    /** 当前这轮原生让位的高度（CSS 像素）；0 = 没让位，网页侧自己负责 */
-    private int keyboardCssPx = 0;
+    /** 上一次设过的 WebView 底部外边距（像素）；-1 = 还没设过 */
+    private int lastBottomMargin = -1;
 
-    /** 上一次记下的布局读数，用来跳过没有变化的重复日志（见 reportLayout） */
+    /** 上一次记下的布局读数，用来跳过没有变化的重复日志（见 reportInsets） */
     private String lastLayoutSig = "";
-
-    /**
-     * 键盘让位当前归谁管：true = 原生（写 --native-kb 通知网页侧别插手），false = 网页侧自己算。
-     * 这个状态是**latch** 的，不随输入法高度的中间态抖动。
-     */
-    private boolean nativeOwnsKeyboard = false;
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -65,7 +66,6 @@ public class MainActivity extends BridgeActivity {
         WebView webView = getBridge() != null ? getBridge().getWebView() : null;
         if (webView == null) return;
 
-        installLayoutWatch(webView);
         // 排查用的桥：网页侧把键盘相关的现场记录送过来，落到 logcat（见 src/mobile/diag.ts）。
         // 只写日志、不改任何状态，出问题时不必改代码重新装包。
         webView.addJavascriptInterface(new Object() {
@@ -74,15 +74,19 @@ public class MainActivity extends BridgeActivity {
                 Log.d(TAG, "web " + text);
             }
         }, "MikiDiag");
-        // WebView 自己的内边距变化（键盘弹出/收起、切换导航方式、旋转）都要重发一次。
-        // 只挂监听、不消费 insets：ViewCompat 的监听器是在 View.onApplyWindowInsets 之后
-        // 才被调用，WebView 内部的处理不受影响。
-        ViewCompat.setOnApplyWindowInsetsListener(webView, (v, insets) -> {
-            applyKeyboardInset(webView, insets);
-            publishInsets();
-            return insets;
-        });
-        applyKeyboardInset(webView, ViewCompat.getRootWindowInsets(webView));
+
+        // 监听挂 decor view：CoordinatorLayout 会把 insets 吞掉，挂 WebView 上只能读到 0。
+        // 只挂监听、不消费 insets：返回值原样透传，其它视图的处理不受影响。
+        ViewCompat.setOnApplyWindowInsetsListener(
+            getWindow().getDecorView(),
+            (view, insets) -> {
+                applyKeyboardMargin(webView, insets);
+                publishInsets();
+                reportInsets(webView, insets);
+                return insets;
+            }
+        );
+        applyKeyboardMargin(webView, ViewCompat.getRootWindowInsets(webView.getRootView()));
         publishInsets();
     }
 
@@ -93,93 +97,57 @@ public class MainActivity extends BridgeActivity {
     }
 
     /**
-     * 补发安全区：onCreate 那次 publishInsets 跑在布局之前，读到的 insets 全是 0。
+     * 按输入法内边距给 WebView 自己留出底部外边距：键盘弹起时 = 键盘高度，收起时 = 0。
      *
-     * 这不只是"少发一次"的问题——那次发布时 bottom 是 0，而「父视图底部内边距 ≥ 期望值(0)」这个
-     * 判据恰好成立，于是 --native-inset-bottom 被写成 0 并且**再也不会被改正**（值没变就不再发），
-     * 表现为内容压在三大金刚/状态栏下面（真机上报的"重叠又回来了"就是这么来的）。
+     * 必须是**设置**而不是累加（每次 insets 回调都从这里重新算），否则键盘弹出期间的
+     * 连续回调会把外边距越加越大，页面被一节节顶上去。
      *
-     * 所以挂一个布局监听：每次布局都重发一次（读到全 0 的窗口不覆盖上一次的值）；
-     * 之后继续保持监听——旋转、切导航方式、分屏都会改内边距，而这些不一定派发新的 insets 回调。
+     * margin 要夹在 [0, parent 高度]：输入法在 App 启动前就可见时 parent 还没测量完
+     * （高度为 0 或很小），此时按键盘高度设 margin 会把 WebView 挤成一条缝。
+     *
+     * 边到边设备（Android 15+）键盘占着底部时导航栏内边距也含在输入法内边距里，取输入法
+     * 内边距就够；不边到边的设备（Android 14 及以下窗口自己会缩）输入法内边距本就是 0，
+     * 这里不会多留一层白。
      */
-    private void installLayoutWatch(final WebView webView) {
-        webView.getViewTreeObserver().addOnGlobalLayoutListener(
-            new ViewTreeObserver.OnGlobalLayoutListener() {
-                @Override
-                public void onGlobalLayout() {
-                    WindowInsetsCompat insets = ViewCompat.getRootWindowInsets(webView.getRootView());
-                    if (insets == null) return;
-                    Insets bars = insets.getInsets(
-                        WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.displayCutout()
-                    );
-                    // 全 0 说明窗口还没真正布好（或这台设备确实没有系统栏）：别拿它盖掉上一次的值
-                    if (bars.top == 0 && bars.bottom == 0 && bars.left == 0 && bars.right == 0) return;
-                    applyKeyboardInset(webView, insets);
-                    publishInsets();
-                    reportLayout(webView, insets);
-                }
-            }
-        );
-    }
-
-    /**
-     * 每次布局都把关键读数记一行（只在数值真的变了才写，避免刷屏）。
-     *
-     * 排查"内容快速闪动"这类现象时，这一行是唯一能同时看到"WebView 有多高、原生补了多少、
-     * 输入法报了多少"的地方——三方中的哪一个在振荡，看序列就能定位。
-     */
-    private void reportLayout(WebView webView, WindowInsetsCompat insets) {
-        View parent = (View) webView.getParent();
+    private void applyKeyboardMargin(WebView webView, WindowInsetsCompat insets) {
+        if (insets == null) return;
+        ViewGroup parent = (ViewGroup) webView.getParent();
         if (parent == null) return;
-        String sig = webView.getHeight() + "/" + parent.getPaddingTop() + "/" + parent.getPaddingBottom()
-            + "/" + insets.isVisible(WindowInsetsCompat.Type.ime())
-            + "/" + insets.getInsets(WindowInsetsCompat.Type.ime()).bottom;
-        if (sig.equals(lastLayoutSig)) return;
-        lastLayoutSig = sig;
-        Log.d(TAG, "layout webH=" + webView.getHeight() + " webY=" + webView.getY()
-            + " parentPad=" + parent.getPaddingTop() + "/" + parent.getPaddingBottom()
-            + " imeRaw=" + insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
+        if (!(webView.getLayoutParams() instanceof ViewGroup.MarginLayoutParams)) return;
+
+        int target = 0;
+        if (insets.isVisible(WindowInsetsCompat.Type.ime())) {
+            target = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom;
+            if (target > parent.getHeight()) target = parent.getHeight();
+            if (target < 0) target = 0;
+        }
+        if (target == lastBottomMargin) return;
+        lastBottomMargin = target;
+
+        ViewGroup.MarginLayoutParams lp = (ViewGroup.MarginLayoutParams) webView.getLayoutParams();
+        lp.bottomMargin = target;
+        webView.setLayoutParams(lp);
+        Log.d(TAG, "kbMargin=" + target + " parentH=" + parent.getHeight()
             + " imeOn=" + (insets.isVisible(WindowInsetsCompat.Type.ime()) ? 1 : 0));
     }
 
     /**
-     * 按输入法内边距给 WebView 的父视图留白：键盘弹起时 = 键盘高度，收起时 = 0。
+     * 每次 insets 变化都记一行（只在数值真的变了才写，避免刷屏）。
      *
-     * 必须是**设置**而不是累加（每次 insets 回调都从这里重新算），否则键盘弹出期间的
-     * 连续回调会把内边距越加越高，页面被一节节顶上去。
+     * 排查"内容快速闪动"这类现象时，这一行是唯一能同时看到"WebView 有多高、外边距多少、
+     * 输入法报了多少"的地方——三方中的哪一个在振荡，看序列就能定位。
      */
-    private void applyKeyboardInset(WebView webView, WindowInsetsCompat insets) {
-        if (insets == null) return;
-        ViewGroup parent = (ViewGroup) webView.getParent();
-        if (parent == null) return;
-
-        boolean keyboard = insets.isVisible(WindowInsetsCompat.Type.ime());
-        int target = 0;
-        if (keyboard) {
-            Insets bars = insets.getInsets(
-                WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.displayCutout()
-            );
-            // 已经留过系统栏内边距 = 窗口不是边到边的（系统自己缩过），别再补键盘那一层
-            if (parent.getPaddingBottom() < bars.bottom) {
-                target = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom;
-            }
-        }
-        float density = getResources().getDisplayMetrics().density;
-        // 交给网页前换算成 CSS 像素：网页读的是 CSS 变量，dp 与 px 在这里会差一个密度
-        keyboardCssPx = target > 0 ? Math.round(target / density) : 0;
-        // 「原生接管键盘」这个状态一旦成立就保持住，直到明确交还（target == 0）为止。
-        // 中间输入法自己改高度（候选栏出现/收起）时，网页侧必须一直认为"不用你管"；
-        // 若改成按当前高度判断，网页侧会在候选栏变化的瞬间抢回让位权，那一下就是可见的跳动。
-        if (target > 0) nativeOwnsKeyboard = true;
-        else if (!keyboard) nativeOwnsKeyboard = false;
-        if (parent.getPaddingBottom() == target) return;
-        parent.setPadding(
-            parent.getPaddingLeft(),
-            parent.getPaddingTop(),
-            parent.getPaddingRight(),
-            target
-        );
-        Log.d(TAG, "ime=" + (keyboard ? 1 : 0) + " parentBottomPad=" + target);
+    private void reportInsets(WebView webView, WindowInsetsCompat insets) {
+        String sig = webView.getHeight() + "/" + lastBottomMargin
+            + "/" + insets.isVisible(WindowInsetsCompat.Type.ime())
+            + "/" + insets.getInsets(WindowInsetsCompat.Type.ime()).bottom;
+        if (sig.equals(lastLayoutSig)) return;
+        lastLayoutSig = sig;
+        Insets bars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
+        Log.d(TAG, "layout webH=" + webView.getHeight() + " margin=" + lastBottomMargin
+            + " imeRaw=" + insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
+            + " imeOn=" + (insets.isVisible(WindowInsetsCompat.Type.ime()) ? 1 : 0)
+            + " bars=" + bars.top + "/" + bars.bottom);
     }
 
     /** 读真实内边距并注入 CSS 变量；已经在原生侧留过白的方向发 0。 */
@@ -196,10 +164,13 @@ public class MainActivity extends BridgeActivity {
             Insets bars = insets.getInsets(
                 WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.displayCutout()
             );
+            // 四点全 0 说明窗口还没真正布好（或这台设备确实没有系统栏）：
+            // 别拿它去盖掉上一次发出去的正常值（真机上表现为安全区永久变 0、内容压到系统栏下面）
+            if (bars.top == 0 && bars.bottom == 0 && bars.left == 0 && bars.right == 0) return;
+
             boolean keyboard = insets.isVisible(WindowInsetsCompat.Type.ime());
             // 键盘占着底部时底部内边距交给键盘（与 Capacitor 的 calcSafeAreaInsets 同口径），
-            // 否则三大金刚会与键盘叠加出一段多余空白。键盘那层的留白由 applyKeyboardInset 负责，
-            // 所以这里的比较基准也要跟着换，否则会把键盘留白当成"导航栏已经处理过"。
+            // 键盘那层的留白由 applyKeyboardMargin 负责；否则三大金刚会与键盘叠出多余空白。
             int expectedBottom = keyboard ? 0 : bars.bottom;
 
             float density = getResources().getDisplayMetrics().density;
@@ -214,13 +185,6 @@ public class MainActivity extends BridgeActivity {
                 + "document.documentElement.style.setProperty('--native-inset-right','" + right + "px');"
                 + "document.documentElement.style.setProperty('--native-inset-bottom','" + bottomCss + "px');"
                 + "document.documentElement.style.setProperty('--native-inset-left','" + left + "px');"
-                // 让位归属标记：原生管着键盘时写一个非 0 值，网页侧据此把 --kb 报 0
-                // （见 src/ui/viewport.ts）。它是**开关**不是高度——网页侧不需要知道具体多高
-                // （视口已经被原生撑短了），写成随高度变化的数字反而会在高度抖动时被误判成"交还"。
-                // 交还时清掉变量，网页侧回到自己算。
-                + (nativeOwnsKeyboard
-                    ? "document.documentElement.style.setProperty('--native-kb','1px');"
-                    : "document.documentElement.style.removeProperty('--native-kb');")
                 // 网页侧靠这个事件知道"原生改过变量了、重算一次"（写 CSS 变量本身不触发可视区事件）
                 + "window.dispatchEvent(new Event('miki:insets'));";
             // 值没变就不再写一遍：键盘弹出期间每次回调都 evaluateJavascript 会让 WebView
@@ -232,8 +196,8 @@ public class MainActivity extends BridgeActivity {
             // 这次发给网页的是多少"，不用改代码重新装包。网页侧自己的读数会以 "web ..." 前缀
             // 追加在后面（见 src/mobile/diag.ts），两边的时序能对上。
             Log.d(TAG, "bars=" + bars.top + "/" + bars.bottom + " ime=" + (keyboard ? 1 : 0)
-                + " parentPad=" + parent.getPaddingTop() + "/" + parent.getPaddingBottom()
-                + " -> css=" + top + "/" + bottomCss + " kb=" + keyboardCssPx);
+                + " webH=" + webView.getHeight() + " margin=" + lastBottomMargin
+                + " -> css=" + top + "/" + bottomCss);
         });
     }
 
