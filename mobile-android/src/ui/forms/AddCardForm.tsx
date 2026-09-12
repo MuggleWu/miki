@@ -6,29 +6,38 @@ import { useWorkspace } from '../use-workspace'
 import { PREF_KEYS, prefGet, prefSet } from '@mobile/prefs'
 
 /**
- * 这一刻该往哪个牌组加卡。优先级：用户选过的（还在）> 上次用的（还在）> 第一个。
+ * 这一刻该往哪个牌组加卡。优先级：用户选过的（还在）> 发起处的牌组（还在）> 上次用的（还在）> 第一个。
  *
  * 为什么抽成纯函数：这段判断原来散在一个 effect 里（异步读偏好后无条件 setDeckId），
  * 而 deckInfos() 每次渲染都返回新数组、被当成依赖，于是每次渲染都重放一遍，
  * 用户选完牌组一打字就被弹回「上次用的牌组」。手机端**没有**「移动牌组」功能（桌面端有），
  * 卡片落错牌组只能删了重建——所以这条优先级值得能在 node 里穷举。
- * 收成一个入参对象而不是三个位置参数：chosenId / lastUsedId 都是 string | null，位置写反了
- * 编译器一句话都不会说，而写反的语义正好就是这个 bug（偏好盖掉用户的选择）。
- * 另外，已选/上次用的牌组都可能已被删除，两个都要重新确认还在列表里才认。
+ * 收成一个入参对象而不是三个位置参数：chosenId / defaultId / lastUsedId 都是 string | null，
+ * 位置写反了编译器一句话都不会说，而写反的语义正好就是这个 bug（偏好盖掉用户的选择）。
+ * 另外，已选/发起处/上次用的牌组都可能已被删除，三个都要重新确认还在列表里才认。
  */
 export function pickDeckId(input: {
   deckIds: readonly string[]
   chosenId: string | null
+  /** 发起处的牌组（学习页「⋮ → 新增卡片」传当前牌组）：没选过时的第一顺位 */
+  defaultId?: string | null
   lastUsedId: string | null
 }): string {
-  const { deckIds, chosenId, lastUsedId } = input
+  const { deckIds, chosenId, defaultId = null, lastUsedId } = input
   if (deckIds.length === 0) return ''
   if (chosenId !== null && deckIds.includes(chosenId)) return chosenId
+  if (defaultId !== null && deckIds.includes(defaultId)) return defaultId
   if (lastUsedId !== null && deckIds.includes(lastUsedId)) return lastUsedId
   return deckIds[0]
 }
 
-export function AddCardForm({ onDone }: { onDone(): void }): JSX.Element {
+export function AddCardForm({
+  onDone,
+  defaultDeckId = null
+}: {
+  onDone(): void
+  defaultDeckId?: string | null
+}): JSX.Element {
   const ws = useWorkspace()
   const bump = useApp((s) => s.bump)
   const notify = useApp((s) => s.notify)
@@ -46,7 +55,7 @@ export function AddCardForm({ onDone }: { onDone(): void }): JSX.Element {
 
   // 当前牌组在渲染期派生，不落 state：一旦让某个 effect 去写它，就得再回答「用户选过没有」，
   // 而这个答案用 ref 记还是会跟迟到的异步结果赛跑。派生以后只有用户的 onChange 能改它
-  const deckId = pickDeckId({ deckIds: decks.map((d) => d.id), chosenId, lastUsedId })
+  const deckId = pickDeckId({ deckIds: decks.map((d) => d.id), chosenId, defaultId: defaultDeckId, lastUsedId })
 
   // 「上次用的牌组」只是还没得选时的兜底：挂载时读一次就够——抽屉内容是按需挂载的
   // （每次打开都是一次新挂载，见 DecksPage 那处的注释），所以「打开即读一次」正是想要的粒度。

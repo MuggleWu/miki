@@ -47,6 +47,19 @@ describe('pickDeckId：该用哪个牌组', () => {
     expect(pickDeckId({ deckIds: ids, chosenId: 'gone', lastUsedId: 'also-gone' })).toBe('d1')
   })
 
+  it('发起处给的默认牌组：没选过时它说了算，压过「上次用的」', () => {
+    // 学习页「⋮ → 新增卡片」走的就是这条：在 d3 里刷卡，新卡默认落 d3，
+    // 而不是上次在别的牌组加卡时留下的 d2——刷卡被打断时不应该还要重新选牌组
+    expect(pickDeckId({ deckIds: ids, chosenId: null, defaultId: 'd3', lastUsedId: 'd2' })).toBe('d3')
+    // 用户在抽屉里选过之后，默认牌组同样不能把它弹回去（与「上次用的」同一条规矩）
+    expect(pickDeckId({ deckIds: ids, chosenId: 'd2', defaultId: 'd3', lastUsedId: 'd1' })).toBe('d2')
+    // 不传 defaultId（首页 FAB 那条路径）时行为与从前完全一致
+    expect(pickDeckId({ deckIds: ids, chosenId: null, lastUsedId: 'd2' })).toBe('d2')
+    expect(pickDeckId({ deckIds: ids, chosenId: null, lastUsedId: null })).toBe('d1')
+    // 发起处的牌组已经被删掉（换牌组后删了它）→ 退回「上次用的」，不要给一个不存在的 id
+    expect(pickDeckId({ deckIds: ids, chosenId: null, defaultId: 'gone', lastUsedId: 'd2' })).toBe('d2')
+  })
+
   it('牌组还没到（列表为空）时给空串，canSave 据此保持禁用', () => {
     expect(pickDeckId({ deckIds: [], chosenId: null, lastUsedId: 'd2' })).toBe('')
   })
@@ -57,11 +70,12 @@ describe('AddCardForm：牌组选择只由用户改', () => {
     expect(src).toMatch(/=\s*pickDeckId\(\{/)
   })
 
-  it('调用点把这两个 state 原样交进去（对调或写死常量都等于让偏好盖掉用户的选择）', () => {
+  it('调用点把这三个 state 原样交进去（对调或写死常量都等于让偏好盖掉用户的选择）', () => {
     // 位置参数时写反了编译器不报错、组件又挂不起来，所以要钉住「传的是 chosenId / lastUsedId
-    // 本身」而不是别的表达式；这两个值同类型（string | null），任何值级对调都不会被类型挡住
+    // 本身」而不是别的表达式；这几个值同类型（string | null），任何值级对调都不会被类型挡住
     const call = /=\s*pickDeckId\(\{[^}]*\}\)/.exec(src)?.[0] ?? '(调用点没找到)'
     expect(call).toMatch(/chosenId\s*,/)
+    expect(call).toMatch(/defaultId:\s*defaultDeckId/)
     expect(call).toMatch(/lastUsedId\s*[,}]/)
   })
 

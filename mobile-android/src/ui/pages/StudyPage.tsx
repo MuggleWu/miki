@@ -7,6 +7,7 @@ import { useApp } from '../store'
 import { StudySession, type StudyState } from '@mobile/study-session'
 import { Sheet } from '../components/Sheet'
 import { CardEditForm } from '../forms/CardEditForm'
+import { AddCardForm } from '../forms/AddCardForm'
 import { useLongPress } from '../use-long-press'
 import { Md } from '../md'
 import { RATING_LABEL } from '@shared/format'
@@ -27,6 +28,8 @@ export function StudyPage({ deckId }: { deckId: string }): JSX.Element {
   const [state, setState] = useState<StudyState>(() => session.start())
   const [menu, setMenu] = useState(false)
   const [editing, setEditing] = useState(false)
+  // 刷卡时被当前这张卡启发出来的新卡：不退回首页、也不离开这个牌组，就地新增
+  const [adding, setAdding] = useState(false)
   const busy = useRef(false)
 
   // 工作区在页面之外被改过（同步拉取、回到前台重载）→ 手里这张卡是重载前的旧对象：
@@ -171,6 +174,20 @@ export function StudyPage({ deckId }: { deckId: string }): JSX.Element {
       ) : null}
 
       <Sheet open={menu} title="这张卡" onClose={() => setMenu(false)}>
+        {/*
+          新增卡片排在编辑之前：它是这个菜单里唯一「不针对当前这张卡」的动作，
+          且是刷卡被打断时最想干的事（由当前卡想到一张新卡）。默认牌组就是当前牌组——
+          在哪个牌组刷卡，新卡就落哪个牌组，不必回首页再选一次。
+        */}
+        <button
+          className="sheet-item"
+          onClick={() => {
+            setMenu(false)
+            setAdding(true)
+          }}
+        >
+          新增卡片
+        </button>
         <button
           className="sheet-item"
           disabled={card === null}
@@ -236,6 +253,15 @@ export function StudyPage({ deckId }: { deckId: string }): JSX.Element {
             }}
           />
         ) : null}
+      </Sheet>
+
+      {/*
+        新增卡片就地开：卡片是从当前牌组里长出来的，所以默认牌组传当前牌组。
+        提交后不关抽屉（连续录入），要关就点关闭——语义与桌面端连续新增一致。
+        没有牌组时表单自己会说"先去建牌组"（这条路径只在学习页可达，而学习页必然有牌组）。
+      */}
+      <Sheet open={adding} title="新增卡片" onClose={() => setAdding(false)}>
+        {adding ? <AddCardForm defaultDeckId={deckId} onDone={() => setAdding(false)} /> : null}
       </Sheet>
     </>
   )
