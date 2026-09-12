@@ -296,7 +296,7 @@ describe('记账', () => {
 })
 
 describe('只拉模式（回前台的自动同步）', () => {
-  // 用户 报的 bug：说好"回前台静默拉一次"，结果把手机上攒的进度也推上去了。
+  // 用户报的 bug：说好"回前台静默拉一次"，结果把手机上攒的进度也推上去了。
   it('本地有新进度、远端没动 → 绝不推送，远端一行都不多（回归）', async () => {
     const ev1 = row({ action: 'answer', cardId: 'c1', t: 1, rating: 3 })
     gh.push('review-log/2026-09.ndjson', ev1)

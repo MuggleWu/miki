@@ -1,0 +1,144 @@
+// 键盘挡住内容这件事，网页侧怎么算、怎么让位。
+//
+// 背景（Android 15+ 起，targetSdk 35+ 强制边到边）：窗口不再随输入法收缩，
+// `windowSoftInputMode="adjustResize"` 那套在边到边窗口上等于失效——键盘是**画在内容之上**的，
+// 而且 WebView 不会把聚焦的输入框滚进可见区。表现出来就是：点开输入框，正在打的字被键盘压住，
+// 什么都看不见（真机上报的正是这条）。
+//
+// 网页侧能观测到的三件事各不相同，所以这里分开处理：
+//
+// 1. 键盘占掉了多高 → `--kb`。用布局视口底 - 可见区底，而不是"窗口高度 - 可见高度"：
+//    vv.offsetTop 是可见区在布局坐标里的上沿（浏览器为露出输入框把可视区往下滚过就有值），
+//    只减 vv.height 会算出一个假的键盘高度。
+// 2. 底部要留多少白 → `--bottom-blocked`（CSS 里取 --kb 与安全区的大者），弹层、提示条都靠它。
+// 3. 聚焦的输入框要滚进可见区 → 光靠浏览器自己的 scrollIntoView 不够（它只保证"进入滚动
+//    容器"，不管键盘压住的那一条），所以滚动容器还要带 scroll-padding-bottom（见 styles.css）。
+//
+// 这套算法在浏览器里可验证：给 window.visualViewport 装一个替身（vite 下 __mikiKbOverride），
+// 就能把"键盘弹起"这件事完整地模拟出来（见 viewport.spec.ts 与本次提交的自测记录）。
+// 真机上还有一层原生兜底：MainActivity 按输入法内边距把 WebView 顶上去，
+// 那时这里的 vv.height 本来就会跟着变小，--kb 算出来接近 0——两套不会叠加。
+
+/** 键盘高度上限：屏幕顶多被键盘占掉大半，超过这个数一定是量错了（比如把缩放算错） */
+const MAX_KEYBOARD_RATIO = 0.7
+
+export interface ViewportMetrics {
+  /** 布局视口高度（documentElement.clientHeight）：fixed 定位的参照，边到边下不随键盘变 */
+  layoutHeight: number
+  /** 可见视口高度（visualViewport.height）：键盘弹起时变小 */
+  visualHeight: number
+  /** 可见区在布局坐标里的上沿（visualViewport.offsetTop） */
+  visualOffsetTop: number
+  /** 缩放（visualViewport.scale）：非 1 时可见高度要按布局坐标折算 */
+  scale: number
+}
+
+/**
+ * 键盘占掉的高度（CSS 像素，>= 0）。
+ *
+ * 为什么把公式抽出来：这段判断原来内联在 App 的 effect 里，改一次就得在真机上试一次；
+ * 抽成纯函数后可以在 node 里把「边到边（布局视口不缩）」「老系统（窗口随键盘缩）」
+ * 「浏览器为露出输入框把可视区滚下去」这几种情形逐个钉住。
+ */
+export function keyboardHeight(m: ViewportMetrics): number {
+  const scale = m.scale > 0 ? m.scale : 1
+  const visibleBottom = m.visualHeight * scale + m.visualOffsetTop
+  const raw = m.layoutHeight - visibleBottom
+  const max = m.layoutHeight * MAX_KEYBOARD_RATIO
+  return Math.round(Math.min(Math.max(raw, 0), max))
+}
+
+/** 要监听的可视区对象（visualViewport 在旧 WebView / node 里可能不存在） */
+export interface VisualViewportLike {
+  height: number
+  offsetTop: number
+  scale: number
+  addEventListener(type: string, fn: () => void): void
+  removeEventListener(type: string, fn: () => void): void
+}
+
+export interface ViewportEnv {
+  /** 布局视口高度：documentElement.clientHeight */
+  layoutHeight(): number
+  /** 可见视口；没有这个 API 时返回 null（老 WebView） */
+  visualViewport(): VisualViewportLike | null
+}
+
+/** 由 window / document 造出默认环境；读不到就退化成"没有可视区信息" */
+export function browserEnv(): ViewportEnv {
+  return {
+    layoutHeight: () => document.documentElement.clientHeight,
+    visualViewport: () => (window.visualViewport as unknown as VisualViewportLike | undefined) ?? null
+  }
+}
+
+/**
+ * 模拟开关：vite 下可用 `window.__mikiKbOverride = { height, offsetTop }` 覆盖可视区读数，
+ * 用来在浏览器里复现"键盘弹起"（真机才有的状态，桌面浏览器造不出来）。
+ * 生产构建里没人会去设它，读到 undefined 就走真实读数。
+ */
+interface KbOverride {
+  height?: number
+  offsetTop?: number
+}
+
+function readOverride(): KbOverride | null {
+  if (typeof window === 'undefined') return null
+  const o = (window as unknown as { __mikiKbOverride?: KbOverride }).__mikiKbOverride
+  return o && typeof o === 'object' ? o : null
+}
+
+/** 算一次读数（把模拟开关叠上去），供 apply 与测试共用 */
+export function readMetrics(env: ViewportEnv): ViewportMetrics {
+  const vv = env.visualViewport()
+  const override = readOverride()
+  return {
+    layoutHeight: env.layoutHeight(),
+    visualHeight: override?.height ?? vv?.height ?? env.layoutHeight(),
+    visualOffsetTop: override?.offsetTop ?? vv?.offsetTop ?? 0,
+    scale: vv?.scale ?? 1
+  }
+}
+
+export interface KeyboardWatchOptions {
+  env?: ViewportEnv
+  /** 键盘高度变化时调用（写 --kb 与打日志由调用方决定） */
+  onChange(height: number): void
+  /** 是否输出诊断日志（排这类问题时靠它看 WebView 到底有没有收缩） */
+  log?: boolean
+}
+
+/**
+ * 开始盯键盘高度：立刻算一次，并在可视区尺寸/位置变化时重算。
+ * 返回取消函数（页面卸载时调用；标签页隐藏后回前台也会重新触发一次 resize）。
+ */
+export function watchKeyboardHeight(opts: KeyboardWatchOptions): () => void {
+  const env = opts.env ?? browserEnv()
+  const vv = env.visualViewport()
+  // 没有可视视口信息（老 WebView）时**不写**这个变量：CSS 里的默认值就是 0，
+  // 写了反而会把上一次的高度留在一个说不准的页面上
+  if (!vv) return () => {}
+  let last = -1
+  const apply = (): void => {
+    const m = readMetrics(env)
+    const kb = keyboardHeight(m)
+    if (opts.log) {
+      // 排这类问题时用 adb logcat 看这一行就够了：innerHeight 与 vv.height 同步变小
+      // 说明 WebView 跟着键盘收缩了（此时 kb=0 是对的，原生已经让过位）
+      console.log(
+        `[miki-kb] layout=${m.layoutHeight} inner=${typeof window === 'undefined' ? '?' : window.innerHeight}` +
+          ` vv=${Math.round(m.visualHeight)} offset=${Math.round(m.visualOffsetTop)} kb=${kb}`
+      )
+    }
+    if (kb === last) return
+    last = kb
+    opts.onChange(kb)
+  }
+  apply()
+  vv.addEventListener('resize', apply)
+  vv.addEventListener('scroll', apply)
+  return () => {
+    vv.removeEventListener('resize', apply)
+    vv.removeEventListener('scroll', apply)
+  }
+}

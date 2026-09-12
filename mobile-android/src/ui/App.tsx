@@ -6,6 +6,7 @@ import { useEffect, useLayoutEffect, useRef } from 'react'
 import { App as CapApp } from '@capacitor/app'
 import { useApp } from './store'
 import { syncToastPopover } from './toast-host'
+import { watchKeyboardHeight } from './viewport'
 import { DecksPage } from './pages/DecksPage'
 import { StudyPage } from './pages/StudyPage'
 import { LibraryPage } from './pages/LibraryPage'
@@ -109,36 +110,21 @@ export function App(): JSX.Element {
     }
   }, [back])
 
-  // 键盘占位：把"被键盘遮住的高度"写进 CSS 变量，弹层底部据此留白。
+  // 键盘占位：把"被键盘遮住的高度"写进 CSS 变量 --kb，弹层底部据此留白（见 styles.css）。
   //
-  // 为什么不能只靠 manifest 的 adjustResize：Android 11+ 的边到边布局下，
-  // WebView 的视口不一定随键盘收缩（真机上就看到过——编辑卡片时保存按钮被键盘盖住）。
-  // VisualViewport 是 WebView 自己能观测到的事实，不依赖系统那套窗口 inset 的行为差异。
-  useEffect(() => {
-    const vv = window.visualViewport
-    if (!vv) return
-    const apply = (): void => {
-      // 键盘高度 = 布局视口高度 − 可见视口高度。
-      // 关键点：**不能用 window.innerHeight**——它在 Chrome/WebView 上跟着视觉视口一起缩
-      // （实测键盘弹起时 842→530，算出来永远是 0），而 fixed 定位参照的布局视口不缩，
-      // 于是弹层比可见区域还高、底部按钮永远在屏幕外。documentElement.clientHeight 才是布局视口。
-      const layoutH = document.documentElement.clientHeight
-      const kb = Math.max(0, layoutH - vv.height - vv.offsetTop)
-      document.documentElement.style.setProperty('--kb', `${Math.round(kb)}px`)
-      // 键盘高度的实测值：只有这里能看清"WebView 到底有没有跟着键盘收缩"，
-      // 排这类问题时不用盲改 CSS（innerHeight 与 vv.height 同步变小就是收缩了）
-      console.log(
-        `[miki-kb] layout=${layoutH} inner=${window.innerHeight} vv=${Math.round(vv.height)} kb=${Math.round(kb)}`
-      )
-    }
-    apply()
-    vv.addEventListener('resize', apply)
-    vv.addEventListener('scroll', apply)
-    return () => {
-      vv.removeEventListener('resize', apply)
-      vv.removeEventListener('scroll', apply)
-    }
-  }, [])
+  // 为什么不能只靠 manifest 的 adjustResize：Android 15+ 的边到边布局下，窗口不再随输入法
+  // 收缩，adjustResize 对 WebView 等于失效——键盘盖在内容上，聚焦的输入框也不会被滚出来。
+  // 所以这里补两层：网页侧按可视视口算 --kb（滚动留白、弹层让位），原生侧按输入法内边距把
+  // WebView 顶上去（MainActivity，那才是"能不能看见正在打的字"的关键）。
+  // 两套不会叠加：原生把视口顶上去之后，vv.height 跟着变小，这里算出来就接近 0。
+  useEffect(
+    () =>
+      watchKeyboardHeight({
+        onChange: (kb) => document.documentElement.style.setProperty('--kb', `${kb}px`),
+        log: true
+      }),
+    []
+  )
 
   // 回到前台自动拉取（设计文档：拉取是只读的、静默的；推送只由用户点触发）
   // 注意这里必须是 'pull-only'：推送只发生在用户点"推送进度 / 立即同步"时

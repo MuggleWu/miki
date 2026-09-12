@@ -48,6 +48,9 @@
    * 于是弹层最后一项永远压在三大金刚下面，而源码里"看着"是有安全区的。
    */
   --bottom-blocked: max(var(--kb, 0px), var(--inset-bottom, 0px));
+  /* 键盘高度默认 0：App 里算出真值后覆盖它。写在这里而不是让 JS 负责初始化，
+     是因为老 WebView 没有 visualViewport、算不出这个值，那时必须是 0 而不是"未定义" */
+  --kb: 0px;
 }
 
 /*
@@ -297,7 +300,7 @@ select {
  * 刷卡面：与桌面端 .cardbox 同版式——**正面在最上面、左对齐**，白底面板，显示答案后一条虚线
  * 分隔、下面是答案。原来是"垂直居中 + 灰底"的大卡片，看着像弹窗而不是卡。
  * 字体也走桌面端的设置（config.study.fontFamily/fontSize），字重固定 400：原来 500 在
- * Android 的 Noto Sans CJK 上就是"黑体"观感，用户 反馈"非常不好看"。
+ * Android 的 Noto Sans CJK 上就是"黑体"观感，用户反馈"非常不好看"。
  */
 .card-face {
   font-size: calc(var(--study-fs, 16px) * var(--fs-scale));
@@ -322,7 +325,7 @@ select {
    * 这里原来有 white-space: pre-wrap，本意是给"渲染管线未就绪时的纯文本回退"保住换行，
    * 但它作用在**整张卡面**上：markdown-it 生成的 HTML 每个块之间都有换行，于是
    * `<p>a</p>\n<p>b</p>` 之间多出一个整行高、松列表的每个 `<li>` 里也多出两行——
-   * 用户 报的"列表和空行分段的间距特别大"就是这么来的（实测：单行 li 高 85.6px）。
+   * 用户报的"列表和空行分段的间距特别大"就是这么来的（实测：单行 li 高 85.6px）。
    * 换行语义现在只加在纯文本回退上（.md.md-plain），渲染后的内容按正常空白处理。
    */
   word-break: break-word;
@@ -330,7 +333,7 @@ select {
 
 .card-face .front {
   /* 与桌面端一致：正面不做加粗。原来这里是 500，Android 的 Noto Sans CJK 没有 500 档，
-     会被合成加重，整屏看着就是"黑体"，这也是 用户 说"非常不好看"的直接原因。 */
+     会被合成加重，整屏看着就是"黑体"，这也是用户说"非常不好看"的直接原因。 */
   font-weight: 400;
 }
 
@@ -428,8 +431,13 @@ select {
   /* --kb 是键盘高度（App 里用 VisualViewport 量的）。直接用 max-height 表达
      "最多占到键盘上沿"，比依赖系统窗口 inset 的行为更可控——真机上就吃过这个亏：
      编辑卡片时键盘盖住了保存按钮，用户找不到怎么保存。 */
-  max-height: calc(86vh - var(--kb, 0px));
-  bottom: var(--kb, 0px);
+  /*
+   * --bottom-blocked 是"屏幕底部被占掉的那一条"（键盘或导航栏，取大者）。
+   * 原来这里写的是 var(--kb)：没有键盘时它是 0，弹层就贴到屏幕最底下，而底部那条
+   * 导航栏/手势条是画在 WebView 上的（边到边），最后一行按钮会被压住看不见。
+   */
+  max-height: calc(86vh - var(--bottom-blocked));
+  bottom: var(--bottom-blocked);
   margin: 0;
   padding: 0;
   border: none;
@@ -445,7 +453,8 @@ select {
 .sheet-inner {
   display: flex;
   flex-direction: column;
-  max-height: calc(86vh - var(--kb, 0px));
+  /* 与 .sheet 同一把尺子：内层不能比外层还高，否则底部按钮会伸出弹层之外 */
+  max-height: calc(86vh - var(--bottom-blocked));
 }
 
 .sheet-full .sheet-inner {
@@ -530,7 +539,7 @@ select {
 
 /*
  * 按钮默认是 display: inline-block，两个相邻的 <button> 会排在**同一行**、而且 JSX 换行
- * 处不产生空格，于是看起来就是两个按钮零间距贴在一起（用户 报的「看本次同步明细」与
+ * 处不产生空格，于是看起来就是两个按钮零间距贴在一起（用户报的「看本次同步明细」与
  * 「立即同步」、「清空凭据」与「清空本机偏好」就是这两处）。这里改成块级 + 占满一行，
  * 并排的场景一律放进 .row-btns（flex）。
  */
@@ -1109,6 +1118,19 @@ code {
 
 .sheet-body {
   padding-bottom: calc(16px + var(--bottom-blocked));
+  /*
+   * 光有 padding-bottom 不够：浏览器把聚焦的输入框滚进可见区时，只保证它"进了滚动容器"，
+   * 不管键盘压住的那一条。scroll-padding 才是在滚动容器上声明"底边这段别用"——
+   * 于是点开下面的输入框时，它会停在键盘上沿而不是钻进键盘后面（Android 15+ 边到边下
+   * 窗口不随键盘收缩，这一条是"看得见正在打的字"的网页侧保障）。
+   * 留白量与 padding-bottom 同源：都取 --bottom-blocked，改一个不会漏掉另一个。
+   */
+  scroll-padding-bottom: calc(16px + var(--bottom-blocked));
+}
+
+/* 普通页面体同理：卡片库里点搜索框、长列表里点下面的输入框，都要能滚到键盘上面 */
+.page-body {
+  scroll-padding-bottom: calc(24px + var(--bottom-blocked));
 }
 
 /* ---------- markdown 渲染（与桌面端同一份管线） ---------- */
