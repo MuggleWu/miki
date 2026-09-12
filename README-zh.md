@@ -98,7 +98,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 桌面端与手机之间通过**一个私有 git 仓库**同步：手机端做「拉取 → 行合并 → 推送」，两端各自追加的事件按行并集合并；如果两侧都改了同一份 JSON（`decks.json` / `config.json`），同步会停下来要求先去桌面端定夺，绝不猜。在手机的「设置 → 配置同步」里填仓库与细粒度 PAT（需要该仓库的 Contents 读写权限），点「立即同步」即把工作区拉到手机上。
 
-移动端 v1 的边界：只追加、不压实（压实留在桌面端）；工作区由同步建立，也可以先在手机上自建牌组试用。构建、门禁与测试细节见 [docs/zh/development.md](docs/zh/development.md) 的「Android 移动端」一节。
+移动端 v1 的边界：只追加、不压实（压实留在桌面端）；工作区由同步建立，也可以先在手机上自建牌组试用。客户端有独立文档：[mobile-android/README.md](mobile-android/README.md)（English: [mobile-android/README.en.md](mobile-android/README.en.md)）；构建、门禁与测试细节见 [docs/zh/development.md](docs/zh/development.md) 的「Android 移动端」一节。
 
 ## HTTP API 与 MCP
 

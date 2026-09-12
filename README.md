@@ -98,7 +98,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 The desktop and the phone sync through **a private git repository**: the phone pulls, unions lines, and pushes; events appended on either side are merged by line union. If both sides changed the same JSON document (`decks.json` / `config.json`), sync stops and asks you to settle it on the desktop rather than guessing. On the phone, open Settings → sync configuration, enter the repository plus a fine-grained PAT (Contents read/write on that repository), and tap sync to pull the workspace down.
 
-What v1 is not: the phone only appends and never compacts (compaction stays on the desktop), and the workspace is established by syncing — or start by creating a deck on the phone. Build, gates, and test details: see the "Android app" section in [docs/en/development.md](docs/en/development.md).
+What v1 is not: the phone only appends and never compacts (compaction stays on the desktop), and the workspace is established by syncing — or start by creating a deck on the phone. The client has its own document: [mobile-android/README.en.md](mobile-android/README.en.md) (中文: [mobile-android/README.md](mobile-android/README.md)); build, gates, and test details: see the "Android app" section in [docs/en/development.md](docs/en/development.md).
 
 ## HTTP API & MCP
 
