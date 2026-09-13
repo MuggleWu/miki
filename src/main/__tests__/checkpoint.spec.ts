@@ -21,6 +21,11 @@ afterAll(() => {
 })
 
 const readBytes = (p: string): Buffer | null => (fs.existsSync(p) ? fs.readFileSync(p) : null)
+/** delta 现存行数：压实的待折叠判据是「还剩几行」，不是「文件在不在」 */
+const deltaLines = (p: string): number =>
+  (readBytes(p)?.toString('utf-8') ?? '')
+    .split('\n')
+    .filter((l) => l.trim() !== '').length
 
 describe('检查点 + delta 写路径', () => {
   it('调度类操作（answer/undo/delete）不重写卡片基文件', () => {
@@ -54,7 +59,9 @@ describe('检查点 + delta 写路径', () => {
     expect(w2.getCard(c.id)!.back).toBe('新反面')
 
     w2.compact()
-    expect(fs.existsSync(deltaFile)).toBe(false)
+    // 只留最后一行锚点：删文件或清空都会与手机端往同一 delta 的追加撞成 git 冲突（见 compactDeck 注释）
+    expect(fs.existsSync(deltaFile)).toBe(true)
+    expect(deltaLines(deltaFile)).toBe(1)
     w2 = newWs(d) // 检查点快照路径
     expect(w2.getCard(c.id)!.front).toBe('新正面')
   })
@@ -161,7 +168,7 @@ describe('启动压实积压的 delta', () => {
     return f
   }
 
-  it('delta 超过阈值：启动时压实，基文件含最新内容且 delta 被删除', () => {
+  it('delta 超过阈值：启动时压实，基文件含最新内容且 delta 只剩锚点行', () => {
     const d = tmp()
     const w = newWs(d)
     const deck = w.addDeck('积压组').id
@@ -170,9 +177,32 @@ describe('启动压实积压的 delta', () => {
     expect(fs.existsSync(deltaFile)).toBe(true)
 
     const w2 = newWs(d)
-    // 压实后：delta 没了，基文件里是新内容
-    expect(fs.existsSync(deltaFile)).toBe(false)
+    // 压实后：delta 只留最后一行当锚点（文件保留，见 compactDeck 注释），基文件里是新内容
+    expect(deltaLines(deltaFile)).toBe(1)
     expect(w2.getCard(c.id)!.front).toBe('积压 249') // 最后一行胜出
+  })
+
+  it('压实只留锚点行、重启不重复压实（多端同步靠它避开 git 硬冲突）', () => {
+    const d = tmp()
+    const w = newWs(d)
+    const deck = w.addDeck('锚点组').id
+    const c = w.addCard(deck, '原内容', '')
+    w.updateCard(c.id, { front: '改过一次', back: '' })
+    w.updateCard(c.id, { front: '改过两次', back: '' })
+    const deltaFile = path.join(d, 'cards', `${deck}.delta.ndjson`)
+    expect(deltaLines(deltaFile)).toBe(2)
+
+    w.compact()
+    expect(fs.existsSync(deltaFile)).toBe(true) // 文件还在：git 看到的是"删 1..N-1 行"而非"删文件"
+    expect(deltaLines(deltaFile)).toBe(1)
+    // 留下的锚点就是压实前那最后一行
+    expect(fs.readFileSync(deltaFile, 'utf-8')).toContain('改过两次')
+
+    const baseFile = path.join(d, 'cards', `${deck}.ndjson`)
+    const afterCompact = readBytes(baseFile)!
+    const w2 = newWs(d) // 锚点行不算待折叠内容，基文件一个字节都不该再动
+    expect(readBytes(baseFile)!.equals(afterCompact)).toBe(true)
+    expect(w2.getCard(c.id)!.front).toBe('改过两次')
   })
 
   it('delta 未超阈值：不动文件（不无谓重写基文件）', () => {
@@ -200,7 +230,7 @@ describe('启动压实积压的 delta', () => {
     newWs(d) // 第一次启动压实
     const baseFile = path.join(d, 'cards', `${deck}.ndjson`)
     const afterFirst = readBytes(baseFile)!
-    newWs(d) // 第二次启动：delta 已不存在，不该再重写基文件
+    newWs(d) // 第二次启动：delta 已清空（0 行），不该再重写基文件
     expect(readBytes(baseFile)!.equals(afterFirst)).toBe(true)
     expect(newWs(d).getCard(c.id)!.front).toBe('积压 249')
   })

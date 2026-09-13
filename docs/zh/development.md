@@ -88,6 +88,11 @@ docs/                # 本目录
 - 启动结算（`compactStaleDeletions`）读的是**加载期快照**：基文件删除标记必须在 delta 合并前
   采样，因为 delta 的内容覆盖行会改写 `deletedAt`，合完就分不清「基文件本身落没落盘」。
   该快照只用于这一次结算，之后清空，所以热加载不会反复重写基文件。
+- **压实时 delta 只留最后一行锚点**（2026-09-13）：多端同步下删文件会与另一端往同一 delta 的追加
+  撞成 git 的 modify/delete 硬冲突，而清空（0 行）git 仍判 CONFLICT（「删光 1..N 行」与「在 N 行后
+  追加」被视为同一处重叠改动）；只留最后一行才能让两侧改动落在不相邻的 hunk、自动合并。
+  所以 `compactDeck` 里别再写 `fs.rmSync`，判据也别用 `fs.existsSync`（文件恒存在 → 每次触发都
+  重写基文件），改用 `deltaCounts` / `deltaRowsOnLoad` 两个计数。
 
 ## 测试
 

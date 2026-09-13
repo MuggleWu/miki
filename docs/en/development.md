@@ -89,6 +89,14 @@ Two traps worth knowing before touching this code:
   `.delta.ndjson`; `<deck>.ndjson` is only merged at compaction, so reading the base file
   right after closing and seeing the old content is expected. To judge whether the write
   landed, look at the delta or read back through `WorkspaceService.getCard`.
+- **Compaction keeps only the last delta line as an anchor** (2026-09-13): with multi-device
+  sync, removing the file collides with the other side appending to the same delta as a git
+  modify/delete hard conflict, and truncating (0 lines) still conflicts (git treats "delete
+  lines 1..N" and "append after line N" as one overlapping change); keeping only the last line
+  puts the two edits in non-adjacent hunks so they auto-merge. So do not reintroduce
+  `fs.rmSync` in `compactDeck`, and do not judge by `fs.existsSync` either (the file always
+  exists → every trigger rewrites the base file): use the `deltaCounts` / `deltaRowsOnLoad`
+  counters.
 
 ## Tests
 

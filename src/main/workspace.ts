@@ -48,7 +48,7 @@ import type { DamageReport } from '../shared/workspace'
 import { WorkspaceWatcher } from './workspace-watcher'
 
 /** delta 压实阈值（行）：追加超过它、或启动时发现 delta 现存行数超过它，就把该牌组压实。
- * 取 200 的理由：真实牌组的 delta 长期停在百行量级不动（没有阈值就永不压实），而一次压实
+ * 取 200 的理由：实际牌组的 delta 长期停在百行量级不动（没有阈值就永不压实），而一次压实
  * 代价是单牌组基文件重写（真实数据最大 3668 行，实测 <20ms），200 行意味着最坏情况积压可控、
  * 又不会频繁重写文件搅动 git 历史 */
 const DELTA_COMPACT_ROWS = 200
@@ -687,30 +687,47 @@ export class WorkspaceService {
     }
   }
 
-  /** 压实一个牌组：全量重写基文件（检查点 seq + 调度快照行）→ 清 delta。
-   * 没有待落盘内容（delta 不存在且无删除/墓碑）→ 直接返回，连基文件都不重写：否则每次触发
+  /** 压实一个牌组：全量重写基文件（检查点 seq + 调度快照行）→ 清空 delta。
+   * 没有待落盘内容（delta 无新增且无删除/墓碑）→ 直接返回，连基文件都不重写：否则每次触发
    * 都要改写全部基文件，git 里全是噪声。返回是否真的压实了（调用方据此决定要不要落聚合检查点）。
    *
    * 注意「无 delta 也可能需要压实」：新增卡直接追加基文件、删卡与跨牌组移出只动内存态，
    * 三种都不建 delta，所以 delta 可能压根不存在，而基文件已经与内存态不一致——典型是
    * **软删卡的 deletedAt 还停在 null**（删卡只写 review-log 与内存）。老版本这里只看 delta
    * 是否存在，会让这条路径永远压不动，只读卡片文件的程序就一直把已删除的卡当成还在。
-   * 注意压实**保留**软删行（行数不变，只是 deletedAt 落成时间戳）：内容要留着供撤销/查看 */
+   * 注意压实**保留**软删行（行数不变，只是 deletedAt 落成时间戳）：内容要留着供撤销/查看
+   *
+   * delta 是**只留最后一行**：既不是删除、也不是清空（2026-09-13 改）。多端同步时
+   * 「这一端删掉 delta 文件」撞上「手机端往同一个 delta 追加」在 git 里是 modify/delete 硬冲突，
+   * git 不会自动合，每次 pull 都要人工判一次语义。清空（0 行）同样不行——实测 git 把
+   * 「删光 1..N 行」与「在第 N 行后追加 M 行」当作同一处重叠改动，照样 CONFLICT。
+   * 留最后一行当**锚点**则两处改动落在不相邻的 hunk（本地只删 1..N-1，远端在 N 之后插入），
+   * git 自动合并成「锚点 + 远端那 M 行」。锚点行的内容早已折进基文件，重放时被覆盖一次是
+   * 幂等的；顺序上锚点在前、远端新行在后，后写覆盖也仍然取远端的新内容。
+   * 判据随之从「文件是否存在」改成内存计数：留了锚点行后 existsSync 恒为真，
+   * 会让每次触发都重写基文件（正是这段开头要避免的噪声）。 */
   private compactDeck(deckId: string): boolean {
-    const hasDelta = fs.existsSync(this.paths.deckDeltaFile(deckId))
+    const hasDelta =
+      (this.deltaCounts.get(deckId) ?? 0) > 0 || (this.deltaRowsOnLoad.get(deckId) ?? 0) > 0
     if (!hasDelta && (this.pendingDeletes.get(deckId) ?? 0) === 0) return false
     const lines: string[] = [JSON.stringify({ __mikiCheckpoint: this.session.seq })]
     // 行序 = 卡 id 序：装饰排序（比 id 不比整行 JSON 串，短键比较），读取端按 id 建 Map 不依赖行序
     const cards = (this.byDeck.get(deckId) ?? []).slice().sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
     const rows = cards.map((c) => snapshotRow(c))
     atomicWrite(this.paths.deckCardsFile(deckId), lines.join('\n') + '\n' + (rows.length ? rows.join('\n') + '\n' : ''))
-    fs.rmSync(this.paths.deckDeltaFile(deckId), { force: true })
-    this.deltaCounts.set(deckId, 0)
+    const deltaFile = this.paths.deckDeltaFile(deckId)
+    // 只留最后一行当锚点（理由见上方注释）；本来就没有 delta 的牌组不必凭空造一个文件
+    if (fs.existsSync(deltaFile)) {
+      const rows = fs.readFileSync(deltaFile, 'utf-8').split('\n').filter((l) => l.trim() !== '')
+      atomicWrite(deltaFile, rows.length > 0 ? rows[rows.length - 1] + '\n' : '')
+    }
+    this.deltaCounts.set(deckId, fs.existsSync(deltaFile) ? 1 : 0)
+    this.deltaRowsOnLoad.set(deckId, fs.existsSync(deltaFile) ? 1 : 0)
     // 内存态已全部写回基文件：待落盘计数（删除/墓碑）随之归零
     this.pendingDeletes.set(deckId, 0)
     this.deckCheckpoints.set(deckId, this.session.seq)
     this.watcher.noteWrite(this.paths.deckCardsFile(deckId))
-    this.watcher.noteWrite(this.paths.deckDeltaFile(deckId))
+    this.watcher.noteWrite(deltaFile)
     return true
   }
 
