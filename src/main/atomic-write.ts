@@ -1,5 +1,5 @@
 // 主进程共用的原子文件写：先写 .tmp 再改名，防半写文件。
-// 统一 0600：config.json 含 API token，指针/端口文件无敏感字段但收紧无害。
+// 统一 0600：写出的文件只读属主。config.json 随工作区 git 仓库同步，权限收紧是防御性兜底。
 import * as fs from 'node:fs'
 
 export function atomicWrite(file: string, data: string): void {

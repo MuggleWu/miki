@@ -361,7 +361,7 @@ app.whenReady().then(() => {
   ipcMain.handle(
     IPC.saveBrowserConfig,
     (_e, columns: string[], sort: SortKey[], filters?: { stateFilter?: QueryState | null; dueFilter?: DueFilter }) => {
-      // 统一走 saveConfig（原子写 + 自写豁免快照）；config.json 含 API token 由 atomicWrite 保持 0600
+      // 统一走 saveConfig（原子写 + 自写豁免快照）；落盘那份由 serializeConfig 抹空 api.token
       ws.saveConfig({
         browser: { columns: columns as MikiConfig['browser']['columns'], sort, ...(filters ?? {}) }
       })

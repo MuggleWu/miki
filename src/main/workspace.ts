@@ -63,6 +63,17 @@ const DELTA_COMPACT_ROWS = 200
  * 阈值取 20 而不是 1：压实要全量重写基文件，逐次删除都重写太费；20 能把漂移压在用户可忽略的量级 */
 const PENDING_DELETE_COMPACT = 20
 
+/** config.json 的落盘序列化：**token 一律抹空**。
+ *
+ * 这个文件在工作区 git 仓库里被跟踪并同步到远端，写进去就等于把凭证推上 Git。
+ * 真 token 只存在内存（API 鉴权从 ws.config 取）与 `.miki/api-token`（应用私有、已 gitignore）。
+ * 读路径（loadConfig）与写路径（saveConfig）共用本函数：两边各写一份序列化，正是 09-12
+ * 「token 搬去私有文件」漏改 saveConfig、导致此后每次保存设置/窗口位置都把 token 写回
+ * config.json 的成因——用户一提交，凭证就重新进历史。 */
+function serializeConfig(cfg: MikiConfig): string {
+  return JSON.stringify({ ...cfg, api: { ...cfg.api, token: '' } }, null, 2)
+}
+
 export class WorkspaceService {
   root!: string
   config!: MikiConfig
@@ -194,8 +205,7 @@ export class WorkspaceService {
     // 旧版本把 token 写在 config.json 里会被工作区仓库同步/推送到远端，这里读取时顺手迁移一次。
     config.api.token = this.ensureApiToken(config.api.token)
     // 序列化结果与盘上逐字节一致才跳过回写：init/热加载是读路径，不该无谓翻动 config.json 的 mtime。
-    // 落盘那份把 token 抹空（内存里的 config 仍持有它，API 鉴权从 ws.config 取）。
-    const serialized = JSON.stringify({ ...config, api: { ...config.api, token: '' } }, null, 2)
+    const serialized = serializeConfig(config)
     if (raw !== serialized) atomicWrite(file, serialized)
     // 跳过回写时也要收敛老版本的宽松权限（0600 含 token）；chmod 不改 mtime，不惊动变更检测
     try {
@@ -257,7 +267,7 @@ export class WorkspaceService {
       this.scheduler = this.buildScheduler(this.config)
       this.previewScheduler = this.buildScheduler(this.config, true)
     }
-    atomicWrite(this.paths.configJson(), JSON.stringify(this.config, null, 2))
+    atomicWrite(this.paths.configJson(), serializeConfig(this.config))
     this.watcher.noteWrite(this.paths.configJson())
     return this.config
   }
@@ -603,7 +613,7 @@ export class WorkspaceService {
     if (deck) {
       deck.name = name
       this.saveDecks()
-      // 统计缓存不含牌组名，rename 无需失效（此注释声明该不变量）
+      // 统计缓存按牌组 id 建键，牌组改名后可继续复用（此注释声明该不变量）
     }
     return deck ?? null
   }

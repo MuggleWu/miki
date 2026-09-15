@@ -400,6 +400,21 @@ describe('saveConfig', () => {
     expect(newWs(d).config.api.token).toBe(t1)
   })
 
+  it('saveConfig 不把 token 写回 config.json（写路径与读路径同口径）', () => {
+    const d = tmpKept()
+    const w = newWs(d)
+    const token = w.config.api.token
+    expect(token).not.toBe('')
+    // 回归：saveConfig 早先直接 JSON.stringify(this.config)，而 loadConfig 才抹空 token。
+    // 于是每次保存设置/窗口位置（退出时必存）都把 token 明文写回这个被 git 跟踪、
+    // 会同步到远端的文件，用户一提交凭证就重新进历史。
+    // 读路径有测试守着、写路径没有，所以这个不一致活了下来——本用例补的就是写路径。
+    w.saveConfig({ window: { x: 11, y: 22, width: 800, height: 600, maximized: false } })
+    expect(JSON.parse(fs.readFileSync(path.join(d, 'config.json'), 'utf-8')).api.token).toBe('')
+    expect(w.config.api.token).toBe(token) // 内存仍持有它，API 鉴权不受影响
+    expect(newWs(d).config.api.token).toBe(token) // 重启后从私有文件取回同一个 token
+  })
+
   it('window 状态：旧 config 缺键补默认，保存后跨 init 恢复', () => {
     const d = tmpKept()
     const w = newWs(d)
