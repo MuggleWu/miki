@@ -312,9 +312,14 @@ export class MobileWorkspace {
           if (row.__mikiSeq !== undefined) {
             // 水位已在行上
           } else if (prev) {
-            if (row.fsrs === undefined) row.fsrs = prev.fsrs ? { ...prev.fsrs } : prev.fsrs
+            const contentOnly = row.fsrs === undefined // 内容行（无调度快照）vs move 快照行
+            if (contentOnly) row.fsrs = prev.fsrs ? { ...prev.fsrs } : prev.fsrs
             if (row.reps === undefined) row.reps = prev.reps
             if (row.lapses === undefined) row.lapses = prev.lapses
+            // 与桌面端同一条口径：暂停态由 suspend 事件驱动、随压实进基行快照，内容行里那份
+            // 只是写行当时的旧值。认它会让已暂停的卡复活（基行快照的 true 被行里的 false 盖掉，
+            // 而老 suspend 事件在检查点水位之前、重放不再补）。
+            if (contentOnly && prev.suspended !== undefined) row.suspended = prev.suspended
             row.__mikiSeq = prev.__mikiSeq
           } else {
             row.__mikiSeq = cp

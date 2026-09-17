@@ -263,6 +263,51 @@ describe('移动版工作区：写入 → 重载 的往返一致性', () => {
     expect(ws4.getCard('c1')!.lapses).toBe(1)
   })
 
+  it('内容行不承载暂停态：基行快照已暂停时，delta 里的内容行不复活它', async () => {
+    // 基文件 = 桌面端压实后的快照行（c1 已暂停，检查点水位 100）
+    fs.seed(
+      `${ROOT}/cards/d1.ndjson`,
+      [
+        JSON.stringify({ __mikiCheckpoint: 100 }),
+        JSON.stringify({
+          id: 'c1',
+          front: '第一张',
+          back: '答案一',
+          createdAt: 1_700_000_000_000,
+          updatedAt: 1_700_000_000_000,
+          deletedAt: null,
+          suspended: true,
+          fsrs: {
+            state: 2,
+            step: null,
+            stability: 1,
+            difficulty: 5,
+            due: 1_700_000_000_000,
+            lastReview: 1_699_000_000_000
+          },
+          reps: 4,
+          lapses: 4
+        })
+      ].join('\n') + '\n'
+    )
+    // delta = 内容行（无调度快照，水位继承基行）：写行当时卡还没暂停，行里是 false
+    fs.seed(
+      `${ROOT}/cards/d1.delta.ndjson`,
+      JSON.stringify({
+        id: 'c1',
+        front: '第一张改',
+        back: '答案一',
+        createdAt: 1_700_000_000_000,
+        updatedAt: 1_700_000_001_000,
+        deletedAt: null,
+        suspended: false
+      }) + '\n'
+    )
+
+    const ws5 = await openWorkspace(fs)
+    expect(ws5.getCard('c1')).toMatchObject({ suspended: true, lapses: 4, front: '第一张改' })
+  })
+
   it('新增牌组：decks.json 整份重写，重载后可见', async () => {
     const deck = await ws.addDeck('新牌组')
     const ws2 = await openWorkspace(fs)

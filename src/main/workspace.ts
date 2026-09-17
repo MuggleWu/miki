@@ -351,9 +351,15 @@ export class WorkspaceService {
         if (row.__mikiSeq !== undefined) {
           // 水位已在行上
         } else if (prev) {
-          if (row.fsrs === undefined) row.fsrs = prev.fsrs ? { ...prev.fsrs } : prev.fsrs
+          const contentOnly = row.fsrs === undefined // 内容行（无调度快照）vs move 快照行
+          if (contentOnly) row.fsrs = prev.fsrs ? { ...prev.fsrs } : prev.fsrs
           if (row.reps === undefined) row.reps = prev.reps
           if (row.lapses === undefined) row.lapses = prev.lapses
+          // 暂停态与 reps/lapses 同族：由 suspend 事件驱动、随压实进基行快照。内容行里那份
+          // 只是写行当时的旧值，认它会让已暂停的卡复活——基行快照的 true 被行里的 false 盖掉，
+          // 而那次 suspend 事件又落在检查点水位之前、重放不再补（09-17 实测：两张 lapses=4 的
+          // 卡就此回到队列）。所以内容行一律继承基行的暂停态，暂停只认基行 + 水位后的事件。
+          if (contentOnly && prev.suspended !== undefined) row.suspended = prev.suspended
           row.__mikiSeq = prev.__mikiSeq
         } else {
           row.__mikiSeq = cp
@@ -717,8 +723,7 @@ export class WorkspaceService {
    * 判据随之从「文件是否存在」改成内存计数：留了锚点行后 existsSync 恒为真，
    * 会让每次触发都重写基文件（正是这段开头要避免的噪声）。 */
   private compactDeck(deckId: string): boolean {
-    const hasDelta =
-      (this.deltaCounts.get(deckId) ?? 0) > 0 || (this.deltaRowsOnLoad.get(deckId) ?? 0) > 0
+    const hasDelta = (this.deltaCounts.get(deckId) ?? 0) > 0 || (this.deltaRowsOnLoad.get(deckId) ?? 0) > 0
     if (!hasDelta && (this.pendingDeletes.get(deckId) ?? 0) === 0) return false
     const lines: string[] = [JSON.stringify({ __mikiCheckpoint: this.session.seq })]
     // 行序 = 卡 id 序：装饰排序（比 id 不比整行 JSON 串，短键比较），读取端按 id 建 Map 不依赖行序
@@ -726,9 +731,12 @@ export class WorkspaceService {
     const rows = cards.map((c) => snapshotRow(c))
     atomicWrite(this.paths.deckCardsFile(deckId), lines.join('\n') + '\n' + (rows.length ? rows.join('\n') + '\n' : ''))
     const deltaFile = this.paths.deckDeltaFile(deckId)
-    // 只留最后一行当锚点（理由见上方注释）；本来就没有 delta 的牌组不必凭空造一个文件
+    // 只留最后一行当锚点（理由见上方注释）；没有 delta 时不必凭空造一个
     if (fs.existsSync(deltaFile)) {
-      const rows = fs.readFileSync(deltaFile, 'utf-8').split('\n').filter((l) => l.trim() !== '')
+      const rows = fs
+        .readFileSync(deltaFile, 'utf-8')
+        .split('\n')
+        .filter((l) => l.trim() !== '')
       atomicWrite(deltaFile, rows.length > 0 ? rows[rows.length - 1] + '\n' : '')
     }
     this.deltaCounts.set(deckId, fs.existsSync(deltaFile) ? 1 : 0)

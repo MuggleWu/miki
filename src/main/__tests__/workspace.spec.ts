@@ -188,6 +188,36 @@ describe('leech 自动暂停', () => {
     w3.undo()
     expect(w3.getCard(c3.id)!.suspended).toBe(true)
   })
+
+  it('内容行不承载暂停态：压实留下的锚点行不复活已暂停卡', () => {
+    const d = tmpKept()
+    const w = newWs(d)
+    const deck = w.addDeck('锚点组').id
+    w.saveConfig({ leechThreshold: 2 })
+    const card = w.addCard(deck, '锚点卡', '原答案')
+    // 先改卡面：此时卡还没暂停，写下的内容行里是 suspended:false
+    // —— 正是「手机写的旧内容行回流」时那份会盖掉暂停态的旧值
+    w.updateCards([{ cardId: card.id, front: '锚点卡改' }])
+    w.answer(card.id, 1)
+    w.answer(card.id, 1) // lapses=2 达阈值 → 自动暂停
+    expect(w.getCard(card.id)!.suspended).toBe(true)
+
+    // 压实：基文件落快照行（suspended:true，检查点水位一并前移），delta 只留最后一行锚点
+    w.compact()
+    const baseText = fs.readFileSync(path.join(d, 'cards', `${deck}.ndjson`), 'utf-8')
+    const deltaRows = fs
+      .readFileSync(path.join(d, 'cards', `${deck}.delta.ndjson`), 'utf-8')
+      .split('\n')
+      .filter((l) => l.trim() !== '')
+    expect(baseText).toContain('"suspended":true')
+    expect(deltaRows).toHaveLength(1)
+    expect(JSON.parse(deltaRows[0])).toMatchObject({ id: card.id, suspended: false })
+
+    // 重载：暂停态只认基行快照 + 水位之后的事件，锚点行（内容行）里那份旧值不作数
+    const w2 = newWs(d)
+    expect(w2.getCard(card.id)).toMatchObject({ suspended: true, lapses: 2, front: '锚点卡改' })
+    expect(w2.getStudy(deck).card?.id).not.toBe(card.id)
+  })
 })
 
 describe('重放一致性（重启恢复）', () => {
