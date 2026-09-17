@@ -23,9 +23,7 @@ afterAll(() => {
 const readBytes = (p: string): Buffer | null => (fs.existsSync(p) ? fs.readFileSync(p) : null)
 /** delta 现存行数：压实的待折叠判据是「还剩几行」，不是「文件在不在」 */
 const deltaLines = (p: string): number =>
-  (readBytes(p)?.toString('utf-8') ?? '')
-    .split('\n')
-    .filter((l) => l.trim() !== '').length
+  (readBytes(p)?.toString('utf-8') ?? '').split('\n').filter((l) => l.trim() !== '').length
 
 describe('检查点 + delta 写路径', () => {
   it('调度类操作（answer/undo/delete）不重写卡片基文件', () => {

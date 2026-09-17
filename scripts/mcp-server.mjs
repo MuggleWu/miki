@@ -100,9 +100,7 @@ async function resolveConnection() {
   }
   if (!token && cfg && cfg.api && cfg.api.token) token = cfg.api.token
   if (!token) {
-    console.error(
-      `miki MCP：工作区 ${workspaceDir} 缺少 API token（首次启动 miki 后会自动生成到 .miki/api-token）。`
-    )
+    console.error(`miki MCP：工作区 ${workspaceDir} 缺少 API token（首次启动 miki 后会自动生成到 .miki/api-token）。`)
     process.exit(1)
   }
   if (cfg.api.enabled === false) {

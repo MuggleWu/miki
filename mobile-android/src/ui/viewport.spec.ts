@@ -9,13 +9,7 @@
 // 那条路径要真的派发一次事件才算验过，node 环境里没有 window。
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
-import {
-  keyboardHeight,
-  readMetrics,
-  watchKeyboardHeight,
-  type ViewportEnv,
-  type VisualViewportLike
-} from './viewport'
+import { keyboardHeight, readMetrics, watchKeyboardHeight, type ViewportEnv, type VisualViewportLike } from './viewport'
 
 describe('keyboardHeight：键盘占掉多高', () => {
   it('边到边（布局视口不缩）：键盘高度 = 布局视口 − 可见区底部', () => {
