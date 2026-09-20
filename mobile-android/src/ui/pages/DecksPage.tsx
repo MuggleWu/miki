@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useApp } from '../store'
 import { useWorkspace } from '../use-workspace'
+import { sumDeckCounts } from '@mobile/workspace'
 import { Sheet } from '../components/Sheet'
 import { AddCardForm } from '../forms/AddCardForm'
 import { AddDeckForm } from '../forms/AddDeckForm'
@@ -18,6 +19,7 @@ export function DecksPage(): JSX.Element {
 
   // 每次渲染直接算：卡片计数由调度索引增量维护，这里是 O(牌组数)
   const decks = ws.deckInfos()
+  const totals = sumDeckCounts(decks)
   const today = ws.todayCount()
   const dmg = ws.damageReport()
   const sync = useApp((s) => s.sync)
@@ -60,23 +62,35 @@ export function DecksPage(): JSX.Element {
             <p className="muted">点右下角 ＋ 新建一个；想用电脑上已有的牌组，先到设置里配好同步再拉取。</p>
           </section>
         ) : (
-          <ul className="deck-list">
-            {decks.map((d) => (
-              <li key={d.id}>
-                <button className="deck-row" onClick={() => go({ kind: 'study', deckId: d.id })}>
-                  <span className="deck-name">{d.name}</span>
-                  {/* 三个数与桌面端同序（总数 / 未学习 / 到期）、同色。与桌面端不同的一点：
-                      为 0 时照常显示 0，颜色也不淡化——手机上固定占位比留白好认，扫一眼就知道
-                      这一列是 0 而不是没有。 */}
-                  <span className="deck-counts">
-                    <span className="count count-total">{d.counts.total}</span>
-                    <span className="count count-new">{d.counts.new}</span>
-                    <span className="count count-due">{d.counts.due}</span>
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
+          <>
+            {/* 总计行：逐牌组数字的加和（口径见 sumDeckCounts）。吸顶——牌组多了要滚动，
+                总量是"扫一眼"的信息，不该滚出视野。 */}
+            <div className="deck-total" aria-label="全部牌组总计">
+              <span className="deck-total-name">总计</span>
+              <span className="deck-counts">
+                <span className="count count-total">{totals.total}</span>
+                <span className="count count-new">{totals.new}</span>
+                <span className="count count-due">{totals.due}</span>
+              </span>
+            </div>
+            <ul className="deck-list">
+              {decks.map((d) => (
+                <li key={d.id}>
+                  <button className="deck-row" onClick={() => go({ kind: 'study', deckId: d.id })}>
+                    <span className="deck-name">{d.name}</span>
+                    {/* 三个数与桌面端同序（总数 / 未学习 / 到期）、同色。与桌面端不同的一点：
+                        为 0 时照常显示 0，颜色也不淡化——手机上固定占位比留白好认，扫一眼就知道
+                        这一列是 0 而不是没有。 */}
+                    <span className="deck-counts">
+                      <span className="count count-total">{d.counts.total}</span>
+                      <span className="count count-new">{d.counts.new}</span>
+                      <span className="count count-due">{d.counts.due}</span>
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </>
         )}
         <p className="legend muted">
           <span className="count count-total">总数</span>

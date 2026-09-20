@@ -7,8 +7,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { MemoryFileStore } from './fs'
 import { MobilePaths } from './paths'
-import { MobileWorkspace, sortDecksByName } from './workspace'
-import type { Card } from '@shared/types'
+import { MobileWorkspace, sortDecksByName, sumDeckCounts } from './workspace'
+import type { Card, DeckInfo } from '@shared/types'
 
 const ROOT = 'miki-base'
 
@@ -587,5 +587,60 @@ describe('写盘失败时回滚内存态', () => {
 
     await expect(ws.addCard('d1', '新的', '')).rejects.toThrow('写入失败')
     expect(ws.cardCount()).toBe(count)
+  })
+})
+
+// 首页牌组列表上方的「总计」行：三个计数逐牌组加和。
+// 口径必须是页面同一份数字（deckInfos 给的 counts），不能另算一套——否则总计与逐行数字对不上。
+describe('首页总计', () => {
+  it('把各牌组的三个计数逐项相加', () => {
+    const info = (id: string, total: number, fresh: number, due: number): DeckInfo => ({
+      id,
+      name: id,
+      order: 0,
+      createdAt: 1,
+      deletedAt: null,
+      counts: { total, new: fresh, due }
+    })
+    expect(sumDeckCounts([info('d1', 10, 3, 2), info('d2', 5, 0, 4), info('d3', 0, 0, 0)])).toEqual({
+      total: 15,
+      new: 3,
+      due: 6
+    })
+  })
+
+  it('没有牌组时三项都是 0（页面这时显示空状态，不显示总计行）', () => {
+    expect(sumDeckCounts([])).toEqual({ total: 0, new: 0, due: 0 })
+  })
+
+  it('总计等于 deckInfos() 各项之和：两个牌组 2+1 张新卡 → 3/3/0', async () => {
+    const fs = new MemoryFileStore()
+    seedWorkspace(fs) // A 牌组 + 两张新卡
+    fs.seed(
+      `${ROOT}/decks.json`,
+      JSON.stringify([
+        { id: 'd1', name: 'A 牌组', order: 0, createdAt: 1_700_000_000_000, deletedAt: null },
+        { id: 'd2', name: 'B 牌组', order: 1, createdAt: 1_700_000_000_000, deletedAt: null }
+      ])
+    )
+    fs.seed(
+      `${ROOT}/cards/d2.ndjson`,
+      JSON.stringify({
+        id: 'c3',
+        front: '第三张',
+        back: '答案三',
+        createdAt: 1_700_000_002_000,
+        updatedAt: 1_700_000_002_000,
+        deletedAt: null,
+        suspended: false
+      }) + '\n'
+    )
+    const ws = await openWorkspace(fs)
+    const decks = ws.deckInfos()
+    expect(decks.map((d) => [d.name, d.counts.total])).toEqual([
+      ['A 牌组', 2],
+      ['B 牌组', 1]
+    ])
+    expect(sumDeckCounts(decks)).toEqual({ total: 3, new: 3, due: 0 })
   })
 })

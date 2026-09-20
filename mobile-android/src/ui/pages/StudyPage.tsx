@@ -131,7 +131,7 @@ export function StudyPage({ deckId }: { deckId: string }): JSX.Element {
         </button>
       </div>
 
-      {state.flash ? <p className="flash">{state.flash}</p> : null}
+      {state.flash ? <p className={state.flashTone === 'warn' ? 'flash flash-warn' : 'flash'}>{state.flash}</p> : null}
 
       <div className="page-body study-body">
         {card === null ? (

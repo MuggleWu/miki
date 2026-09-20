@@ -75,6 +75,32 @@ export function sortDecksByName<T extends { name: string }>(decks: T[]): T[] {
   return [...decks].sort((a, b) => a.name.localeCompare(b.name, 'zh', { numeric: true }))
 }
 
+/**
+ * 首页「总计」行：把各牌组的三个计数加和。
+ *
+ * 口径就是 `deckInfos()` 的口径（总数=牌组内未删卡含暂停；未学习=新卡；到期=此刻已到期、
+ * 点进去立刻能刷的卡），所以只是逐项相加，不做任何过滤——**不能拿"牌组列表里显示的数字"
+ * 之外的东西再算一遍**，否则总计与逐行数字对不上，用户一眼就看得出来。
+ * 抽成纯函数是为了能在 node 里断言（页面只负责把结果画出来）。
+ */
+export function sumDeckCounts(decks: DeckInfo[]): DeckTableCounts {
+  const sum: DeckTableCounts = { total: 0, new: 0, due: 0 }
+  for (const d of decks) {
+    sum.total += d.counts.total
+    sum.new += d.counts.new
+    sum.due += d.counts.due
+  }
+  return sum
+}
+
+/** 一次答题触发的 leech 自动暂停（用于就地提示用户"这张卡被暂停了"） */
+export interface LeechSuspension {
+  /** 触发时的累计重来次数（通常正好等于阈值；用户把阈值调小时会大于它） */
+  lapses: number
+  /** 触发时的阈值（config.leechThreshold，可能被改过，提示里要显示当时那个值） */
+  threshold: number
+}
+
 /** 一次全量加载的分段耗时（毫秒） */
 export interface LoadTiming {
   config: number
@@ -716,7 +742,7 @@ export class MobileWorkspace {
     cardId: string,
     rating: Rating,
     durationMs?: number
-  ): Promise<StudyPayload & { answeredCardId: string }> {
+  ): Promise<StudyPayload & { answeredCardId: string; leechSuspended: LeechSuspension | null }> {
     const card = this.cards.get(cardId)
     if (!card || card.deletedAt) throw new Error(`card not found: ${cardId}`)
     const now = Date.now()
@@ -738,9 +764,12 @@ export class MobileWorkspace {
     card.fsrs = after
     card.reps++
     if (rating === 1) card.lapses++
-    // leech：累计重来达阈值（>0 启用）自动暂停；同样走 suspend 事件，重放才自洽
+    // leech：累计重来达阈值（>0 启用）自动暂停；同样走 suspend 事件，重放才自洽。
+    // 结果一并回给调用方：这张卡会从队列里消失，用户必须被告知（见 StudySession.rate）。
+    let leechSuspended: LeechSuspension | null = null
     if (this.config.leechThreshold > 0 && !card.suspended && card.lapses >= this.config.leechThreshold) {
       card.suspended = true
+      leechSuspended = { lapses: card.lapses, threshold: this.config.leechThreshold }
       evs.push({
         seq: this.session.nextSeq(),
         t: now,
@@ -765,7 +794,7 @@ export class MobileWorkspace {
     this.recordAnswer(card.deckId, ev.t, rating, durationMs)
     this.sched.reindexCard(card, before)
     this.session.pushUndoable([ev])
-    return { answeredCardId: cardId, ...this.getStudy(card.deckId) }
+    return { answeredCardId: cardId, leechSuspended, ...this.getStudy(card.deckId) }
   }
 
   /**

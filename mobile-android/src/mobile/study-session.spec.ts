@@ -219,3 +219,100 @@ describe('会话刷新（同步拉取 / 回到前台重载之后）', () => {
     expect(s.card?.id).not.toBe(id)
   })
 })
+
+// 点「重来」把这张卡推到 leech 阈值时，它会**从此不进队列**（自动暂停）。
+// 不吭声的话用户只看到"点了一下，卡没了"，所以这里钉住：暂停确实发生、事件流自洽、
+// 而且给了一条留得住的警示提示（不是一闪而过的 toast）。
+describe('leech 自动暂停', () => {
+  const LEECH_DECK = 'leech'
+
+  /** 铺一个只有一张卡的牌组：它已重来 `lapses` 次；阈值写进 config.json */
+  function seedLeech(fs: MemoryFileStore, threshold: number, lapses: number): void {
+    fs.seed(
+      `${ROOT}/decks.json`,
+      JSON.stringify([{ id: LEECH_DECK, name: '难卡', order: 0, createdAt: 1, deletedAt: null }])
+    )
+    fs.seed(`${ROOT}/config.json`, JSON.stringify({ leechThreshold: threshold }))
+    fs.seed(
+      `${ROOT}/cards/${LEECH_DECK}.ndjson`,
+      JSON.stringify({
+        id: 'c1',
+        front: '难卡正面',
+        back: '难卡背面',
+        createdAt: 1,
+        updatedAt: 1,
+        deletedAt: null,
+        suspended: false,
+        fsrs: null,
+        reps: lapses,
+        lapses
+      }) + '\n'
+    )
+  }
+
+  async function openLeech(
+    threshold: number,
+    lapses: number
+  ): Promise<{ fs: MemoryFileStore; ws: MobileWorkspace; session: StudySession }> {
+    const fs = new MemoryFileStore()
+    seedLeech(fs, threshold, lapses)
+    const ws = new MobileWorkspace(fs, new MobilePaths(ROOT))
+    await ws.init()
+    return { fs, ws, session: new StudySession(ws, LEECH_DECK) }
+  }
+
+  it('达到阈值：自动暂停该卡，并给出警示提示（次数与阈值都写清楚）', async () => {
+    const { fs, ws, session } = await openLeech(8, 7)
+    session.start()
+    session.reveal()
+    const s = await session.rate(1)
+
+    expect(s.flashTone).toBe('warn')
+    expect(s.flash).toContain('leech')
+    expect(s.flash).toContain('8')
+    expect(ws.getCard('c1')!.suspended).toBe(true)
+
+    // 事件流自洽：answer 之后紧跟一条 suspend（与桌面端同一口径，重放才能还原这次暂停）
+    const events = await logEvents(fs)
+    expect(events[events.length - 2].action).toBe('answer')
+    expect(events[events.length - 1]).toMatchObject({ action: 'suspend', suspended: true })
+  })
+
+  it('没到阈值：照常出下一张，不给提示', async () => {
+    const { ws, session } = await openLeech(8, 0)
+    session.start()
+    session.reveal()
+    const s = await session.rate(1)
+    expect(s.flash).toBeNull()
+    expect(s.flashTone).toBe('info')
+    expect(ws.getCard('c1')!.suspended).toBe(false)
+  })
+
+  it('阈值设为 0（关闭 leech）：重来再多次也不暂停、不提示', async () => {
+    const { ws, session } = await openLeech(0, 99)
+    session.start()
+    session.reveal()
+    const s = await session.rate(1)
+    expect(s.flash).toBeNull()
+    expect(ws.getCard('c1')!.suspended).toBe(false)
+  })
+
+  it('answer() 把这次暂停回给调用方（次数 + 当时的阈值）；没触发时是 null', async () => {
+    const hit = await openLeech(8, 7)
+    expect((await hit.ws.answer('c1', 1)).leechSuspended).toEqual({ lapses: 8, threshold: 8 })
+
+    const miss = await openLeech(8, 0)
+    expect((await miss.ws.answer('c1', 1)).leechSuspended).toBeNull()
+  })
+
+  it('撤销这次重来：自动暂停一并解除，提示条回到普通语气', async () => {
+    const { ws, session } = await openLeech(8, 7)
+    session.start()
+    session.reveal()
+    await session.rate(1)
+    const s = await session.undo()
+    expect(s.flash).toBe('已撤销')
+    expect(s.flashTone).toBe('info')
+    expect(ws.getCard('c1')!.suspended).toBe(false)
+  })
+})

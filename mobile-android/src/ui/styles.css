@@ -227,6 +227,35 @@ select {
 
 /* ---------- 牌组列表 ---------- */
 
+/*
+ * 总计行：牌组列表上方的三个计数加和（口径见 workspace 的 sumDeckCounts）。
+ *
+ * 刻意比牌组行"轻"一点（更矮、加粗字、淡蓝底），因为它不是可点的入口——没有按下反馈，
+ * 也不能被当成一个牌组点进去。吸顶：牌组多了要滚动，总量属于"扫一眼"的信息。
+ * 吸顶必须给**不透明**底色，否则滚动时下面的牌组行会从它背后透出来。
+ */
+.deck-total {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 8px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent) 8%, var(--card));
+  color: var(--fg);
+  font-size: 15px;
+}
+
+.deck-total-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-weight: 600;
+}
+
 .deck-list {
   list-style: none;
   margin: 0;
@@ -716,6 +745,16 @@ code {
   text-align: center;
   color: var(--muted);
   border-bottom: 1px solid var(--line);
+}
+
+/*
+ * 警示版提示条（目前只有 leech 自动暂停）：普通提示是"刚刚做了什么"的回执，看过就过去；
+ * 这一条说的是"这张卡的状态变了、它不会自己回来"，所以给一层琥珀底让它被看见。
+ * 颜色借用 --skip（与"跳过"同色系），不新引变量。
+ */
+.flash-warn {
+  color: var(--skip);
+  background: color-mix(in srgb, var(--skip) 12%, transparent);
 }
 
 /*

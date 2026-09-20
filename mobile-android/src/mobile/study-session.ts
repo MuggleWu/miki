@@ -7,6 +7,15 @@ import { clampAnswerMs, fmtDuePreview } from '@shared/format'
 import type { Card, Rating, StudyPayload } from '@shared/types'
 import type { MobileWorkspace } from './workspace'
 
+/**
+ * 一次性提示条的语气。
+ *
+ * info：普通结果（已撤销、卡片已删除）——灰字一行，看过就过去了。
+ * warn：需要用户"注意到"的状态变化。目前只有 leech 自动暂停：那张卡**从此不再进队列**，
+ *       不吭声的话用户只看到"点了一下重来，卡就没了"，很像数据丢了。
+ */
+export type FlashTone = 'info' | 'warn'
+
 export interface StudyState {
   /** 当前要学的卡；null = 这个牌组今天没有待学卡 */
   card: Card | null
@@ -22,6 +31,8 @@ export interface StudyState {
   undoable: number
   /** 上一次操作的结果提示（UI 用来做一次性提示条） */
   flash: string | null
+  /** 上面那条提示的语气（决定 UI 用普通样式还是警示样式） */
+  flashTone: FlashTone
 }
 
 const RATINGS: Rating[] = [1, 2, 3, 4]
@@ -39,7 +50,16 @@ export class StudySession {
   }
 
   private blank(): StudyState {
-    return { card: null, revealed: false, remaining: 0, todayCount: 0, preview: null, undoable: 0, flash: null }
+    return {
+      card: null,
+      revealed: false,
+      remaining: 0,
+      todayCount: 0,
+      preview: null,
+      undoable: 0,
+      flash: null,
+      flashTone: 'info'
+    }
   }
 
   get(): StudyState {
@@ -51,7 +71,7 @@ export class StudySession {
     return this.load(now)
   }
 
-  private load(now: number, flash: string | null = null): StudyState {
+  private load(now: number, flash: string | null = null, flashTone: FlashTone = 'info'): StudyState {
     const payload: StudyPayload = this.ws.getStudy(this.deckId)
     this.shownAt = now
     this.state = {
@@ -61,7 +81,8 @@ export class StudySession {
       todayCount: payload.todayCount,
       preview: null,
       undoable: this.ws.undoableCount(),
-      flash
+      flash,
+      flashTone
     }
     return this.state
   }
@@ -108,15 +129,27 @@ export class StudySession {
     const card = this.state.card
     if (!card || !this.state.revealed) return this.state
     const durationMs = clampAnswerMs(now - this.shownAt)
-    await this.ws.answer(card.id, rating, durationMs)
-    return this.load(now)
+    const res = await this.ws.answer(card.id, rating, durationMs)
+    // leech：这张卡刚刚被自动暂停、从此不进队列。提示**留在屏幕上**（不是一闪而过的 toast）：
+    // 它消失的原因是"被暂停了"而不是"答完了"，一闪而过用户会以为卡丢了。
+    const leech = res.leechSuspended
+    if (!leech) return this.load(now)
+    // 末尾要写清"怎么找回来"：这张卡会从牌组计数里消失，只说"已暂停"等于把用户扔在原地
+    return this.load(now, `⚠ 重来 ${leech.lapses} 次已达 leech 阈值，这张卡已自动暂停（卡片库可解除）`, 'warn')
   }
 
   /** 撤销上一笔可撤销操作（答题或删除），并把该卡重新摆到屏幕中央 */
   async undo(now = Date.now()): Promise<StudyState> {
     const res = await this.ws.undo()
     if (!res.restoredCardId || !res.card) {
-      this.state = { ...this.state, undoable: this.ws.undoableCount(), flash: '没有可撤销的操作' }
+      // flashTone 显式回 info：上一条可能是 leech 的警示条，不写就会把"没有可撤销的操作"
+      // 也画成警示样式（状态是整体替换，不做这件事的地方都会继承旧语气）
+      this.state = {
+        ...this.state,
+        undoable: this.ws.undoableCount(),
+        flash: '没有可撤销的操作',
+        flashTone: 'info'
+      }
       return this.state
     }
     this.shownAt = now
@@ -127,7 +160,8 @@ export class StudySession {
       todayCount: res.todayCount,
       preview: null,
       undoable: this.ws.undoableCount(),
-      flash: '已撤销'
+      flash: '已撤销',
+      flashTone: 'info'
     }
     return this.state
   }

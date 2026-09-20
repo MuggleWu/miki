@@ -66,3 +66,16 @@ describe('键盘让位的不变量', () => {
     expect(blockOf('.toast')).toContain('--bottom-blocked')
   })
 })
+
+// 首页总计行是牌组列表上方的汇总：吸顶（牌组多了要滚动）但不透明。
+//
+// 为什么值得钉：吸顶元素压在滚动内容之上，半透明底色会让下面的牌组行**从它背后透出来**
+// ——只有真正滑起来才看得见，隔着一层 CSS 读代码是看不出来的（本项目在 .legend / .muted
+// 的样式穿透上已经踩过同类的坑）。
+describe('首页总计行的不变量', () => {
+  it('吸顶 + 底色不透明（不能出现 transparent）', () => {
+    const block = blockOf('.deck-total')
+    expect(block).toContain('position: sticky')
+    expect(block).not.toContain('transparent')
+  })
+})
