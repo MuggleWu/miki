@@ -4,7 +4,7 @@ import { Md } from '../md'
 import { isTypingTarget, useApp } from '../store'
 import { createSeqGuard } from '../staleGuard'
 import { MAX_ANSWER_MS, RATING_LABEL, fmtDuePreview as fmtDuePreviewOf } from '../../../shared/format'
-import type { Rating, StudyPayload } from '../../../shared/types'
+import type { LeechSuspension, Rating, StudyPayload } from '../../../shared/types'
 
 export function Study() {
   const studyDeckId = useApp((s) => s.studyDeckId)
@@ -22,6 +22,9 @@ export function Study() {
   /** 评级在途：闸门（ref 同 tick 生效）+ 按钮禁用反馈 */
   const [answering, setAnswering] = useState(false)
   const [answerError, setAnswerError] = useState<string | null>(null)
+  // leech 自动暂停提示：这张卡刚被暂停、从此不进队列。**留在屏幕上**（不是一闪而过的提示）——
+  // 它消失的原因是"被暂停了"而不是"答完了"，一闪而过会让人以为卡丢了。
+  const [leechNotice, setLeechNotice] = useState<LeechSuspension | null>(null)
   const answeringRef = useRef(false)
   const questionShownAt = useRef<number>(Date.now())
   // 最近一次装载进界面的卡（编辑弹窗确认后的重取用它判断「同卡」→ 保留当前相位）
@@ -91,6 +94,8 @@ export function Study() {
         const durationMs = Math.min(Date.now() - questionShownAt.current, MAX_ANSWER_MS)
         const p = await window.miki.answer(payload.card.id, rating, durationMs)
         setAnswerError(null)
+        // 每次评级都重设：答到 leech 卡时立起来，其余情况收掉（撤销解除暂停也走这条）
+        setLeechNotice(p.leechSuspended)
         setPayload(p)
         loadedCardIdRef.current = p.card?.id ?? null
         setPhase('question')
@@ -131,6 +136,9 @@ export function Study() {
       setPhase('question')
       questionShownAt.current = Date.now()
       setStudyCurrentCardId(r.card.id)
+      // 撤销那次「重来」会连带解除 leech 自动暂停（主进程侧的逻辑）⇒ 提示条必须立刻收掉，
+      // 否则屏幕上留着一句"这张卡已自动暂停"，而它其实已经回到队列里了
+      setLeechNotice(null)
     }
   }, [studyDeckId, setStudyCurrentCardId, bumpCardEpoch])
 
@@ -176,6 +184,16 @@ export function Study() {
         <div className="damage-banner">
           <span>这次评级没有存下来：{answerError}（卡片状态已回滚，可以直接再按一次）</span>
           <button className="damage-dismiss" onClick={() => setAnswerError(null)}>
+            知道了
+          </button>
+        </div>
+      ) : null}
+      {leechNotice ? (
+        // 与移动端同一条文案（末尾写清"怎么找回来"：这张卡会从牌组计数里消失，只说"已暂停"
+        // 等于把用户扔在原地）。用 warn 色而不是 danger：不是故障，是卡的状态变了
+        <div className="leech-banner">
+          <span>⚠ 重来 {leechNotice.lapses} 次已达 leech 阈值，这张卡已自动暂停（卡片库可解除）</span>
+          <button className="damage-dismiss" onClick={() => setLeechNotice(null)}>
             知道了
           </button>
         </div>

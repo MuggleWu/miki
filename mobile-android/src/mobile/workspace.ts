@@ -18,6 +18,7 @@
 //   新增卡片                  → cards/<deck>.ndjson 追加一行内容
 import {
   DEFAULT_CONFIG,
+  type AnswerResult,
   type Card,
   type CardContent,
   type Deck,
@@ -93,13 +94,8 @@ export function sumDeckCounts(decks: DeckInfo[]): DeckTableCounts {
   return sum
 }
 
-/** 一次答题触发的 leech 自动暂停（用于就地提示用户"这张卡被暂停了"） */
-export interface LeechSuspension {
-  /** 触发时的累计重来次数（通常正好等于阈值；用户把阈值调小时会大于它） */
-  lapses: number
-  /** 触发时的阈值（config.leechThreshold，可能被改过，提示里要显示当时那个值） */
-  threshold: number
-}
+/** 一次答题触发的 leech 自动暂停：类型定义在 `@shared/types`（LeechSuspension），
+ * 桌面端与移动端共用同一形状——提示文案照它的字段拼，两端不能各记一套。 */
 
 /** 一次全量加载的分段耗时（毫秒） */
 export interface LoadTiming {
@@ -738,11 +734,7 @@ export class MobileWorkspace {
     return ([1, 2, 3, 4] as Rating[]).map((r) => this.previewScheduler.review(card.fsrs, r, now).due)
   }
 
-  async answer(
-    cardId: string,
-    rating: Rating,
-    durationMs?: number
-  ): Promise<StudyPayload & { answeredCardId: string; leechSuspended: LeechSuspension | null }> {
+  async answer(cardId: string, rating: Rating, durationMs?: number): Promise<AnswerResult> {
     const card = this.cards.get(cardId)
     if (!card || card.deletedAt) throw new Error(`card not found: ${cardId}`)
     const now = Date.now()
@@ -766,7 +758,7 @@ export class MobileWorkspace {
     if (rating === 1) card.lapses++
     // leech：累计重来达阈值（>0 启用）自动暂停；同样走 suspend 事件，重放才自洽。
     // 结果一并回给调用方：这张卡会从队列里消失，用户必须被告知（见 StudySession.rate）。
-    let leechSuspended: LeechSuspension | null = null
+    let leechSuspended: AnswerResult['leechSuspended'] = null
     if (this.config.leechThreshold > 0 && !card.suspended && card.lapses >= this.config.leechThreshold) {
       card.suspended = true
       leechSuspended = { lapses: card.lapses, threshold: this.config.leechThreshold }

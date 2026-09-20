@@ -221,6 +221,28 @@ input {
   background: var(--hover);
 }
 
+/*
+ * leech 自动暂停提示条（学习页，与移动端 .flash-warn 同一件事）。
+ * 为什么常驻而不是 toast：这张卡被暂停后不再进队列、也从牌组计数里消失，
+ * 提示一闪而过会让人以为卡丢了；它说的是"状态变了"，不是"刚做了什么"的回执。
+ * 配色沿用全局 --warn（琥珀），不新引变量。
+ */
+.leech-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  background: color-mix(in srgb, var(--warn) 14%, var(--panel));
+  border-bottom: 1px solid color-mix(in srgb, var(--warn) 40%, var(--border));
+  color: var(--warn);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.leech-banner span {
+  flex: 1;
+}
+
 /* ---------- 工作区（多用户档案） ---------- */
 .ws-list {
   list-style: none;

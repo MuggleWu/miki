@@ -99,8 +99,18 @@ export interface StudyPayload {
   todayCount: number
 }
 
+/** leech 自动暂停的触发信息（两端共用同一形状，UI 提示文案也照它拼） */
+export interface LeechSuspension {
+  /** 触发时的累计重来次数（通常正好等于阈值；用户把阈值调小时会大于它） */
+  lapses: number
+  /** 触发时的阈值（config.leechThreshold，可能被改过，提示里要显示当时那个值） */
+  threshold: number
+}
+
 export interface AnswerResult extends StudyPayload {
   answeredCardId: string
+  /** 本次评级触发了 leech 自动暂停时非 null：这张卡会从队列里消失，界面必须告知用户 */
+  leechSuspended: LeechSuspension | null
 }
 
 export interface UndoResult extends StudyPayload {

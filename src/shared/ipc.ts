@@ -1,5 +1,6 @@
 // IPC 通道与调用签名（main / preload / renderer 共用）
 import type {
+  AnswerResult,
   Card,
   CardUpdateResult,
   DeckInfo,
@@ -54,7 +55,7 @@ export interface MikiApi {
   renameDeck(id: string, name: string): Promise<DeckInfo[]>
   deleteDeck(id: string): Promise<DeckInfo[]>
   getStudy(deckId: string): Promise<StudyPayload>
-  answer(cardId: string, rating: Rating, durationMs?: number): Promise<StudyPayload & { answeredCardId: string }>
+  answer(cardId: string, rating: Rating, durationMs?: number): Promise<AnswerResult>
   undo(): Promise<UndoResult>
   addCard(deckId: string, front: string, back: string): Promise<Card>
   updateCard(cardId: string, patch: { front?: string; back?: string }): Promise<Card | null>

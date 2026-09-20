@@ -11,6 +11,7 @@ import { randomUUID } from 'node:crypto'
 import { atomicWrite } from './atomic-write'
 import {
   DEFAULT_CONFIG,
+  type AnswerResult,
   type Card,
   type CardContent,
   type Deck,
@@ -1136,7 +1137,7 @@ export class WorkspaceService {
     }
   }
 
-  answer(cardId: string, rating: Rating, durationMs?: number): StudyPayload & { answeredCardId: string } {
+  answer(cardId: string, rating: Rating, durationMs?: number): AnswerResult {
     const card = this.cards.get(cardId)
     if (!card || card.deletedAt) throw new Error(`card not found: ${cardId}`)
     const now = Date.now()
@@ -1159,8 +1160,12 @@ export class WorkspaceService {
     card.reps++
     if (rating === 1) card.lapses++
     // leech：累计重来次数达到阈值（>0 时启用）自动暂停，不再进入调度；同样走 suspend 事件
+    // （重放才自洽）。结果一并回给调用方：这张卡会从队列里消失，用户必须被告知
+    // （见 src/renderer/src/study/Study.tsx 的提示条与 mobile 端 StudySession.rate）。
+    let leechSuspended: AnswerResult['leechSuspended'] = null
     if (this.config.leechThreshold > 0 && !card.suspended && card.lapses >= this.config.leechThreshold) {
       card.suspended = true
+      leechSuspended = { lapses: card.lapses, threshold: this.config.leechThreshold }
       evs.push({
         seq: this.session.nextSeq(),
         t: now,
@@ -1185,7 +1190,7 @@ export class WorkspaceService {
     this.ledger.recordAnswer(card.deckId, ev.t, rating, durationMs)
     this.sched.reindexCard(card, before)
     this.session.pushUndoable([ev])
-    return { answeredCardId: cardId, ...this.getStudy(card.deckId) }
+    return { answeredCardId: cardId, leechSuspended, ...this.getStudy(card.deckId) }
   }
 
   /** 四档评级各自的下次到期预览（不落盘；关闭 fuzz 保证展示稳定） */

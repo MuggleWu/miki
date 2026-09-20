@@ -125,6 +125,22 @@ describe('leech 自动暂停', () => {
     expect(study.card?.id).not.toBe(card.id)
   })
 
+  it('answer() 回包带上本次触发的暂停信息：未触发为 null，触发后带 lapses/threshold', () => {
+    const w = newWs(tmpKept())
+    const d = w.addDeck('leech 回包组').id
+    w.saveConfig({ leechThreshold: 2 })
+    const card = w.addCard(d, 'leech 回包卡', '')
+    // 未达阈值：不报暂停（界面据此保持"没有告警"的正常态）
+    expect(w.answer(card.id, 1).leechSuspended).toBeNull()
+    // 达到阈值这一答：把当时的累计重来数与阈值一起回给界面，提示文案照它拼
+    const r = w.answer(card.id, 1)
+    expect(r.leechSuspended).toEqual({ lapses: 2, threshold: 2 })
+    expect(w.getCard(card.id)!.suspended).toBe(true)
+    // 已暂停的卡不会再触发一次（避免同一次暂停被报两遍）
+    w.answer(card.id, 1)
+    expect(w.getCard(card.id)!.suspended).toBe(true)
+  })
+
   it('阈值 0 关闭 leech', () => {
     const w = newWs(tmpKept())
     const d = w.addDeck('no leech').id
