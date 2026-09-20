@@ -13,6 +13,24 @@ export interface CardCheckpointRow extends CardContent {
   __mikiSeq?: number
 }
 
+/** 内容行是否已被基行上的更新版本取代 —— 是就整行内容都不认（2026-09-20）。
+ *
+ * 两端加载 delta 时，内容行会把整份内容（front/back/createdAt/updatedAt/deletedAt/suspended）
+ * 盖到基行上，原先不看时间戳。而「运行实例把内存里的旧卡面写回」这条路径会在 delta 里留下
+ * 比基行更旧的内容行：09-18 的提交把这样 315 行一起提交出去（其中 42 行与基行内容不同），
+ * 09-19 某设备无差别应用，37 张卡的 KaTeX 背面被 09-15 13:50 的旧文本盖回去，而基行上
+ * 09-15 14:39 的公式版明明更新（改后值与基行内容毫无关系，只能是行盖的）。
+ *
+ * 判据只有时间戳：行比基行旧就整行不认，基行原样留着；调用方照旧让基行提供调度快照、
+ * 暂停态与水位（与本文件 09-17「内容行不承载暂停态」同一条边界）。
+ * 只针对内容行（无 fsrs 的覆盖行）——带水位的 move 快照行与墓碑行不受影响。
+ * 任一侧 updatedAt 不是数字就放行：宁可照旧覆盖，也不要因缺字段吞掉一次真编辑。
+ * 两端语义必须一致：桌面（src/main/workspace.ts）与移动端（mobile-android/src/mobile/workspace.ts）
+ * 共用本函数，改这里等于同时改两端。 */
+export function isStaleContentRow(row: CardCheckpointRow, base: CardCheckpointRow): boolean {
+  return typeof row.updatedAt === 'number' && typeof base.updatedAt === 'number' && row.updatedAt < base.updatedAt
+}
+
 /** 一次加载里发现的文件级问题（损坏检测用）：非空行无法 JSON.parse / 文件末尾没有换行 */
 export interface LoadIssues {
   /** file → 无法解析的非空行数 */

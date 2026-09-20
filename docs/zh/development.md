@@ -100,7 +100,7 @@ docs/                # 本目录
 | --- | --- |
 | `src/core/__tests__/fsrs.spec.ts` | FSRS-6 基准向量比对：552 组固定输入的期望输出由 py-fsrs v6.3.2 官方实现生成（tools/ 下脚本），TS 实现逐例比对 state/step/stability/difficulty/due |
 | `src/core/__tests__/core.spec.ts` | replay / queue / query / stats 口径 |
-| `src/main/__tests__/workspace.spec.ts` | 服务层不变量：undo 语义、leech、suspend 事件化、重放一致性、事件不驻留、损坏容错、配置持久化 |
+| `src/main/__tests__/workspace.spec.ts` | 服务层不变量：undo 语义、leech、suspend 事件化、delta 内容行时间戳守卫、重放一致性、事件不驻留、损坏容错、配置持久化 |
 | `src/main/__tests__/schedule-index.spec.ts` | 调度索引对拍：200 步随机操作（新增/答题/撤销/删除/暂停/重置/跨牌组移动）后，索引取卡与计数逐牌组比对全量扫描基准 |
 | `src/main/__tests__/checkpoint.spec.ts` | 检查点 + delta 写路径：调度类操作零卡片写、move 墓碑往返幂等、压实前后一致、stats.json 增量重放、旧格式兼容 |
 | `src/main/__tests__/api-server.spec.ts` | HTTP API 安全链与 CRUD（真实监听临时端口）：鉴权/Origin/Host 校验、HEAD 镜像 GET、suspend 严格布尔、到期窗口两入口口径、分页 clamp |
@@ -226,7 +226,7 @@ npx tsc --noEmit && npx eslint . && npx vitest run && npm run build
 
 | 套件 | 内容 |
 | --- | --- |
-| `src/mobile/workspace.spec.ts` | 移动版数据层：**写路径（内存先行 → 追加落盘）与 reload（读文件 → 重放）必须互为逆运算**——这是跨机同步的正确性前提 |
+| `src/mobile/workspace.spec.ts` | 移动版数据层：**写路径（内存先行 → 追加落盘）与 reload（读文件 → 重放）必须互为逆运算**——这是跨机同步的正确性前提；delta 内容行时间戳守卫与桌面端同口径 |
 | `src/mobile/study-session.spec.ts` | 学习会话状态机：出卡 → 显示答案 → 评级 → 下一张 → 撤销，含耗时报数口径 |
 | `src/mobile/fs/memory-fs.spec.ts` | 内存 FileStore：与真机桥同语义的读写/追加/列目录/改名/删除 |
 | `src/mobile/probes.spec.ts` | M0 探针逻辑在内存实现上的回归（真机跑法见设备「自检」页） |

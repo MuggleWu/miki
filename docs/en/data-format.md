@@ -71,6 +71,7 @@ Append-only journal of content changes; **line order is operation order**. Each 
 ```
 
 - Content override rows: carry only the changed content fields; scheduling snapshot fields are inherited from the base row (whichever fields are missing are inherited).
+- A content override row **older than the base row** (smaller `updatedAt`) is ignored in full: the base row holds the newer version, and the old row is just residue in the delta from "a running instance writing its stale in-memory card face back" (decided 2026-09-20 — such rows once reverted 37 cards' KaTeX backs to old plain text). The scheduling snapshot, suspended state and watermark are still inherited from the base row; move-in rows (which carry a watermark) are unaffected by this rule.
 - Move-in rows (with `__mikiSeq`): written to the target deck on cross-deck moves, carrying a complete scheduling snapshot and event watermark.
 - Tombstone rows: written to the source deck on cross-deck moves; removed from the corresponding base row at load time. Within one delta, "tombstone first, move-in later" resolves naturally by line order, so a move there and back never loses a card.
 

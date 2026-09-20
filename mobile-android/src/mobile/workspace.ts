@@ -35,6 +35,7 @@ import {
 } from '@shared/types'
 import {
   contentRow,
+  isStaleContentRow,
   iterateNdjsonText,
   newLoadIssues,
   noteDamaged,
@@ -313,6 +314,9 @@ export class MobileWorkspace {
             // 水位已在行上
           } else if (prev) {
             const contentOnly = row.fsrs === undefined // 内容行（无调度快照）vs move 快照行
+            // 与桌面端同一条口径：内容行比基行旧 ⇒ 整行内容都不认（见 isStaleContentRow），
+            // 基行上的新卡面不被旧行盖掉（09-19 37 张卡丢公式就是这条路径）
+            if (contentOnly && isStaleContentRow(row, prev)) continue
             if (contentOnly) row.fsrs = prev.fsrs ? { ...prev.fsrs } : prev.fsrs
             if (row.reps === undefined) row.reps = prev.reps
             if (row.lapses === undefined) row.lapses = prev.lapses

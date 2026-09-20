@@ -10,6 +10,7 @@ import { iterateNdjsonText, type LoadIssues } from '../shared/workspace-io'
 export {
   contentRow,
   snapshotRow,
+  isStaleContentRow,
   noteDamaged,
   newLoadIssues,
   iterateNdjsonText,

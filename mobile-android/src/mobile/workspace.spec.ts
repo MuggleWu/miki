@@ -308,6 +308,44 @@ describe('移动版工作区：写入 → 重载 的往返一致性', () => {
     expect(ws5.getCard('c1')).toMatchObject({ suspended: true, lapses: 4, front: '第一张改' })
   })
 
+  it('旧内容行不覆盖基行上的新卡面：行比基行旧就整行不认（与桌面端同一条口径）', async () => {
+    // 基文件 = 桌面端压实后的快照行（c1 已改成公式版，updatedAt 较新）
+    fs.seed(
+      `${ROOT}/cards/d1.ndjson`,
+      [
+        JSON.stringify({ __mikiCheckpoint: 100 }),
+        JSON.stringify({
+          id: 'c1',
+          front: '第一张',
+          back: '$\\dfrac{b}{a}$',
+          createdAt: 1_700_000_000_000,
+          updatedAt: 1_700_000_060_000,
+          deletedAt: null,
+          suspended: false,
+          fsrs: null,
+          reps: 3,
+          lapses: 1
+        })
+      ].join('\n') + '\n'
+    )
+    // delta = 同一张卡更早的内容行（写行当时还是纯文本），09-19 实测这类行会把公式盖回去
+    fs.seed(
+      `${ROOT}/cards/d1.delta.ndjson`,
+      JSON.stringify({
+        id: 'c1',
+        front: '第一张',
+        back: '旧文本答案',
+        createdAt: 1_700_000_000_000,
+        updatedAt: 1_700_000_000_000,
+        deletedAt: null,
+        suspended: false
+      }) + '\n'
+    )
+
+    const ws6 = await openWorkspace(fs)
+    expect(ws6.getCard('c1')).toMatchObject({ back: '$\\dfrac{b}{a}$', reps: 3, lapses: 1 })
+  })
+
   it('新增牌组：decks.json 整份重写，重载后可见', async () => {
     const deck = await ws.addDeck('新牌组')
     const ws2 = await openWorkspace(fs)

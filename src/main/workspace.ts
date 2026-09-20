@@ -37,6 +37,7 @@ import { StatsLedger } from './stats-ledger'
 import {
   WorkspacePaths,
   contentRow,
+  isStaleContentRow,
   iterateNdjson,
   newLoadIssues,
   noteDamaged,
@@ -352,6 +353,9 @@ export class WorkspaceService {
           // 水位已在行上
         } else if (prev) {
           const contentOnly = row.fsrs === undefined // 内容行（无调度快照）vs move 快照行
+          // 内容行比基行旧 ⇒ 基行上的版本更新，整行内容都不认（见 isStaleContentRow）：行里那份
+          // 旧卡面盖回去，就是 09-19 那 37 张卡丢公式的路径。行仍计入 deltaRows，压实不受影响。
+          if (contentOnly && isStaleContentRow(row, prev)) continue
           if (contentOnly) row.fsrs = prev.fsrs ? { ...prev.fsrs } : prev.fsrs
           if (row.reps === undefined) row.reps = prev.reps
           if (row.lapses === undefined) row.lapses = prev.lapses

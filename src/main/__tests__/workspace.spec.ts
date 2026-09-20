@@ -220,6 +220,68 @@ describe('leech 自动暂停', () => {
   })
 })
 
+describe('delta 内容行的时间戳守卫（旧行不覆盖新卡面）', () => {
+  /** 铺一个牌组：基行=改过的新卡面（updatedAt 较新，带调度快照），delta=同一张卡的旧内容行 */
+  const seedDeck = (d: string, deckId: string, baseUpdatedAt: number, lineUpdatedAt: number, lineBack: string) => {
+    const T = 1_700_000_000_000
+    fs.writeFileSync(
+      path.join(d, 'cards', `${deckId}.ndjson`),
+      [
+        JSON.stringify({ __mikiCheckpoint: 100 }),
+        JSON.stringify({
+          id: 'c1',
+          front: '基期倍数公式是什么？',
+          back: '$\\dfrac{b}{a}\\times\\dfrac{1+B}{1+A}$',
+          createdAt: T,
+          updatedAt: baseUpdatedAt,
+          deletedAt: null,
+          suspended: false,
+          fsrs: null,
+          reps: 3,
+          lapses: 1
+        })
+      ].join('\n') + '\n',
+      'utf-8'
+    )
+    fs.writeFileSync(
+      path.join(d, 'cards', `${deckId}.delta.ndjson`),
+      JSON.stringify({
+        id: 'c1',
+        front: '基期倍数公式是什么？',
+        back: lineBack,
+        createdAt: T,
+        updatedAt: lineUpdatedAt,
+        deletedAt: null,
+        suspended: false
+      }) + '\n',
+      'utf-8'
+    )
+  }
+
+  it('行比基行旧：整行内容都不认，旧卡面不盖掉基行上的新卡面', () => {
+    const d = tmpKept()
+    const deckId = newWs(d).addDeck('旧行组').id
+    // 基行 14:39 的公式版 vs delta 行 13:50 的旧文本 —— 09-19 实测正是这种行被应用进基行，
+    // 37 张卡的 KaTeX 背面被旧文本盖回去（来源行 updatedAt 比基行早约 49 分钟）
+    seedDeck(d, deckId, 1_700_000_060_000, 1_700_000_000_000, 'b/a×(1+B增)/(1+A增)。')
+    const w = newWs(d)
+    expect(w.getCard('c1')).toMatchObject({
+      back: '$\\dfrac{b}{a}\\times\\dfrac{1+B}{1+A}$',
+      front: '基期倍数公式是什么？',
+      reps: 3,
+      lapses: 1
+    })
+  })
+
+  it('行比基行新：照旧覆盖（守卫只挡更旧的行，编辑通道不受影响）', () => {
+    const d = tmpKept()
+    const deckId = newWs(d).addDeck('新行组').id
+    seedDeck(d, deckId, 1_700_000_000_000, 1_700_000_060_000, '$\\dfrac{A}{B}$')
+    const w = newWs(d)
+    expect(w.getCard('c1')).toMatchObject({ back: '$\\dfrac{A}{B}$', reps: 3, lapses: 1 })
+  })
+})
+
 describe('重放一致性（重启恢复）', () => {
   it('混合操作后重新 init，内存态与事件重放一致', () => {
     const d = tmpKept()
