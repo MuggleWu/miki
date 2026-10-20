@@ -138,14 +138,6 @@ export class MobileWorkspace {
   private dailyAgg: DailyAgg = new Map()
   private todayAnswers = 0
   private totalAnsweredCount = 0
-  /**
-   * 今天刷过的卡（**全部牌组合在一起**）：学习页头部的「刷 N 张」用它。
-   *
-   * 与「今日已学 N 次」不是一个口径：那个数答题次数、撤销会回退；这个数的是"碰过几张卡"，
-   * 撤销不回退（用户确实看过这张卡）。所以不能从 dailyAgg 推出来，只能单独记。
-   * 不分牌组：用户要看的是"今天一共刷了多少张"，进了哪个牌组都不该让这个数变小。
-   */
-  private todayCards = new Set<string>()
   private statsCache = new Map<string, StatsPayload>()
 
   constructor(
@@ -165,7 +157,6 @@ export class MobileWorkspace {
       onDayRollover: () => {
         // 会话内跨天：今日计数清零（累计数与聚合不变）；重导在 ensureDay 里做
         this.todayAnswers = 0
-        this.todayCards.clear()
       }
     })
     await this.store.mkdir(this.paths.cardsDir())
@@ -391,7 +382,6 @@ export class MobileWorkspace {
     this.dailyAgg = new Map()
     this.todayAnswers = 0
     this.totalAnsweredCount = 0
-    this.todayCards = new Set()
     this.statsCache = new Map()
 
     const entries = await this.store.list(this.paths.logDir())
@@ -437,7 +427,6 @@ export class MobileWorkspace {
         }
         if (ev.action === 'answer') {
           this.recordAnswer(ev.deckId, ev.t, ev.rating, ev.durationMs)
-          this.markTodayCard(ev.cardId, ev.t)
         } else if (ev.action === 'undo' && wEntry?.action === 'answer') {
           this.undoAnswer(wEntry.deckId, wEntry.t, wEntry.rating, wEntry.durationMs)
         }
@@ -461,12 +450,6 @@ export class MobileWorkspace {
     bumpDailyAgg(this.dailyAgg, deckId, t, rating, 1, durationMs)
     if (localDateKey(t) === localDateKey(Date.now())) this.todayAnswers++
     this.totalAnsweredCount++
-  }
-
-  /** 记一张"今天刷过的卡"（跨天的不要，撤销不回退，理由见字段注释） */
-  private markTodayCard(cardId: string, t: number): void {
-    if (localDateKey(t) !== localDateKey(Date.now())) return
-    this.todayCards.add(cardId)
   }
 
   private undoAnswer(deckId: string, t: number, rating: Rating | undefined, durationMs?: number): void {
@@ -547,12 +530,6 @@ export class MobileWorkspace {
   todayCount(): number {
     this.ensureDay()
     return this.todayAnswers
-  }
-
-  /** 今天刷过的卡数（**全部牌组**；学习页「刷 N 张」，与数答题次数的 todayCount 口径不同） */
-  todayCardsCount(): number {
-    this.ensureDay()
-    return this.todayCards.size
   }
 
   totalAnswered(): number {
@@ -813,7 +790,6 @@ export class MobileWorkspace {
       throw e
     }
     this.recordAnswer(card.deckId, ev.t, rating, durationMs)
-    this.markTodayCard(cardId, ev.t)
     this.sched.reindexCard(card, before)
     this.session.pushUndoable([ev])
     return { answeredCardId: cardId, leechSuspended, ...this.getStudy(card.deckId) }

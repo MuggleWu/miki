@@ -97,6 +97,26 @@ describe('学习会话', () => {
     expect(s.card!.id).not.toBe(first) // 换到下一张
   })
 
+  it('学习页「刷 N 张」与首页「今日已学 N 次」是同一个数，撤销时一起退', async () => {
+    // 学习页头部渲染的是 state.todayCount，首页渲染的是 ws.todayCount()：
+    // 这两个必须是同一个计数器，否则"今天到底刷了多少"会出现两个答案。
+    expect(session.start().todayCount).toBe(ws.todayCount())
+
+    session.reveal()
+    let s = await session.rate(3)
+    expect(s.todayCount).toBe(1)
+    expect(s.todayCount).toBe(ws.todayCount())
+
+    session.reveal()
+    s = await session.rate(3)
+    expect(s.todayCount).toBe(2)
+    expect(s.todayCount).toBe(ws.todayCount())
+
+    s = await session.undo()
+    expect(s.todayCount).toBe(1)
+    expect(s.todayCount).toBe(ws.todayCount())
+  })
+
   it('答题耗时按「上屏到评级」计算，并封顶 MAX_ANSWER_MS', async () => {
     const t0 = 1_700_000_000_000
     session.start(t0)

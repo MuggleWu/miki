@@ -206,7 +206,9 @@ export function StudyPage({ deckId }: { deckId: string }): JSX.Element {
         <h1 className="ellipsis">{deckName}</h1>
         <span className="head-notes">
           <span className="head-note">剩 {state.remaining} 张</span>
-          <span className="head-note">刷 {ws.todayCardsCount()} 张</span>
+          {/* 与首页「今日已学 N 次」同一个计数器：今天是"这一次学习里已经答了几次"，
+              不是"碰过几张不同的卡"（同一张卡重来两次算两次），两处数字要对得上 */}
+          <span className="head-note">刷 {state.todayCount} 张</span>
         </span>
         <button className="icon-btn" onClick={() => void undo()} disabled={state.undoable === 0} aria-label="撤销">
           ↺
