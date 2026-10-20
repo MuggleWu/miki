@@ -9,6 +9,7 @@ import { Sheet } from '../components/Sheet'
 import { CardEditForm } from '../forms/CardEditForm'
 import { AddCardForm } from '../forms/AddCardForm'
 import { useLongPress } from '../use-long-press'
+import { createClickSwallower } from '../swipe-swallow'
 import { Md } from '../md'
 import { RATING_LABEL } from '@shared/format'
 import type { Rating } from '@shared/types'
@@ -61,7 +62,8 @@ export function StudyPage({ deckId }: { deckId: string }): JSX.Element {
   // 所以同样不弹二次确认：顶部 ↺ 就是那个"想撤回"的出口。
   const faceRef = useRef<HTMLDivElement>(null)
   const swipe = useRef({ y: 0, engaged: false, blocked: false })
-  const swallowClick = useRef(false)
+  // 上滑删除松手后浏览器会补发一次 click，吞掉它；新触摸一律解除（否则会吞掉用户下一次点按）
+  const clickSwallow = useRef(createClickSwallower())
 
   /*
    * 评级条是 position: fixed（不占布局），所以卡面要自己让出它的高度。
@@ -95,10 +97,7 @@ export function StudyPage({ deckId }: { deckId: string }): JSX.Element {
 
   function tapCard(): void {
     // 刚用上滑删过卡：抬手后浏览器还会补一次 click，不吞掉就会顺手把下一张的答案翻出来
-    if (swallowClick.current) {
-      swallowClick.current = false
-      return
-    }
+    if (clickSwallow.current.shouldSwallow(performance.now())) return
     if (longPress.shouldSwallowClick()) return
     setState(session.reveal())
   }
@@ -126,6 +125,9 @@ export function StudyPage({ deckId }: { deckId: string }): JSX.Element {
    * pointermove 就 cancel 了，手势永远触发不了。touchmove 不会被这样掐断（页面滚不动时它照常送）。
    */
   function onCardTouchStart(e: React.TouchEvent<HTMLDivElement>): void {
+    // 新的触摸开始 = 上一次手势的后效到此为止。不做这一步，删完卡后第一次点按会被吞掉
+    // （真机上表现为"删完有一段时间点卡面没反应"）。
+    clickSwallow.current.release()
     if (e.touches.length !== 1) return
     // 这屏还能往下滚时，向上滑首先是滚动，不能接管成删除
     const body = e.currentTarget.closest('.page-body')
@@ -165,7 +167,7 @@ export function StudyPage({ deckId }: { deckId: string }): JSX.Element {
       el.style.opacity = ''
     }
     if (!s.engaged) return
-    swallowClick.current = true
+    clickSwallow.current.suppress(performance.now())
     void deleteCurrent()
   }
 
