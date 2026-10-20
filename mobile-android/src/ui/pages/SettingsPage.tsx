@@ -239,6 +239,17 @@ export function SettingsPage(): JSX.Element {
             打开设备自检（读写 / 性能 / 往返一致性）
           </button>
         </section>
+
+        {/* 「关于」只放一个用途：升级完能确认手机上跑的是哪份包。
+            安卓包的 versionCode 恒为 1（覆盖安装要用），只看版本号永远分不出新旧，
+            所以这里直接摊开打包时间和 commit —— 数字变了才是真的换了包。 */}
+        <section className="card">
+          <h2>关于</h2>
+          <p className="muted">
+            Miki {__MIKI_BUILD__.version} · 构建 {__MIKI_BUILD__.hash}
+          </p>
+          <p className="muted">打包时间：{new Date(__MIKI_BUILD__.at).toLocaleString()}</p>
+        </section>
       </div>
 
       <Sheet open={configSync} title="同步配置" onClose={() => setConfigSync(false)}>
