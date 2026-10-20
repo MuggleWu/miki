@@ -355,7 +355,7 @@ export const useApp = create<AppState>((set, get) => ({
       const { repo, branch, token } = await loadCreds()
       if (!token) {
         set({ sync: { ...get().sync, busy: false, lastError: '还没有配置 GitHub 凭据' } })
-        if (mode === 'full') get().notify('还没配置同步：去设置页填仓库与 PAT')
+        if (mode !== 'pull-only') get().notify('还没配置同步：去设置页填仓库与 PAT')
         return null
       }
       const base = await loadBase()
@@ -392,7 +392,8 @@ export const useApp = create<AppState>((set, get) => ({
         }
       })
       get().bump()
-      if (mode === 'full') get().notify(outcome.report.message)
+      // 只拉（回前台自动同步 / 静默）不打扰用户；只推与全量都手动触发，给一句结论
+      if (mode !== 'pull-only') get().notify(outcome.report.message)
       return outcome.report
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
@@ -407,7 +408,7 @@ export const useApp = create<AppState>((set, get) => ({
         }
       })
       if (stale) await saveVerify({ at: Date.now(), ok: false, message: msg })
-      if (mode === 'full') get().notify(`同步失败：${msg}`)
+      if (mode !== 'pull-only') get().notify(`同步失败：${msg}`)
       return null
     }
   },

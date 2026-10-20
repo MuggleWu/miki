@@ -24,6 +24,7 @@ export function DecksPage(): JSX.Element {
   const dmg = ws.damageReport()
   const sync = useApp((s) => s.sync)
   const syncNow = useApp((s) => s.syncNow)
+  const notify = useApp((s) => s.notify)
 
   return (
     <>
@@ -32,9 +33,25 @@ export function DecksPage(): JSX.Element {
           ☰
         </button>
         <h1>牌组</h1>
-        {/* 拉取是自动的（回前台静默拉），首页只放推送——进度攒在本机，手动推一次就够了 */}
-        <button className="head-btn" onClick={() => void syncNow('full')} disabled={sync.busy}>
-          {sync.busy ? '推送中…' : '推送进度'}
+        {/*
+          拉与推各一个按钮，方向真的分开：拉取只拉（不产生 commit），推送只推（不下载、不合并）。
+          回前台仍然会自动静默拉一次，这两个是"我现在就要"的手动入口。
+          拉取失败要给提示：store 只在对非 pull-only 的失败发通知（自动拉不该打扰人），
+          所以这里自己兜最后一次错误。
+        */}
+        <button
+          className="head-btn"
+          disabled={sync.busy}
+          onClick={() =>
+            void syncNow('pull-only').then((r) => {
+              notify(r ? r.message : (useApp.getState().sync.lastError ?? '拉取失败'))
+            })
+          }
+        >
+          拉取进度
+        </button>
+        <button className="head-btn" disabled={sync.busy} onClick={() => void syncNow('push-only')}>
+          推送进度
         </button>
         <span className="head-note">今日已学 {today} 次</span>
       </div>

@@ -64,13 +64,17 @@ export interface SyncOutcome {
 
 /**
  * 同步方向。**故意做成必填、且不给默认值**：
- * - `'pull-only'`：只拉，绝不产生 commit。回到前台的自动同步走这条。
- * - `'full'`：拉 + 推。只有用户点"推送进度 / 立即同步"才走这条。
+ * - `'pull-only'`：只拉，绝不产生 commit。回到前台的自动同步、以及首页「拉取进度」都走这条。
+ * - `'push-only'`：只推，不下载也不合并。首页「推送进度」走这条。
+ *   远端在记账之后又动过（别的设备推过）时**直接拒绝**，让用户先拉——否则会拿一份建立在
+ *   旧树上的本地状态去覆盖远端。
+ * - `'full'`：拉 + 推。设置页的「立即同步」走这条（一次把两边对齐）。
+ * - `'force-pull'`：用户点名用远端覆盖本机的那几个文件。
  *
  * 之前这里没有这个参数，回前台那次也照样执行推送段——用户看到的是"说好只拉，结果把我
  * 本机的进度也推上去了"。加上参数并不够，所以不留默认值：漏传时编译就过不去。
  */
-export type SyncMode = 'full' | 'pull-only' | 'force-pull'
+export type SyncMode = 'full' | 'pull-only' | 'push-only' | 'force-pull'
 
 export interface SyncOptions {
   /**
@@ -96,6 +100,12 @@ export async function runSync(
 
   // 「用远端覆盖本机」是一条独立的短路径：只处理点名的文件，不参与下面的合并/推送编排
   if (mode === 'force-pull') return await forcePullFiles(env, client, base, at, opts.forcePaths ?? [])
+
+  // 「只推」：远端自上次同步后又动过，说明别处（另一台设备/桌面端）已经推了新内容。
+  // 这时本地这份是建立在旧树上的，直接推上去会把对方的改动盖掉——先让用户拉一次。
+  if (mode === 'push-only' && base.commit !== head.commit) {
+    throw new Error('远端有新的提交（另一台设备推过）：先点「拉取进度」，再推送')
+  }
 
   const files: MergeResult[] = []
   /** 远端变了、这次没取过来的文件（只拉模式下会让记账的 commit 停在原地） */
@@ -189,7 +199,8 @@ export async function runSync(
   // 快照必须拍在写入之前，否则它记的是合并后的状态，真出问题时退不回去（写入阶段抛错时更是
   // 连快照都还没拍）。只拉模式不产生 commit，也就没有要保的"推送前状态"，不拍。
   const toPush = files.filter((f) => f.action === 'keep-local' || f.action === 'union')
-  const snapshot = mode === 'full' && toPush.length > 0 ? await snapshotWorkspace(env) : null
+  // 推之前快照：只拉模式不产生 commit，也就没有要保的"推送前状态"，不拍。
+  const snapshot = mode !== 'pull-only' && toPush.length > 0 ? await snapshotWorkspace(env) : null
 
   // ---- 落地：把结果写进本地工作区 ----
   // 只拉模式只写"直接取远端"（take-remote）的文件：合并结果（union）不与推送分离——
@@ -313,7 +324,8 @@ export async function runSync(
         ok: true,
         at,
         message:
-          `已同步：推送 ${pushedPaths.length} 个文件（${stats.reviews} 条答题、${stats.cards} 张卡）` +
+          (mode === 'push-only' ? '已推送：' : '已同步：推送 ') +
+          `${pushedPaths.length} 个文件（${stats.reviews} 条答题、${stats.cards} 张卡）` +
           (toWrite.length > 0 ? `，拉取 ${toWrite.length} 个文件` : '') +
           (blockedNote ? `。${blockedNote}` : ''),
         files: files.map((f) => ({ path: f.path, action: f.action, reason: f.reason })),
@@ -335,8 +347,11 @@ export async function runSync(
       ok: true,
       at,
       message:
-        (toWrite.length > 0 ? `已拉取 ${toWrite.length} 个文件（本地无新内容，未产生 commit）` : '已是最新，无需改动') +
-        (blockedNote ? `。${blockedNote}` : ''),
+        (toWrite.length > 0
+          ? `已拉取 ${toWrite.length} 个文件（本地无新内容，未产生 commit）`
+          : mode === 'push-only'
+            ? '没有需要推送的改动（远端也没有新内容）'
+            : '已是最新，无需改动') + (blockedNote ? `。${blockedNote}` : ''),
       files: files.map((f) => ({ path: f.path, action: f.action, reason: f.reason })),
       pushed: 0,
       pulled: toWrite.length,

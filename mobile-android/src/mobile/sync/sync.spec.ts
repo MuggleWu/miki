@@ -552,3 +552,36 @@ describe('同步路径白名单', () => {
     expect(out.report.pushed).toBe(2)
   })
 })
+
+describe('runSync：只推模式（首页「推送进度」）', () => {
+  it('远端自上次同步后动过 → 直接拒绝，绝不产生 commit', async () => {
+    gh.push('decks.json', '[{"id":"d1","name":"A"}]')
+    const store = new MemoryFileStore()
+    const first = await runSync({ store, paths, reloadAndVerify: verifyFrom(store) }, creds, emptyBase(), 'full')
+    expect(first.report.pulled).toBe(1)
+
+    // 桌面端之后又推了一次（远端头变了）
+    gh.push('decks.json', '[{"id":"d1","name":"A2"}]')
+    await store.writeText(`${ROOT}/review-log/2026-09.ndjson`, row({ action: 'answer', cardId: 'c1', t: 1, rating: 3 }))
+
+    await expect(
+      runSync({ store, paths, reloadAndVerify: verifyFrom(store) }, creds, first.base, 'push-only')
+    ).rejects.toThrow(/先点「拉取进度」/)
+    expect(gh.refUpdates).toBe(0)
+  })
+
+  it('远端没动 → 只推本地改动，不下载任何远端文件', async () => {
+    gh.push('decks.json', '[{"id":"d1","name":"A"}]')
+    const store = new MemoryFileStore()
+    const first = await runSync({ store, paths, reloadAndVerify: verifyFrom(store) }, creds, emptyBase(), 'full')
+
+    await store.writeText(`${ROOT}/review-log/2026-09.ndjson`, row({ action: 'answer', cardId: 'c1', t: 1, rating: 3 }))
+    const out = await runSync({ store, paths, reloadAndVerify: verifyFrom(store) }, creds, first.base, 'push-only')
+
+    expect(out.report.ok).toBe(true)
+    expect(out.report.pushed).toBe(1)
+    expect(out.report.pulled).toBe(0)
+    expect(out.report.message).toContain('已推送')
+    expect(gh.refUpdates).toBe(1)
+  })
+})
