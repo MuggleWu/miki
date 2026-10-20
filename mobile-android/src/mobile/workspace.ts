@@ -394,9 +394,15 @@ export class MobileWorkspace {
       number,
       { action: ReviewEvent['action']; rating?: Rating; t: number; deckId: string; durationMs?: number }
     >()
+    // 月度日志一次并发读回来：串行读时每个月一份 2–3MB 的文件、每次都要过一次桥，
+    // 实测这段占了启动的 300–500ms；并发发起后剩余开销几乎只剩 JSON 解析。
+    const logTexts = await readTexts(
+      this.store,
+      files.map((f) => `${this.paths.logDir()}/${f}`)
+    )
     for (const f of files) {
       const file = `${this.paths.logDir()}/${f}`
-      const text = await this.store.readText(file)
+      const text = logTexts.get(file) ?? null
       if (text === null) continue
       for (const line of iterateNdjsonText(text, file, issues)) {
         let ev: ReviewEvent

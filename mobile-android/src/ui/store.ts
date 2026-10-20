@@ -13,6 +13,7 @@ import { MobileWorkspace } from '@mobile/workspace'
 import { WORKSPACE_DIR } from '@mobile/constants'
 import { PREF_KEYS, prefGet, prefSet } from '@mobile/prefs'
 import { prefetchMarkdown } from './md'
+import { readDeckSnapshot, saveDeckSnapshot, snapshotFrom, type DeckSnapshot } from './deck-snapshot'
 import {
   applySyncConfig,
   clearCreds,
@@ -72,6 +73,11 @@ interface AppState {
   ws: MobileWorkspace | null
   /** 启动失败（工作区打不开这类硬错误）：整屏显示，不做静默降级 */
   bootError: string | null
+  /**
+   * 上次退出时的首页快照：工作区还没就绪时先用它把牌组列表画出来，别让用户对着
+   * "正在打开工作区…"等一秒多。真数据一到立刻被真实页面替换（见 ui/deck-snapshot.ts）。
+   */
+  deckSnapshot: DeckSnapshot | null
   prefs: Prefs
   route: Route
   stack: Route[]
@@ -97,6 +103,8 @@ interface AppState {
   sync: SyncUiState
 
   boot(): Promise<void>
+  /** 读首屏快照（几毫秒），与工作区初始化并行 */
+  loadDeckSnapshot(): Promise<void>
   loadPrefs(): Promise<void>
   setPref<K extends keyof Prefs>(key: K, value: Prefs[K]): Promise<void>
   go(route: Route): void
@@ -133,9 +141,23 @@ interface AppState {
   syncNow(mode: SyncMode, opts?: SyncOptions): Promise<SyncReport | null>
 }
 
+/** 快照落盘节奏：连点答题时只留最后一次（1.5s 内），避免每答一题过一次桥 */
+let snapshotTimer: ReturnType<typeof setTimeout> | null = null
+
+function scheduleDeckSnapshot(): void {
+  if (snapshotTimer) clearTimeout(snapshotTimer)
+  snapshotTimer = setTimeout(() => {
+    snapshotTimer = null
+    const state = useApp.getState()
+    if (!state.ws) return
+    void saveDeckSnapshot(snapshotFrom(state.ws.deckInfos(), state.ws.todayCount()))
+  }, 1500)
+}
+
 export const useApp = create<AppState>((set, get) => ({
   ws: null,
   bootError: null,
+  deckSnapshot: null,
   prefs: DEFAULT_PREFS,
   route: { kind: 'decks' },
   stack: [],
@@ -150,6 +172,8 @@ export const useApp = create<AppState>((set, get) => ({
   sync: { status: null, verify: null, report: null, lastSyncAt: null, busy: false, lastError: null },
 
   async boot() {
+    // 先把上次的快照交给首屏（偏好读一次，几毫秒），再开始真加载
+    void get().loadDeckSnapshot()
     try {
       const store = new CapacitorFileStore()
       const ws = new MobileWorkspace(store, new MobilePaths(WORKSPACE_DIR))
@@ -164,11 +188,18 @@ export const useApp = create<AppState>((set, get) => ({
             : '')
       )
       set({ ws, bootError: null })
+      // 就绪后立刻把这份数字存成下次的首屏快照（写失败不影响使用，属纯优化）
+      void saveDeckSnapshot(snapshotFrom(ws.deckInfos(), ws.todayCount()))
       // 工作区就绪后再预取 markdown 管线：首屏不受它影响，进牌组时通常已经就位
       prefetchMarkdown()
     } catch (e) {
       set({ bootError: e instanceof Error ? e.message : String(e) })
     }
+  },
+
+  async loadDeckSnapshot() {
+    const snap = await readDeckSnapshot()
+    if (snap) set({ deckSnapshot: snap })
   },
 
   async loadPrefs() {
@@ -398,5 +429,7 @@ export const useApp = create<AppState>((set, get) => ({
 
   bump() {
     set({ version: get().version + 1 })
+    // 答题会连续 bump：攒一下再落快照，别每次都过一次桥
+    scheduleDeckSnapshot()
   }
 }))

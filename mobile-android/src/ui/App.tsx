@@ -15,12 +15,14 @@ import { SettingsPage } from './pages/SettingsPage'
 import { SelfCheckPage } from './pages/SelfCheckPage'
 import { Drawer } from './components/Drawer'
 import { ErrorBoundary } from './components/ErrorBoundary'
+import { DeckListPreview } from './components/DeckListPreview'
 import { useEdgeSwipeDrawer } from './use-edge-swipe'
 import { applyAppearance, acquireWakeLock, watchSystemDark } from '@mobile/theme'
 
 export function App(): JSX.Element {
   const ws = useApp((s) => s.ws)
   const bootError = useApp((s) => s.bootError)
+  const deckSnapshot = useApp((s) => s.deckSnapshot)
   const route = useApp((s) => s.route)
   const toast = useApp((s) => s.toast)
   const prefs = useApp((s) => s.prefs)
@@ -175,6 +177,16 @@ export function App(): JSX.Element {
   }
 
   if (!ws) {
+    // 有上次的快照就直接把首页画出来：读卡片 + 重放 review-log 要 1 秒多，
+    // 这段时间让用户看着自己的牌组，比对着"正在打开工作区…"好得多。
+    // 快照只画不点（没有工作区，导航与写操作都还没有落点）。
+    if (deckSnapshot) {
+      return (
+        <div className="app">
+          <DeckListPreview snap={deckSnapshot} />
+        </div>
+      )
+    }
     return (
       <div className="app">
         <div className="page-body">

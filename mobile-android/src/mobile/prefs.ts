@@ -21,7 +21,9 @@ export const PREF_KEYS = {
   /** 上次同步的两侧状态（JSON）：判断"谁变了"的依据 */
   syncBase: 'miki.sync.base',
   /** 上次连接验证的结果（JSON：{at, ok, message}） */
-  syncVerify: 'miki.sync.verify'
+  syncVerify: 'miki.sync.verify',
+  /** 首页快照（JSON）：上次退出时的牌组列表与今日次数，只为下次启动先画一屏（见 ui/deck-snapshot.ts） */
+  deckSnapshot: 'miki.ui.deckSnapshot'
 } as const
 
 export async function prefGet(key: string): Promise<string | null> {

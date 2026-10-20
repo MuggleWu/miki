@@ -90,7 +90,10 @@ html {
   /* 双击不缩放（点答案/评级时最怕误触缩放），双指缩放仍可用 */
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
+  /* 别让系统字体设置把整页字号二次放大（真机上会和 --fs-scale 叠成两级） */
+  -webkit-text-size-adjust: 100%;
 }
+
 
 body {
   background: var(--bg);
@@ -226,6 +229,19 @@ select {
 }
 
 /* ---------- 牌组列表 ---------- */
+
+/*
+ * 启动首屏（DeckListPreview）：结构与牌组页一致，只把指针关掉——工作区还没就绪，
+ * 点进去也没有可导航的地方。不用 disabled 属性是为了不触发 :disabled 的变淡样式，
+ * 免得快照换成真页面时闪一下。
+ */
+.deck-preview {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  pointer-events: none;
+}
 
 /*
  * 总计行：牌组列表上方的三个计数加和（口径见 workspace 的 sumDeckCounts）。
