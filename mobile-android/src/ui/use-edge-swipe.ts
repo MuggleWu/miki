@@ -32,6 +32,8 @@ export function useEdgeSwipeDrawer(): void {
     let mode: 'undecided' | 'open' | 'closing' | 'aborted' | null = null
     let fromOpen = false
     let samples: DragSample[] = []
+    /** 到这个时间点之前，吞掉所有 click（见 onClickCapture） */
+    let swallowClickUntil = 0
 
     const reset = (): void => {
       start = null
@@ -85,9 +87,17 @@ export function useEdgeSwipeDrawer(): void {
         fromOpen = !!target?.closest('.drawer')
         if (!fromOpen) return
       } else {
-        // 抽屉关着时：只有学习页与弹层场景不接管，免得两层手势打架
-        if (route.kind === 'study' || document.querySelector('dialog[open]')) return
-        if (!inEdgeZone(x)) return
+        // 抽屉关着时：弹层开着就不接管，免得两层手势打架。
+        if (document.querySelector('dialog[open]')) return
+        if (route.kind === 'study') {
+          // 学习页：整块卡面都能起手（"刷卡时右滑打开抽屉"）。这里没有横向滚动的内容，
+          // 横滑只可能是想开抽屉；但顶栏与评级条是按钮区，不抢它们的横向手势。
+          // 方向判定仍走 dragAxis：竖着划（翻长卡）不会误触。
+          if (target?.closest('.page-head') || target?.closest('.rating-bar')) return
+        } else if (!inEdgeZone(x)) {
+          // 其它页面维持"从左边缘起手"：那里有列表与可点行，全屏右滑会跟滚动/点击打架
+          return
+        }
         fromOpen = false
       }
       start = { x, y: e.touches[0].clientY }
@@ -104,6 +114,19 @@ export function useEdgeSwipeDrawer(): void {
       applyMove({ x: e.touches[0].clientX, y: e.touches[0].clientY }, e.timeStamp)
     }
 
+    /**
+     * 拖动结束后把紧跟着的那次 click 吞掉。
+     *
+     * 浏览器自己的触摸滑动阈值不总是能拦住它：从边缘拉抽屉时手指只走了十来像素就松手，
+     * click 仍可能落到下面的卡面/牌组行上——表现为"拉开抽屉的同时还答了一张卡"。
+     * 只在我们**确实接管了**这次触摸（open/closing）后生效，且只在 400ms 内，不误伤正常点按。
+     */
+    const onClickCapture = (e: MouseEvent): void => {
+      if (performance.now() > swallowClickUntil) return
+      e.preventDefault()
+      e.stopPropagation()
+    }
+
     const onEnd = (e: TouchEvent): void => {
       if (!start || mode === null) {
         reset()
@@ -118,7 +141,10 @@ export function useEdgeSwipeDrawer(): void {
       const velocity = dragVelocity(samples)
       reset()
       // 甩得够快就按方向定，否则按位置（过半）定——两种情况都在 settleDrawer 里落定
-      if (decided) useApp.getState().settleDrawer({ velocity, travelled })
+      if (decided) {
+        swallowClickUntil = performance.now() + 400
+        useApp.getState().settleDrawer({ velocity, travelled })
+      }
     }
 
     // 被动监听：这里只读坐标，不能 preventDefault，也就不会挡住页面滚动
@@ -127,11 +153,13 @@ export function useEdgeSwipeDrawer(): void {
     document.addEventListener('touchmove', onMove, opts)
     document.addEventListener('touchend', onEnd, opts)
     document.addEventListener('touchcancel', onEnd, opts)
+    document.addEventListener('click', onClickCapture, true)
     return () => {
       document.removeEventListener('touchstart', onStart)
       document.removeEventListener('touchmove', onMove)
       document.removeEventListener('touchend', onEnd)
       document.removeEventListener('touchcancel', onEnd)
+      document.removeEventListener('click', onClickCapture, true)
     }
   }, [])
 }
