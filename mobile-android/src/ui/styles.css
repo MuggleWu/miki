@@ -94,6 +94,48 @@ html {
   -webkit-text-size-adjust: 100%;
 }
 
+/*
+ * 系统默认外观清零（触屏）。
+ *
+ * 这些都是浏览器/系统自己画的，不是我们的样式，但用户看起来像"点出了个橘色框"：
+ * ① 焦点环：Chrome 在模态弹层（<dialog>）打开、或某些焦点变化之后会给聚焦元素画一圈
+ *    outline，颜色跟随系统主题（小米上是橘色）。触屏不需要键盘焦点环，一律清掉；
+ *    真接键盘鼠标时（hover:hover + pointer:fine）下面再补一版我们的颜色。
+ * ② 点击高亮：* 上已关成透明（否则每次点按闪一块灰）。
+ * ③ 选中文本与系统长按菜单：body 上已关（长按是"编辑"手势），输入框单独放开。
+ * 改这里要一起想清楚：清掉之后按下的反馈只能靠 :active（见文件末尾的触屏反馈块）。
+ */
+:focus,
+:focus-visible {
+  outline: none;
+}
+
+dialog:focus,
+button:focus,
+a:focus,
+summary:focus,
+[tabindex]:focus {
+  outline: none;
+}
+
+/* 只给真正的键盘/鼠标环境画焦点环：手机上（粗指针）永远走不到这条 */
+@media (hover: hover) and (pointer: fine) {
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+}
+
+/* 选中文本用主题色，别用系统默认的橘/蓝块 */
+::selection {
+  background: color-mix(in srgb, var(--accent) 32%, transparent);
+}
+
+/* 复选框/单选的系统强调色（小米默认是橘色）也统一到主题色 */
+input[type='checkbox'],
+input[type='radio'] {
+  accent-color: var(--accent);
+}
 
 body {
   background: var(--bg);
