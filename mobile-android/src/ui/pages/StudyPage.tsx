@@ -120,19 +120,24 @@ export function StudyPage({ deckId }: { deckId: string }): JSX.Element {
     }
   }
 
-  function onCardPointerDown(e: React.PointerEvent<HTMLDivElement>): void {
-    longPress.onPointerDown(e)
+  /*
+   * 为什么用 touch 而不是 pointer：在真机（以及 Chrome 的触摸模拟）上，浏览器一旦把这一下
+   * 判成"可能在滚动"，就会给卡片发 pointercancel，pointermove 直接断掉——实测只收到一次
+   * pointermove 就 cancel 了，手势永远触发不了。touchmove 不会被这样掐断（页面滚不动时它照常送）。
+   */
+  function onCardTouchStart(e: React.TouchEvent<HTMLDivElement>): void {
+    if (e.touches.length !== 1) return
     // 这屏还能往下滚时，向上滑首先是滚动，不能接管成删除
     const body = e.currentTarget.closest('.page-body')
     const canScroll = body instanceof HTMLElement && body.scrollHeight - body.clientHeight - body.scrollTop > 2
-    swipe.current = { y: e.clientY, engaged: false, blocked: canScroll }
+    swipe.current = { y: e.touches[0].clientY, engaged: false, blocked: canScroll }
   }
 
-  function onCardPointerMove(e: React.PointerEvent<HTMLDivElement>): void {
-    longPress.onPointerMove(e)
+  function onCardTouchMove(e: React.TouchEvent<HTMLDivElement>): void {
+    const t = e.touches[0]
     const s = swipe.current
-    if (s.blocked || s.y === 0) return
-    const dy = e.clientY - s.y
+    if (!t || s.blocked || s.y === 0) return
+    const dy = t.clientY - s.y
     if (dy > 12) {
       s.blocked = true // 往下滑：不是删除手势，交还给滚动与点按
       return
@@ -150,8 +155,7 @@ export function StudyPage({ deckId }: { deckId: string }): JSX.Element {
     }
   }
 
-  function onCardPointerUp(): void {
-    longPress.onPointerUp()
+  function onCardTouchEnd(): void {
     const s = swipe.current
     swipe.current = { y: 0, engaged: false, blocked: false }
     const el = faceRef.current
@@ -226,10 +230,14 @@ export function StudyPage({ deckId }: { deckId: string }): JSX.Element {
             ref={faceRef}
             style={cardStyle}
             onClick={tapCard}
-            onPointerDown={onCardPointerDown}
-            onPointerMove={onCardPointerMove}
-            onPointerUp={onCardPointerUp}
-            onPointerCancel={onCardPointerUp}
+            onPointerDown={longPress.onPointerDown}
+            onPointerMove={longPress.onPointerMove}
+            onPointerUp={longPress.onPointerUp}
+            onPointerCancel={longPress.onPointerCancel}
+            onTouchStart={onCardTouchStart}
+            onTouchMove={onCardTouchMove}
+            onTouchEnd={onCardTouchEnd}
+            onTouchCancel={onCardTouchEnd}
           >
             <Md source={card.front} className="face front" />
             {state.revealed ? (
