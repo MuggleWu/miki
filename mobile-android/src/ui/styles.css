@@ -431,6 +431,20 @@ select {
   word-break: break-word;
 }
 
+/*
+ * 上滑删除的手势反馈：只动 transform / opacity（不重排，真机上重排会掉帧）。
+ * 拖动期间要关掉过渡才是跟手的，松手后再让过渡把卡片弹回去。
+ */
+.card-face {
+  transition:
+    transform 0.18s ease,
+    opacity 0.18s ease;
+}
+
+.card-face.swiping {
+  transition: none;
+}
+
 .card-face .front {
   /* 与桌面端一致：正面不做加粗。原来这里是 500，Android 的 Noto Sans CJK 没有 500 档，
      会被合成加重，整屏看着就是"黑体"，这也是用户说"非常不好看"的直接原因。 */

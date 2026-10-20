@@ -15,6 +15,9 @@ import type { Rating } from '@shared/types'
 
 const RATING_CLASS: Record<Rating, string> = { 1: 'r1', 2: 'r2', 3: 'r3', 4: 'r4' }
 
+/** 上滑删除的触发距离（CSS px）：要明显大于手指抖动，又要明显小于半屏 */
+const SWIPE_DELETE = 90
+
 export function StudyPage({ deckId }: { deckId: string }): JSX.Element {
   const ws = useApp((s) => s.ws)!
   const bump = useApp((s) => s.bump)
@@ -52,6 +55,14 @@ export function StudyPage({ deckId }: { deckId: string }): JSX.Element {
   // 长按卡面 = 桌面端的 E（编辑）；抬手后那次 tap 要被吞掉，否则会顺带显示答案
   const longPress = useLongPress({ onLongPress: () => setEditing(true) })
 
+  // ---- 上滑删除 ----
+  //
+  // 在卡面上按住往上滑过阈值 = 删除当前这张。与「更多 → 删除」走同一条路径（软删、可撤销），
+  // 所以同样不弹二次确认：顶部 ↺ 就是那个"想撤回"的出口。
+  const faceRef = useRef<HTMLDivElement>(null)
+  const swipe = useRef({ y: 0, engaged: false, blocked: false })
+  const swallowClick = useRef(false)
+
   /*
    * 评级条是 position: fixed（不占布局），所以卡面要自己让出它的高度。
    * 只在显示答案后才有这条，所以用实测高度写进 --rating-h：字号档位调大、按钮变高也不会漏算。
@@ -83,8 +94,75 @@ export function StudyPage({ deckId }: { deckId: string }): JSX.Element {
   }, [state.revealed])
 
   function tapCard(): void {
+    // 刚用上滑删过卡：抬手后浏览器还会补一次 click，不吞掉就会顺手把下一张的答案翻出来
+    if (swallowClick.current) {
+      swallowClick.current = false
+      return
+    }
     if (longPress.shouldSwallowClick()) return
     setState(session.reveal())
+  }
+
+  async function deleteCurrent(): Promise<void> {
+    const c = state.card
+    if (!c || busy.current) return
+    busy.current = true
+    try {
+      await ws.deleteCard(c.id)
+      bump()
+      // 与「更多 → 删除」同一句提示：这条路径不弹二次确认，靠顶部的 ↺ 兜底
+      notify('已删除（可用顶部的 ↺ 撤销）')
+      setState(session.start())
+    } catch (e) {
+      notify(`删除失败：${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      busy.current = false
+    }
+  }
+
+  function onCardPointerDown(e: React.PointerEvent<HTMLDivElement>): void {
+    longPress.onPointerDown(e)
+    // 这屏还能往下滚时，向上滑首先是滚动，不能接管成删除
+    const body = e.currentTarget.closest('.page-body')
+    const canScroll = body instanceof HTMLElement && body.scrollHeight - body.clientHeight - body.scrollTop > 2
+    swipe.current = { y: e.clientY, engaged: false, blocked: canScroll }
+  }
+
+  function onCardPointerMove(e: React.PointerEvent<HTMLDivElement>): void {
+    longPress.onPointerMove(e)
+    const s = swipe.current
+    if (s.blocked || s.y === 0) return
+    const dy = e.clientY - s.y
+    if (dy > 12) {
+      s.blocked = true // 往下滑：不是删除手势，交还给滚动与点按
+      return
+    }
+    if (dy > -SWIPE_DELETE) return
+    const el = faceRef.current
+    if (!s.engaged) {
+      s.engaged = true
+      el?.classList.add('swiping')
+    }
+    // 跟手位移砍半并封顶：手感像"把卡往上抽"，又不至于整张飞出屏幕
+    if (el) {
+      el.style.transform = `translateY(${Math.max(dy, -220) * 0.45}px)`
+      el.style.opacity = String(Math.max(0.3, 1 + dy / 320))
+    }
+  }
+
+  function onCardPointerUp(): void {
+    longPress.onPointerUp()
+    const s = swipe.current
+    swipe.current = { y: 0, engaged: false, blocked: false }
+    const el = faceRef.current
+    if (el) {
+      el.classList.remove('swiping')
+      el.style.transform = ''
+      el.style.opacity = ''
+    }
+    if (!s.engaged) return
+    swallowClick.current = true
+    void deleteCurrent()
   }
 
   async function rate(rating: Rating): Promise<void> {
@@ -145,12 +223,13 @@ export function StudyPage({ deckId }: { deckId: string }): JSX.Element {
         ) : (
           <div
             className="card-face"
+            ref={faceRef}
             style={cardStyle}
             onClick={tapCard}
-            onPointerDown={longPress.onPointerDown}
-            onPointerMove={longPress.onPointerMove}
-            onPointerUp={longPress.onPointerUp}
-            onPointerCancel={longPress.onPointerCancel}
+            onPointerDown={onCardPointerDown}
+            onPointerMove={onCardPointerMove}
+            onPointerUp={onCardPointerUp}
+            onPointerCancel={onCardPointerUp}
           >
             <Md source={card.front} className="face front" />
             {state.revealed ? (
