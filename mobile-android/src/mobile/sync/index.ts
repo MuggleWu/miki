@@ -5,11 +5,12 @@
 //     否则每次同步都要搬整个工作区。
 //   · 合并落地后**先重放校验再推送**：校验不过就地停止，不留下"本地已改、远端没推"的
 //     半截状态，也不产生一条可能推错内容的 commit。
-//   · 推送前快照（保留最近 5 次），合并异常或推送失败都能退回去。
+//   · 合并落地前快照（保留最近 5 次，只拍**这次会被覆盖**的文件）：推送本身不改本地字节，
+//     会把本地改坏的可能只来自"落地"，拍全量只是让每次推送多读多写 8.9MB。
 //   · updateRef 用 fast-forward：远端在我们读取之后被别人推过时，GitHub 直接拒，
 //     我们不覆盖别人的提交。
-import { GithubClient } from './github'
-import { mergeFile, type MergeResult } from './merge'
+import { GithubClient, type TreeEntry } from './github'
+import { linesOf, mergeFile, type MergeResult } from './merge'
 import { emptyBase, type SyncBase, type SyncCreds, type SyncReport } from './types'
 import { atomicWriteText } from '../fs/atomic-write'
 import type { FileStore } from '../fs/types'
@@ -96,25 +97,40 @@ export async function runSync(
 ): Promise<SyncOutcome> {
   const client = new GithubClient(creds)
   const at = Date.now()
-  const head = await client.head()
+  // 只要 1 个请求（以前连带读 commit，白跑一个）。文件树用到时才取，见下面的 remoteFiles
+  const headCommit = await client.head()
 
   // 「用远端覆盖本机」是一条独立的短路径：只处理点名的文件，不参与下面的合并/推送编排
   if (mode === 'force-pull') return await forcePullFiles(env, client, base, at, opts.forcePaths ?? [])
 
   // 「只推」：远端自上次同步后又动过，说明别处（另一台设备/桌面端）已经推了新内容。
   // 这时本地这份是建立在旧树上的，直接推上去会把对方的改动盖掉——先让用户拉一次。
-  if (mode === 'push-only' && base.commit !== head.commit) {
+  if (mode === 'push-only' && base.commit !== headCommit) {
     throw new Error('远端有新的提交（另一台设备推过）：先点「拉取进度」，再推送')
   }
 
   const files: MergeResult[] = []
   /** 远端变了、这次没取过来的文件（只拉模式下会让记账的 commit 停在原地） */
   const remotePending: string[] = []
-  const localOf = async (p: string): Promise<string | null> => env.store.readText(`${env.paths.root}/${p}`)
+  /**
+   * 读本地文件去重：一次同步里"收集本地状态"和"结尾记账"都要读全量工作区，
+   * 复习日志已经 2.6MB（真机读一次 190–225ms），读两遍就是白白多花半秒。
+   * 这里按路径缓存本次读过的文本与算过的指纹，写入后**让缓存跟着变**。
+   */
+  const cachedText = new Map<string, string | null>()
+  const cachedHash = new Map<string, string>()
+  const localOf = async (p: string): Promise<string | null> => {
+    if (cachedText.has(p)) return cachedText.get(p)!
+    const text = await env.store.readText(`${env.paths.root}/${p}`)
+    cachedText.set(p, text)
+    return text
+  }
 
   // 远端没有动过（头一致）时不必下载任何文件，直接看本地有什么要推的
-  const remoteChanged = base.commit !== head.commit
-  const remoteFiles = remoteChanged ? (await client.listFiles(head.tree)).filter((e) => isSyncable(e.path)) : []
+  const remoteChanged = base.commit !== headCommit
+  const remoteFiles = remoteChanged
+    ? (await client.listFiles(await client.treeOf(headCommit))).filter((e) => isSyncable(e.path))
+    : []
   /** path → 远端 blob sha（rEntry 就是它，读文件要用） */
   const remoteSha = new Map(remoteFiles.map((e) => [e.path, e.sha]))
   /** 上次同步判过"不能自动合并"的文件（见 SyncBase.conflicts 的注释） */
@@ -145,7 +161,14 @@ export async function runSync(
     const lastLocal = base.localHash[path] ?? null
 
     const remoteDiffers = rEntry !== null && (conflicted || rEntry !== baseRemoteSha)
-    const localDiffers = local !== null && (conflicted || lastLocal === null || (await hashText(local)) !== lastLocal)
+    let localDiffers = false
+    if (local !== null && !conflicted) {
+      const h = await hashText(local)
+      cachedHash.set(path, h)
+      localDiffers = lastLocal === null || h !== lastLocal
+    } else if (local !== null) {
+      localDiffers = true
+    }
 
     // 两侧都没动 → 跳过，且**不下载**（卡片基文件可能有几百 KB，每次同步都拉一遍是浪费）
     if (rEntry !== null && !remoteDiffers && !localDiffers) {
@@ -163,6 +186,25 @@ export async function runSync(
           : '本地未改，远端本就没有这个文件'
       })
       continue
+    }
+
+    // 远端头没变、只有本地变了：结果只能是 keep-local（推本地），**不需要远端内容**。
+    // 以前这一支照样把整份 blob 拉下来做三方比对——复习日志已经 2.6MB（压缩后约 890KB），
+    // 手机上一有待推的答题，每次同步都白拉一趟（实测 2.2 秒）。新增行数用记账里的行数算。
+    // 行数比上次还少 ⇒ 不是单纯追加（压实/重写），那种情况让 mergeFile 按原来的路判。
+    if (!remoteDiffers && localDiffers && local !== null && rEntry !== null) {
+      const baseLines = base.lineCount?.[path]
+      const localLines = linesOf(local, path).length
+      if (baseLines !== undefined && localLines >= baseLines) {
+        files.push({
+          path,
+          action: 'keep-local',
+          content: null,
+          reason: '远端自上次同步后未改动，推本地（远端头没变，未下载远端内容）',
+          detail: { remote: baseLines, local: localLines, merged: localLines, appended: localLines - baseLines }
+        })
+        continue
+      }
     }
 
     // 要到"要不要合并、新增了几行"这个层面，就得看远端内容了。
@@ -200,18 +242,31 @@ export async function runSync(
   // 连快照都还没拍）。只拉模式不产生 commit，也就没有要保的"推送前状态"，不拍。
   const toPush = files.filter((f) => f.action === 'keep-local' || f.action === 'union')
   // 推之前快照：只拉模式不产生 commit，也就没有要保的"推送前状态"，不拍。
-  const snapshot = mode !== 'pull-only' && toPush.length > 0 ? await snapshotWorkspace(env) : null
-
-  // ---- 落地：把结果写进本地工作区 ----
   // 只拉模式只写"直接取远端"（take-remote）的文件：合并结果（union）不与推送分离——
   // 那种文件的本地版本会与远端分叉，必须由手动推送一并推上去，静默拉取不碰它。
   const toWrite =
     mode === 'pull-only'
       ? files.filter((f) => f.action === 'take-remote' && f.content !== null)
       : files.filter((f) => f.content !== null)
+
+  // 快照只拍**这次会被覆盖的文件**：推送本身不改动本地任何一个字节，会改本地的只有合并落地，
+  // 而落地范围就是 toWrite。整份工作区 8.9MB，读+写一遍要 1.8 秒，全在推送的关键路径上。
+  const snapshot =
+    mode !== 'pull-only' && toWrite.length > 0
+      ? await snapshotWorkspace(
+          env,
+          5,
+          toWrite.map((f) => f.path)
+        )
+      : null
+
+  // ---- 落地：把结果写进本地工作区 ----
   for (const f of toWrite) {
     // 原子写：拉取是"整份替换"，半写文件（decks.json / config.json / 卡片基文件）会让整套数据读不出来
     await atomicWriteText(env.store, `${env.paths.root}/${f.path}`, f.content!)
+    // 缓存跟着落地内容走，否则结尾记账读到的还是"写入前那份"（指纹与行数都会错）
+    cachedText.set(f.path, f.content!)
+    cachedHash.delete(f.path)
   }
 
   // ---- 重放校验：写下去的东西必须被工作区完整吃进去 ----
@@ -242,6 +297,7 @@ export async function runSync(
     // 下次同步会以为"远端没变过"，那些文件的远端改动就再也拉不回来了。
     const nextRemoteSha = { ...base.remoteSha }
     const nextLocalHash = { ...base.localHash }
+    const nextLineCount = { ...(base.lineCount ?? {}) }
     if (remoteChanged && remotePending.length === 0) {
       // 远端清单这次列全了、也没有留下没处理的：直接用这份清单，
       // 顺带清掉远端已删文件的旧记录，免得上一次删除永远留在记账里
@@ -252,18 +308,23 @@ export async function runSync(
       const sha = remoteShaOf.get(f.path)
       if (sha) nextRemoteSha[f.path] = sha
       const text = await env.store.readText(`${env.paths.root}/${f.path}`)
-      if (text !== null) nextLocalHash[f.path] = await hashText(text)
+      if (text !== null) {
+        nextLocalHash[f.path] = await hashText(text)
+        if (f.path.endsWith('.ndjson')) nextLineCount[f.path] = countEvents(text)
+      }
     }
     // 被跳过的文件绝不能记成"已同步"：记了下次两侧都没变 → 静默 skip，分叉永远不收敛
     for (const p of blockedPaths) {
       delete nextRemoteSha[p]
       delete nextLocalHash[p]
+      delete nextLineCount[p]
     }
     return {
       base: {
-        commit: remotePending.length === 0 ? head.commit : base.commit,
+        commit: remotePending.length === 0 ? headCommit : base.commit,
         remoteSha: nextRemoteSha,
         localHash: nextLocalHash,
+        lineCount: nextLineCount,
         conflicts: [...blockedPaths].sort()
       },
       report: {
@@ -304,20 +365,25 @@ export async function runSync(
     const stats = countLinesToPush(toPush, await Promise.all(toPush.map(async (f) => await localOf(f.path))))
     const message = `mobile: sync ${new Date(at).toISOString().slice(0, 16)} (${stats.reviews} reviews, ${stats.cards} cards)`
 
-    const tree = await client.createTree(head.tree, blobs)
-    commit = await client.createCommit(message, tree, head.commit)
+    const tree = await client.createTree(await client.treeOf(headCommit), blobs)
+    commit = await client.createCommit(message, tree, headCommit)
     await client.updateRef(commit) // 非 fast-forward 时 GitHub 返回 422 → 抛冲突
 
     // 读回：确认分支头真的到了我们推的 commit，且改动文件的 blob 就是刚写的那几个
-    const after = await client.head()
-    if (after.commit !== commit) throw new Error('推送后读回的分支头与预期不一致，请到 GitHub 上确认仓库状态')
-    const afterTree = await client.listFiles(after.tree)
+    const afterCommit = await client.head()
+    if (afterCommit !== commit) throw new Error('推送后读回的分支头与预期不一致，请到 GitHub 上确认仓库状态')
+    const afterTree = await client.listFiles(await client.treeOf(afterCommit))
     for (const b of blobs) {
       const got = afterTree.find((e) => e.path === b.path)
       if (!got || got.sha !== b.sha) throw new Error(`推送后读回的文件 ${b.path} 与写入的不一致`)
     }
 
-    const nextBase = await buildBase(env, creds, client, after.commit, allPaths, blockedPaths)
+    // 记账直接用上面刚读回的这份树：以前这里再由 buildBase 拉一次 heads + tree，
+    // 一次推送白跑两个请求（约 1.5 秒）
+    const nextBase = await buildBase(env, afterCommit, afterTree, base, allPaths, blockedPaths, {
+      cachedText,
+      cachedHash
+    })
     return {
       base: nextBase,
       report: {
@@ -339,8 +405,12 @@ export async function runSync(
     }
   }
 
-  // 只拉取（没有要推的）：远端头已经是我们读到的那个 commit，记账直接更新
-  const nextBase = await buildBase(env, creds, client, head.commit, allPaths, blockedPaths)
+  // 只拉取（没有要推的）：远端头已经是我们读到的那个 commit，记账在本地就能算完——
+  // 远端变了就用这次列到的清单，**没变就一个请求都不发**（沿用上次记的远端 sha）
+  const nextBase = await buildBase(env, headCommit, remoteChanged ? remoteFiles : null, base, allPaths, blockedPaths, {
+    cachedText,
+    cachedHash
+  })
   return {
     base: nextBase,
     report: {
@@ -362,27 +432,42 @@ export async function runSync(
   }
 }
 
-/** 记账：把"这次同步后两侧的状态"记下来，下次判定"谁变了"靠它 */
+/**
+ * 记账：把"这次同步后两侧的状态"记下来，下次判定"谁变了"靠它。
+ *
+ * `tree` 传 `null` 表示"这次没有重新列远端"（头没变）——直接沿用上次记的远端 sha。
+ * 以前这里固定再拉一次分支头 + 整棵树，一次"什么都没变"的同步白跑两个请求。
+ */
 async function buildBase(
   env: SyncEnv,
-  _creds: SyncCreds,
-  client: GithubClient,
   commit: string,
+  tree: TreeEntry[] | null,
+  prev: SyncBase,
   paths: string[],
-  conflicts: string[] = []
+  conflicts: string[] = [],
+  /** 本次同步过程中已经读过的文本与算过的指纹（见 runSync 里的 cachedText/cachedHash） */
+  cache: { cachedText: Map<string, string | null>; cachedHash: Map<string, string> } = {
+    cachedText: new Map(),
+    cachedHash: new Map()
+  }
 ): Promise<SyncBase> {
-  const head = await client.head()
-  const tree = await client.listFiles(head.tree)
   const remoteSha: Record<string, string> = {}
-  for (const e of tree) if (isSyncable(e.path)) remoteSha[e.path] = e.sha
+  if (tree === null) {
+    Object.assign(remoteSha, prev.remoteSha)
+  } else {
+    for (const e of tree) if (isSyncable(e.path)) remoteSha[e.path] = e.sha
+  }
   const localHash: Record<string, string> = {}
+  const lineCount: Record<string, number> = {}
   for (const p of paths) {
-    const text = await env.store.readText(`${env.paths.root}/${p}`)
-    if (text !== null) localHash[p] = await hashText(text)
+    const text = cache.cachedText.has(p) ? cache.cachedText.get(p)! : await env.store.readText(`${env.paths.root}/${p}`)
+    if (text === null) continue
+    localHash[p] = cache.cachedHash.get(p) ?? (await hashText(text))
+    if (p.endsWith('.ndjson')) lineCount[p] = countEvents(text)
   }
   // 分叉文件照常记账（远端 sha / 本地指纹都记），但**同时**记进 conflicts：
   // 光靠两张表分不出"已对齐"和"两侧都变过、只是这次没合并成"，那是分叉被静默的地方
-  return { commit, remoteSha, localHash, conflicts: [...conflicts].sort() }
+  return { commit, remoteSha, localHash, lineCount, conflicts: [...conflicts].sort() }
 }
 
 /** 推送内容里有多少答题事件、多少卡片行（写进 commit message，方便回看） */
@@ -426,9 +511,11 @@ async function forcePullFiles(
 ): Promise<SyncOutcome> {
   const wanted = [...new Set(paths)].filter((p) => isSyncable(p))
   if (wanted.length === 0) throw new Error('用远端覆盖本机：没有点名任何文件（这是个调用错误）')
-  const head = await client.head()
+  const headCommit = await client.head()
   const remoteSha = new Map(
-    (await client.listFiles(head.tree)).filter((e) => isSyncable(e.path)).map((e) => [e.path, e.sha])
+    (await client.listFiles(await client.treeOf(headCommit)))
+      .filter((e) => isSyncable(e.path))
+      .map((e) => [e.path, e.sha])
   )
   const files: MergeResult[] = []
   const wrote: string[] = []
@@ -471,16 +558,21 @@ async function forcePullFiles(
 
   const nextRemoteSha = { ...base.remoteSha }
   const nextLocalHash = { ...base.localHash }
+  const nextLineCount = { ...(base.lineCount ?? {}) }
   for (const p of wrote) {
     nextRemoteSha[p] = remoteSha.get(p)!
     const text = await env.store.readText(`${env.paths.root}/${p}`)
-    if (text !== null) nextLocalHash[p] = await hashText(text)
+    if (text !== null) {
+      nextLocalHash[p] = await hashText(text)
+      if (p.endsWith('.ndjson')) nextLineCount[p] = countEvents(text)
+    }
   }
   return {
     base: {
       commit: base.commit,
       remoteSha: nextRemoteSha,
       localHash: nextLocalHash,
+      lineCount: nextLineCount,
       // 被覆盖的文件已经对齐，从"已知分叉"里拿掉；其余分叉原样留着
       conflicts: (base.conflicts ?? []).filter((p) => !wrote.includes(p)).sort()
     },
@@ -509,11 +601,12 @@ async function forcePullFiles(
  * 快照是"手动回退用"的：要回退就把 `<root>-backups/<名字>/` 下的文件拷回 `<root>/`
  * （App 里目前没有一键恢复，所以这份东西的价值全在于它拍在**改动之前**）。
  */
-export async function snapshotWorkspace(env: SyncEnv, keep = 5): Promise<string> {
+export async function snapshotWorkspace(env: SyncEnv, keep = 5, only?: string[]): Promise<string> {
   const root = env.paths.root
   const backupsDir = `${root}-backups`
   const name = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 23)
-  const files = await listWorkspaceFiles(env.store, env.paths)
+  // only 给了就只拍这几个：同步时只需要"即将被覆盖的那几份"，拍全量会在推送前白读白写一遍
+  const files = only ?? (await listWorkspaceFiles(env.store, env.paths))
   for (const p of files) {
     const text = await env.store.readText(`${root}/${p}`)
     if (text !== null) await env.store.writeText(`${backupsDir}/${name}/${p}`, text)

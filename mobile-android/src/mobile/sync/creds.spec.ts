@@ -75,3 +75,21 @@ describe('同步目标变更时的记账作废', () => {
     expect(prefs.get(PREF_KEYS.githubPat)).toBe('tok-1')
   })
 })
+
+describe('同步记账的持久化', () => {
+  beforeEach(async () => {
+    prefs.clear()
+    await clearBase()
+  })
+
+  it('行数原样存回来：丢了它每次同步都要把远端大文件白拉一遍', async () => {
+    await saveBase({
+      commit: 'c1',
+      remoteSha: { 'review-log/2026-09.ndjson': 'sha-1' },
+      localHash: { 'review-log/2026-09.ndjson': 'hash-1' },
+      lineCount: { 'review-log/2026-09.ndjson': 42 },
+      conflicts: []
+    })
+    expect((await loadBase()).lineCount).toEqual({ 'review-log/2026-09.ndjson': 42 })
+  })
+})

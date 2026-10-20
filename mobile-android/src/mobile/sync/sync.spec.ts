@@ -25,6 +25,10 @@ class FakeGithub {
   conflictOnNextRef = false
   refUpdates = 0
   commitMessages: string[] = []
+  /** 每次请求的 "METHOD 路径"，用来数"一次同步到底发了几个请求" */
+  requests: string[] = []
+  /** 下载 blob 的次数（大文件往返的计数） */
+  blobReads = 0
 
   treeSha(): string {
     return `tree-${this.commit}`
@@ -50,6 +54,7 @@ class FakeGithub {
 
   handle(method: string, url: string, body?: string): { status: number; json: unknown } {
     const path = url.replace('https://api.github.com', '')
+    this.requests.push(`${method} ${path.replace(`/repos/${creds.repo}`, '')}`)
     const j = body ? (JSON.parse(body) as Record<string, unknown>) : {}
 
     if (method === 'GET' && path.startsWith('/repos/')) {
@@ -72,6 +77,7 @@ class FakeGithub {
         }
       }
       if (path.includes('/git/blobs/')) {
+        this.blobReads++
         const sha = path.split('/').pop()!
         const content = this.blobs.get(sha) ?? ''
         return { status: 200, json: { content: Buffer.from(content, 'utf8').toString('base64'), encoding: 'base64' } }
@@ -243,18 +249,23 @@ describe('runSync 编排', () => {
     ).rejects.toThrow(/422|fast forward/)
   })
 
-  it('推送前留下快照（工作区整份复制到 <root>-backups）', async () => {
+  it('纯推送不拍快照（推送不改动本地字节）；有落地时才拍，且只拍被覆盖的那份', async () => {
+    // 纯推送：远端没动，本地只是多了一条答题
     gh.push('review-log/2026-09.ndjson', row({ action: 'answer', cardId: 'c0', t: 0, rating: 3 }))
     const store = new MemoryFileStore()
     const first = await runSync({ store, paths, reloadAndVerify: verifyFrom(store) }, creds, emptyBase(), 'full')
     await store.appendText(`${ROOT}/review-log/2026-09.ndjson`, row({ action: 'answer', cardId: 'x', t: 1, rating: 3 }))
-    const out = await runSync({ store, paths, reloadAndVerify: verifyFrom(store) }, creds, first.base, 'full')
+    const pushed = await runSync({ store, paths, reloadAndVerify: verifyFrom(store) }, creds, first.base, 'full')
+    expect(pushed.report.pushed).toBe(1)
+    expect(pushed.report.snapshot).toBeUndefined()
+    expect(await store.list(`${ROOT}-backups`)).toHaveLength(0)
 
-    expect(out.report.snapshot).toBeTruthy()
-    const backups = await store.list(`${ROOT}-backups`)
-    expect(backups.filter((e) => e.type === 'directory')).toHaveLength(1)
-    const snap = await store.readText(`${ROOT}-backups/${out.report.snapshot}/review-log/2026-09.ndjson`)
-    expect(snap).toContain('c0')
+    // 有落地：远端把 decks.json 改了，本地那份将被覆盖 → 拍它，且只拍它
+    gh.push('decks.json', '[{"id":"d1","name":"远端"}]')
+    const out = await runSync({ store, paths, reloadAndVerify: verifyFrom(store) }, creds, pushed.base, 'pull-only')
+    expect(out.report.pulled).toBe(1)
+    // 只拉模式不拍快照（它只写"直接取远端"，不产生 commit）
+    expect(await store.list(`${ROOT}-backups`)).toHaveLength(0)
   })
 
   it('重放校验发现坏行 → 停止同步、不推送', async () => {
@@ -583,5 +594,103 @@ describe('runSync：只推模式（首页「推送进度」）', () => {
     expect(out.report.pulled).toBe(0)
     expect(out.report.message).toContain('已推送')
     expect(gh.refUpdates).toBe(1)
+  })
+})
+
+describe('runSync：请求数与往返成本的收敛（真机实测 GitHub 每次往返 ~0.7 秒）', () => {
+  const logPath = `${ROOT}/review-log/2026-09.ndjson`
+
+  it('远端没变、只有本地变了 → 不下载远端内容，新增行数仍算得对', async () => {
+    gh.push('review-log/2026-09.ndjson', row({ action: 'answer', cardId: 'c1', t: 1, rating: 3 }))
+    const store = new MemoryFileStore()
+    await store.writeText(logPath, row({ action: 'answer', cardId: 'c1', t: 1, rating: 3 }))
+    const first = await runSync({ store, paths, reloadAndVerify: verifyFrom(store) }, creds, emptyBase(), 'full')
+    expect(first.report.pushed).toBe(0)
+    expect(first.base.lineCount?.['review-log/2026-09.ndjson']).toBe(1)
+
+    // 手机上又答了两题：本地变了、远端没变
+    await store.appendText(logPath, row({ action: 'answer', cardId: 'c2', t: 2, rating: 4 }))
+    await store.appendText(logPath, row({ action: 'answer', cardId: 'c3', t: 3, rating: 1 }))
+    const before = gh.blobReads
+    const second = await runSync({ store, paths, reloadAndVerify: verifyFrom(store) }, creds, first.base, 'push-only')
+
+    expect(gh.blobReads - before).toBe(0) // 一次 blob 都没下（远端头没变，结果只可能是推本地）
+    expect(second.report.pushed).toBe(1)
+    expect(second.report.reviews).toBe(2) // 计数走记账里的行数，不是整份行数
+    expect(gh.commitMessages.at(-1)).toContain('2 reviews')
+  })
+
+  it('什么都没变 → 一次同步只读一次分支头（不再重复拉头与整棵树）', async () => {
+    gh.push('decks.json', '[{"id":"d1","name":"A"}]')
+    const store = new MemoryFileStore()
+    await store.writeText(`${ROOT}/decks.json`, '[{"id":"d1","name":"A"}]')
+    const first = await runSync({ store, paths, reloadAndVerify: verifyFrom(store) }, creds, emptyBase(), 'full')
+
+    const from = gh.requests.length
+    const out = await runSync({ store, paths, reloadAndVerify: verifyFrom(store) }, creds, first.base, 'pull-only')
+    expect(out.report.message).toContain('已是最新')
+
+    const tail = gh.requests.slice(from)
+    expect(tail).toEqual(['GET /git/ref/heads/main'])
+  })
+
+  it('推送后读回只拉一次头与树，不再由记账重复拉一遍', async () => {
+    gh.push('decks.json', '[{"id":"d1","name":"A"}]')
+    const store = new MemoryFileStore()
+    await store.writeText(`${ROOT}/decks.json`, '[{"id":"d1","name":"A"}]')
+    const first = await runSync({ store, paths, reloadAndVerify: verifyFrom(store) }, creds, emptyBase(), 'full')
+
+    await store.writeText(logPath, row({ action: 'answer', cardId: 'c1', t: 1, rating: 3 }))
+    const from = gh.requests.length
+    const out = await runSync({ store, paths, reloadAndVerify: verifyFrom(store) }, creds, first.base, 'push-only')
+    expect(out.report.pushed).toBe(1)
+
+    // 整条链的请求清单（sha 打码）：这是"一次推送最少要几个往返"的回归基线。
+    // 以前是 11 个：开头读头会连带读 commit、结尾记账又重复拉一次头+commit+树。
+    const seq = gh.requests.slice(from).map((r) => r.replace(/[0-9a-f]{40}|tree-c\d+|c\d+/g, '<id>'))
+    expect(seq).toEqual([
+      'GET /git/ref/heads/main', // 开头读分支头（只要头，不连带读 commit）
+      'POST /git/blobs', // 上传改动文件
+      'GET /git/commits/<id>', // 建新树要用 base_tree，这时才去读 commit
+      'POST /git/trees',
+      'POST /git/commits',
+      'PATCH /git/refs/heads/main',
+      'GET /git/ref/heads/main', // 推送后读回
+      'GET /git/commits/<id>',
+      'GET /git/trees/<id>?recursive=1'
+    ])
+  })
+})
+
+describe('runSync：合并落地前的快照只拍会被覆盖的文件', () => {
+  it('整份工作区 8.9MB 读+写一遍要 1.8 秒，落在推送关键路径上——只拍 toWrite', async () => {
+    const cardA = row({ id: 'c1', front: 'q' })
+    const evA = row({ action: 'answer', cardId: 'c1', t: 1, rating: 3 })
+    gh.push('cards/d1.ndjson', cardA)
+    gh.push('review-log/2026-09.ndjson', evA)
+    const store = new MemoryFileStore()
+    await store.writeText(`${ROOT}/cards/d1.ndjson`, cardA)
+    await store.writeText(`${ROOT}/review-log/2026-09.ndjson`, evA)
+    const first = await runSync({ store, paths, reloadAndVerify: verifyFrom(store) }, creds, emptyBase(), 'full')
+    expect(first.report.pushed).toBe(0)
+
+    // 之后：远端给卡片文件加了一行（要落到本地），本地给复习日志加了一行（要推上去）
+    gh.push('cards/d1.ndjson', cardA + row({ id: 'c2', front: 'q2' }))
+    await store.appendText(
+      `${ROOT}/review-log/2026-09.ndjson`,
+      row({ action: 'answer', cardId: 'c2', t: 5, rating: 4 })
+    )
+    const out = await runSync({ store, paths, reloadAndVerify: verifyFrom(store) }, creds, first.base, 'full')
+    expect(out.report.ok).toBe(true)
+    expect(out.report.pulled).toBe(1)
+    expect(out.report.pushed).toBe(1)
+
+    const dirs = (await store.list(`${ROOT}-backups`)).map((e) => e.name).sort()
+    expect(dirs).toHaveLength(1)
+    const dir = `${ROOT}-backups/${dirs[0]}`
+    // 只拍了这次会被覆盖的那份（保留相对路径）……
+    expect(await store.readText(`${dir}/cards/d1.ndjson`)).toBe(cardA)
+    // ……review-log 是推上去的，不是覆盖本地，不进快照
+    expect(await store.readText(`${dir}/review-log/2026-09.ndjson`)).toBeNull()
   })
 })

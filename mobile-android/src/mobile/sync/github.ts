@@ -7,6 +7,7 @@
 // 推送用的是 fast-forward 语义：updateRef 不带 force。远端在我们读完之后被别人推过
 // （桌面端 push），GitHub 会返回 422，我们据此中止而不是强推覆盖——这是"绝不猜测"在
 // 网络层的体现。
+import { Capacitor, CapacitorHttp } from '@capacitor/core'
 import type { SyncCreds } from './types'
 
 const API = 'https://api.github.com'
@@ -67,6 +68,16 @@ export function explainFailure(kind: FailureKind, detail: string, repo: string):
   }
 }
 
+/** 从 GitHub 的错误响应里抠出原话（原生层给的是已解析对象，fetch 路径给的是 JSON 或文本） */
+function detailOf(data: unknown): string {
+  if (typeof data === 'string') return data.slice(0, 200)
+  if (data && typeof data === 'object' && 'message' in data) {
+    const m = (data as { message?: unknown }).message
+    if (typeof m === 'string') return m
+  }
+  return ''
+}
+
 export interface TreeEntry {
   path: string
   sha: string
@@ -77,6 +88,42 @@ export class GithubClient {
   constructor(private readonly creds: SyncCreds) {}
 
   private async req<T>(method: string, path: string, body?: unknown): Promise<T> {
+    const url = `${API}${path}`
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${this.creds.token}`,
+      Accept: 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28',
+      ...(body === undefined ? {} : { 'Content-Type': 'application/json' })
+    }
+
+    // ---- 真机：走原生网络层（CapacitorHttp），不用 WebView 的 fetch ----
+    //
+    // 为什么非换不可：WebView 里这个应用的 origin 是 https://localhost，请求 api.github.com
+    // 是跨域；而每个请求都带 Authorization（非"简单请求"），浏览器必须先发一次 OPTIONS 预检
+    // 问服务器同不同意。实测：同一个 URL、同一条连接，带 Authorization 一次 650ms，不带 120ms
+    // ——差的这 500ms 出头就是预检。一次推送十几个请求，光预检就是五六秒。
+    // 原生层直接发 HTTP，没有同源策略，也就没有预检。
+    if (Capacitor.isNativePlatform()) {
+      let res: { status: number; data: unknown }
+      try {
+        res = await CapacitorHttp.request({
+          url,
+          method,
+          headers,
+          ...(body === undefined ? {} : { data: body }),
+          connectTimeout: REQUEST_TIMEOUT_MS,
+          readTimeout: REQUEST_TIMEOUT_MS,
+          responseType: 'json'
+        })
+      } catch (e) {
+        throw this.networkError(e)
+      }
+      // 原生层不会因为状态码抛错，4xx/5xx 也要在这里翻成人话
+      if (res.status < 200 || res.status >= 300) throw this.httpError(method, path, res.status, res.data)
+      return res.data as T
+    }
+
+    // ---- 浏览器/测试环境：原来的 fetch 路径（没有 Capacitor 原生层可用）----
     let res: Response
     // 每个请求各自超时：没有超时的话，一次卡住的请求会让界面永远停在"同步中"（busy 只有
     // 在 runSync 返回/抛错时才释放），用户除了杀进程没有别的办法。用 AbortController 而不是
@@ -85,7 +132,7 @@ export class GithubClient {
     const timer = setTimeout(() => ac.abort(), REQUEST_TIMEOUT_MS)
     let aborted = false
     try {
-      res = await fetch(`${API}${path}`, {
+      res = await fetch(url, {
         method,
         // 必须显式禁掉 HTTP 缓存：GitHub 的 REST 响应带 `cache-control: private, max-age=60`，
         // WebView 的私有缓存会在这 60 秒内直接复用**没有重新请求**的旧响应。真机演练里就是这么炸的：
@@ -93,43 +140,50 @@ export class GithubClient {
         // 于是"推送成功却报读回不一致"。Node 侧的 undici 没有 HTTP 缓存，所以只有真机看得见。
         cache: 'no-store',
         signal: ac.signal,
-        headers: {
-          Authorization: `Bearer ${this.creds.token}`,
-          Accept: 'application/vnd.github+json',
-          'X-GitHub-Api-Version': '2022-11-28',
-          ...(body ? { 'Content-Type': 'application/json' } : {})
-        },
-        body: body ? JSON.stringify(body) : undefined
+        headers,
+        body: body === undefined ? undefined : JSON.stringify(body)
       })
-    } catch {
+    } catch (e) {
       aborted = ac.signal.aborted
       // fetch 抛错 = 压根没拿到 HTTP 响应（DNS/连接/证书/被拦/超时）。这条以前会原样抛成
       // "Failed to fetch"，用户看到四个英文单词，无从判断是网络还是凭据——分开报。
-      throw new GithubError(
-        NETWORK_STATUS,
-        aborted
-          ? `等了 ${Math.round(REQUEST_TIMEOUT_MS / 1000)} 秒没有响应，已放弃这次请求（网络可能断了）。可以稍后重试，本地数据没有被改动。`
-          : explainFailure('network', '', this.creds.repo)
-      )
+      throw this.networkError(aborted ? new Error('timeout') : e)
     } finally {
       clearTimeout(timer)
     }
     if (!res.ok) {
       // 把状态码翻成"下一步做什么"，并保留 GitHub 原话与具体请求，便于排查时不被二次转述失真。
-      let detail = ''
+      let data: unknown = null
       try {
-        const j = (await res.json()) as { message?: string }
-        detail = j.message ?? ''
+        data = await res.json()
       } catch {
-        detail = await res.text().catch(() => '')
+        data = await res.text().catch(() => '')
       }
-      const kind = classifyFailure(res.status, detail)
-      throw new GithubError(
-        res.status,
-        `${explainFailure(kind, detail, this.creds.repo)}［${method} ${path} → HTTP ${res.status}］`
-      )
+      throw this.httpError(method, path, res.status, data)
     }
     return (await res.json()) as T
+  }
+
+  /** 没拿到 HTTP 响应：区分"超时"与"连不上"，别让用户对着 Failed to fetch 猜 */
+  private networkError(e: unknown): GithubError {
+    const msg = e instanceof Error ? e.message : String(e)
+    const timeout = /timeout|timed out|abort/i.test(msg)
+    return new GithubError(
+      NETWORK_STATUS,
+      timeout
+        ? `等了 ${Math.round(REQUEST_TIMEOUT_MS / 1000)} 秒没有响应，已放弃这次请求（网络可能断了）。可以稍后重试，本地数据没有被改动。`
+        : explainFailure('network', '', this.creds.repo)
+    )
+  }
+
+  /** 拿到 HTTP 响应但不是 2xx：把状态码翻成"下一步做什么"，并保留 GitHub 原话与具体请求 */
+  private httpError(method: string, path: string, status: number, data: unknown): GithubError {
+    const detail = detailOf(data)
+    const kind = classifyFailure(status, detail)
+    return new GithubError(
+      status,
+      `${explainFailure(kind, detail, this.creds.repo)}［${method} ${path} → HTTP ${status}］`
+    )
   }
 
   /** 凭据与仓库可达性验证（设置页的"验证连接"用） */
@@ -139,13 +193,10 @@ export class GithubClient {
         'GET',
         `/repos/${this.creds.repo}`
       )
-      const ref = await this.req<{ object: { sha: string } }>(
-        'GET',
-        `/repos/${this.creds.repo}/git/ref/heads/${this.creds.branch}`
-      )
+      const head = await this.head()
       return {
         ok: true,
-        message: `${repo.full_name}（${repo.private ? '私有' : '公开'}）分支 ${this.creds.branch} @ ${ref.object.sha.slice(0, 7)}`,
+        message: `${repo.full_name}（${repo.private ? '私有' : '公开'}）分支 ${this.creds.branch} @ ${head.slice(0, 7)}`,
         kind: null
       }
     } catch (e) {
@@ -159,16 +210,22 @@ export class GithubClient {
   }
 
   /** 分支头：commit sha 与它的 tree sha（推送时作为 base_tree） */
-  async head(): Promise<{ commit: string; tree: string }> {
+  /**
+   * 分支头 commit。**只要 1 个请求**：tree 不是每次都要（"远端没变"的一次拉取完全不碰它），
+   * 所以拆出去放在 treeOf 里按需取。以前这里连带把 commit 也读了，每次同步开头就多一个请求。
+   */
+  async head(): Promise<string> {
     const ref = await this.req<{ object: { sha: string } }>(
       'GET',
       `/repos/${this.creds.repo}/git/ref/heads/${this.creds.branch}`
     )
-    const commit = await this.req<{ tree: { sha: string } }>(
-      'GET',
-      `/repos/${this.creds.repo}/git/commits/${ref.object.sha}`
-    )
-    return { commit: ref.object.sha, tree: commit.tree.sha }
+    return ref.object.sha
+  }
+
+  /** 某个 commit 的 tree sha（1 个请求）。列文件树、建新树时才需要 */
+  async treeOf(commit: string): Promise<string> {
+    const c = await this.req<{ tree: { sha: string } }>('GET', `/repos/${this.creds.repo}/git/commits/${commit}`)
+    return c.tree.sha
   }
 
   /** 一次取回整棵树（不递归子目录请求，仓库只有三层） */
@@ -197,8 +254,13 @@ export class GithubClient {
   /** 写一个文件：内容 → blob sha（推送的第一步） */
   async writeBlob(text: string): Promise<string> {
     const bytes = new TextEncoder().encode(text)
+    // 分块拼二进制字符串：逐字节 `bin += ...` 在 2.6MB 的复习日志上实测 206ms，分块只要 25ms
+    // （块大小 8192 是 String.fromCharCode.apply 的安全上限附近，再大容易爆调用栈）
     let bin = ''
-    for (const b of bytes) bin += String.fromCharCode(b)
+    const CHUNK = 8192
+    for (let i = 0; i < bytes.length; i += CHUNK) {
+      bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK) as unknown as number[])
+    }
     const res = await this.req<{ sha: string }>('POST', `/repos/${this.creds.repo}/git/blobs`, {
       content: btoa(bin),
       encoding: 'base64'

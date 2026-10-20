@@ -69,6 +69,9 @@ export async function loadBase(): Promise<SyncBase> {
       commit: parsed.commit ?? null,
       remoteSha: parsed.remoteSha ?? {},
       localHash: parsed.localHash ?? {},
+      // 老记账没有行数这一项：少了它只是"远端没变时也要把远端内容拉下来算新增行数"，
+      // 不影响正确性（但会让每次同步白拉一个大文件，所以必须原样带回来）
+      lineCount: parsed.lineCount ?? {},
       // 老版本记的账里没有这一项：当作"没有已知分叉"（空数组），别让读旧格式失败
       conflicts: parsed.conflicts ?? []
     }

@@ -57,8 +57,8 @@ async function pushAsDesktop(files: Record<string, string>, message: string): Pr
   const blobs = await Promise.all(
     Object.entries(files).map(async ([path, text]) => ({ path, sha: await client.writeBlob(text) }))
   )
-  const tree = await client.createTree(head.tree, blobs)
-  const commit = await client.createCommit(message, tree, head.commit)
+  const tree = await client.createTree(await client.treeOf(head), blobs)
+  const commit = await client.createCommit(message, tree, head)
   await client.updateRef(commit)
   return commit
 }
@@ -151,8 +151,8 @@ describe.skipIf(!enabled)(`真实 GitHub 演练（分支 ${BRANCH}）`, () => {
     // 源到线上读回：不看内存里的假设，看服务器上的树
     const client = new GithubClient(creds)
     const head = await client.head()
-    expect(head.commit).toBe(out.report.commit)
-    const files = await client.listFiles(head.tree)
+    expect(head).toBe(out.report.commit)
+    const files = await client.listFiles(await client.treeOf(head))
     const paths = files.map((f) => f.path)
     expect(paths).toContain('decks.json')
     expect(paths).toContain('cards/drill-deck-0001.ndjson')
@@ -205,13 +205,15 @@ describe.skipIf(!enabled)(`真实 GitHub 演练（分支 ${BRANCH}）`, () => {
     expect(await store.readText('drill-ws/decks.json')).toBe(localDecks)
     const client = new GithubClient(creds)
     const head = await client.head()
-    const remote = await client.readFile((await client.listFiles(head.tree)).find((f) => f.path === 'decks.json')!.sha)
+    const remote = await client.readFile(
+      (await client.listFiles(await client.treeOf(head))).find((f) => f.path === 'decks.json')!.sha
+    )
     expect(remote).toBe(remoteDecks)
   }, 120_000)
 
   it('非 fast-forward 的推送被服务器拒绝（绝不覆盖别人的提交）', async () => {
     const client = new GithubClient(creds)
-    const stale = (await client.head()).commit
+    const stale = await client.head()
     await pushAsDesktop({ 'review-log/2026-09.ndjson': '' }, 'desktop: 演练——抢先推一条')
     // 拿过期的 head 去更新分支头：GitHub 必须拒绝（这就是"绝不覆盖别人的提交"）
     const err = await client.updateRef(stale).then(
@@ -229,7 +231,7 @@ describe.skipIf(!enabled)(`真实 GitHub 演练（分支 ${BRANCH}）`, () => {
     expect(await hashText(local!)).toHaveLength(64)
     const client = new GithubClient(creds)
     const head = await client.head()
-    const entry = (await client.listFiles(head.tree)).find((f) => f.path === 'decks.json')!
+    const entry = (await client.listFiles(await client.treeOf(head))).find((f) => f.path === 'decks.json')!
     // blob sha 是 git 的对象 id，与我们的内容指纹不是同一个东西——两者都要有，
     // 一个用来判断"远端变没变"，一个用来判断"本地变没变"
     expect(entry.sha).toMatch(/^[0-9a-f]{40}$/)
