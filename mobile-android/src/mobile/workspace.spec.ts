@@ -645,7 +645,7 @@ describe('首页总计', () => {
   })
 })
 
-describe('今天刷过的卡数（学习页「刷 N 张」）', () => {
+describe('今天刷过的卡数（学习页「刷 N 张」，全部牌组合起来算）', () => {
   let fs: MemoryFileStore
   beforeEach(() => {
     fs = new MemoryFileStore()
@@ -654,11 +654,11 @@ describe('今天刷过的卡数（学习页「刷 N 张」）', () => {
 
   it('按卡去重：同一张答两次也只算一张', async () => {
     const ws = await openWorkspace(fs)
-    expect(ws.todayCardsOf('d1')).toBe(0)
+    expect(ws.todayCardsCount()).toBe(0)
     const card = ws.getStudy('d1').card!
     await ws.answer(card.id, 3)
     await ws.answer(card.id, 3)
-    expect(ws.todayCardsOf('d1')).toBe(1)
+    expect(ws.todayCardsCount()).toBe(1)
   })
 
   it('与「今日已学 N 次」是两个口径：撤销回退次数、不回退卡数', async () => {
@@ -669,7 +669,7 @@ describe('今天刷过的卡数（学习页「刷 N 张」）', () => {
     await ws.undo()
     expect(ws.todayCount()).toBe(0)
     // 用户确实看过这张卡，撤销不改变"今天碰过几张卡"
-    expect(ws.todayCardsOf('d1')).toBe(1)
+    expect(ws.todayCardsCount()).toBe(1)
   })
 
   it('重放后与内存态一致：reload 不重复计数', async () => {
@@ -678,9 +678,9 @@ describe('今天刷过的卡数（学习页「刷 N 张」）', () => {
     await ws.answer(a.id, 3)
     const b = ws.getStudy('d1').card!
     await ws.answer(b.id, 3)
-    expect(ws.todayCardsOf('d1')).toBe(2)
+    expect(ws.todayCardsCount()).toBe(2)
     await ws.reload()
-    expect(ws.todayCardsOf('d1')).toBe(2)
+    expect(ws.todayCardsCount()).toBe(2)
   })
 
   it('昨天的答题不计入今天', async () => {
@@ -690,10 +690,10 @@ describe('今天刷过的卡数（学习页「刷 N 张」）', () => {
       JSON.stringify({ seq: 1, t: yesterday, action: 'answer', cardId: 'c1', deckId: 'd1', rating: 3 }) + '\n'
     )
     const ws = await openWorkspace(fs)
-    expect(ws.todayCardsOf('d1')).toBe(0)
+    expect(ws.todayCardsCount()).toBe(0)
   })
 
-  it('牌组之间互不串账', async () => {
+  it('换到别的牌组也接着算（看的是今天一共刷了多少张，不是这个牌组多少张）', async () => {
     fs.seed(
       `${ROOT}/decks.json`,
       JSON.stringify(
@@ -712,7 +712,10 @@ describe('今天刷过的卡数（学习页「刷 N 张」）', () => {
     const ws = await openWorkspace(fs)
     const c = ws.getStudy('d1').card!
     await ws.answer(c.id, 3)
-    expect(ws.todayCardsOf('d1')).toBe(1)
-    expect(ws.todayCardsOf('d2')).toBe(0)
+    expect(ws.todayCardsCount()).toBe(1)
+    // 切到另一个牌组，这个数不变、也不归零
+    const other = ws.getStudy('d2').card!
+    await ws.answer(other.id, 3)
+    expect(ws.todayCardsCount()).toBe(2)
   })
 })

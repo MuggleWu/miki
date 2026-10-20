@@ -206,7 +206,7 @@ export function StudyPage({ deckId }: { deckId: string }): JSX.Element {
         <h1 className="ellipsis">{deckName}</h1>
         <span className="head-notes">
           <span className="head-note">剩 {state.remaining}</span>
-          <span className="head-note">刷 {ws.todayCardsOf(deckId)} 张</span>
+          <span className="head-note">刷 {ws.todayCardsCount()} 张</span>
         </span>
         <button className="icon-btn" onClick={() => void undo()} disabled={state.undoable === 0} aria-label="撤销">
           ↺
