@@ -187,7 +187,8 @@ export interface StatsParams {
 }
 
 export interface StatsPayload {
-  /** 预测：等宽时间桶（38 根），label 为桶起点，range 为桶起止文本（tooltip 用） */
+  /** 预测：与「复习」图同分档（近一年＝今天起 365 天每天一根、全部＝按月），label 为日期/月键，
+   * count 为该天（该月）到期张数（逾期并入第一根），range 为 tooltip 文本 */
   forecast: { label: string; count: number; range: string }[]
   heatmap: { date: string; count: number }[] // yyyy-MM-dd
   reviews: { label: string; total: number; again: number }[]

@@ -133,7 +133,7 @@ interface Axis {
 }
 
 function axis(p: ChartPalette): Axis {
-  // 手机上刻度字要小一号，否则 38 根柱子的标签会糊在一起
+  // 手机上刻度字要小一号：预测图是 365 根日柱（复习图同宽），标签本来就密
   return { axisLabel: { color: p.dim, fontSize: 10 }, splitLine: { lineStyle: { color: p.split } } }
 }
 

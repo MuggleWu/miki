@@ -189,43 +189,68 @@ export function computeStats(input: StatsInput): StatsPayload {
       .map((r) => ({ label: r.label, total: r.total, correct: r.total - r.again }))
   }
 
-  // 预测：38 根等宽柱自适应分桶（柱数沿用原 30 天 + 8 周；桶宽随视野均分，逾期积压与超远间隔都进图）
+  // 预测（未来到期）：分档口径与「复习」图完全对齐——近一年＝未来 365 天每天一根，全部＝按月。
+  // 逾期积压并进第一根（今天/本月）：旧的 38 根等宽柱每根跨 9.6 天、还把逾期整个丢掉，
+  // 结果第一根柱（标签写的还是今天）比首页「到期」大十几倍，而且窗口每天往前滑 ⇒ 只增不减，
+  // 从图上读不出「每天要刷多少」。按天之后柱高就是当天到期张数，和首页、和产能都对得上。
   const forecast: StatsPayload['forecast'] = []
-  const FORECAST_BARS = 38
-  const endOfToday = endOfLocalDay(now)
-  // 暂停卡不进调度（与队列口径一致），不计入预测；逾期卡仅在「全部」档计入
+  // 暂停卡不进调度（与队列口径一致），不计入预测
   const scheduled = cards.filter((c) => !c.suspended && c.fsrs).map((c) => c.fsrs!.due)
-  let fStart: number
-  let fSpan: number
-  if (range === 'all' && scheduled.length > 0) {
-    // 全部：最远到期 − 最早逾期，跨度均分 38 桶（逾期积压落在最左侧柱）
-    let minDue = Infinity
-    let maxDue = -Infinity
+  if (range === 'year') {
+    const days = nextLocalDays(now, FORECAST_DAYS)
+    const indexOfDay = new Map<string, number>()
+    days.forEach((ms, i) => indexOfDay.set(localDateKey(ms), i))
+    const todayKey = localDateKey(days[0])
+    const counts = new Array<number>(days.length).fill(0)
+    let overdue = 0
     for (const due of scheduled) {
-      if (due < minDue) minDue = due
-      if (due > maxDue) maxDue = due
+      const key = localDateKey(due)
+      const i = indexOfDay.get(key)
+      if (i !== undefined) {
+        counts[i]++
+        continue
+      }
+      // 逾期（含今天更早到点的）落到今天这一根：藏起来的话，图上永远看不到真实工作量
+      if (key < todayKey) {
+        counts[0]++
+        overdue++
+      }
+      // key 在最后一天之后＝到期在一年以外，本档不画（视野与「近一年」一致）
     }
-    fStart = minDue
-    fSpan = Math.max(maxDue - minDue, FORECAST_BARS)
+    for (let i = 0; i < days.length; i++) {
+      forecast.push({
+        label: monthDayLabel(days[i]),
+        count: counts[i],
+        range:
+          i === 0 && overdue > 0 ? `${fullDayLabel(days[i])}（今天，另含逾期 ${overdue} 张）` : fullDayLabel(days[i])
+      })
+    }
   } else {
-    // 近一年：未来 365 天均分 38 桶；无已调度卡时回退此窗口（全零柱）
-    fStart = endOfToday
-    fSpan = 365 * 86_400_000
-  }
-  const barWidth = fSpan / FORECAST_BARS
-  const counts = new Array<number>(FORECAST_BARS).fill(0)
-  for (const due of scheduled) {
-    if (range === 'year' && (due <= fStart || due > fStart + fSpan)) continue // 逾期与超视野不计
-    const bi = Math.min(FORECAST_BARS - 1, Math.max(0, Math.floor((due - fStart) / barWidth)))
-    counts[bi]++
-  }
-  for (let i = 0; i < FORECAST_BARS; i++) {
-    const rs = fStart + barWidth * i
-    forecast.push({
-      label: forecastLabel(rs, barWidth),
-      count: counts[i],
-      range: forecastRange(rs, rs + barWidth, barWidth)
-    })
+    const months = forecastMonths(now, scheduled)
+    const indexOfMonth = new Map<string, number>()
+    months.forEach((key, i) => indexOfMonth.set(key, i))
+    const thisMonth = monthKey(now)
+    const counts = new Array<number>(months.length).fill(0)
+    let overdue = 0
+    for (const due of scheduled) {
+      const key = monthKey(due)
+      const i = indexOfMonth.get(key)
+      if (i !== undefined) {
+        counts[i]++
+        continue
+      }
+      if (key < thisMonth) {
+        counts[0]++
+        overdue++
+      }
+    }
+    for (let i = 0; i < months.length; i++) {
+      forecast.push({
+        label: months[i],
+        count: counts[i],
+        range: i === 0 && overdue > 0 ? `${months[i]}（本月，另含逾期 ${overdue} 张）` : months[i]
+      })
+    }
   }
 
   // 状态分布
@@ -256,24 +281,61 @@ export function endOfLocalDay(ms: number): number {
   return d.getTime()
 }
 
-/** 预测柱标签：桶宽 ≥1 年只标年份，≥25 天标年-月，否则标月-日 */
-function forecastLabel(ms: number, barWidth: number): string {
+/** 预测「近一年」档的天数：今天起 365 天，一天一根 */
+const FORECAST_DAYS = 365
+/** 预测「全部」档最少画几个月：没有远期卡时也不至于只剩一根柱 */
+const FORECAST_MIN_MONTHS = 12
+/** 预测「全部」档最多画几个月：极端数据（最远到期在几十年后）不至于把图撑成一片头发 */
+const FORECAST_MAX_MONTHS = 120
+
+/** 从 now 所在日起连续 n 个本地零点（跨 DST 用 setDate 递增，不按毫秒累加） */
+function nextLocalDays(now: number, n: number): number[] {
+  const out: number[] = []
+  const d = new Date(now)
+  d.setHours(0, 0, 0, 0)
+  for (let i = 0; i < n; i++) {
+    out.push(d.getTime())
+    d.setDate(d.getDate() + 1)
+  }
+  return out
+}
+
+/** 本地月键 yyyy-MM（「全部」档按它分桶；字符串比较即时间顺序，前提是月份补零） */
+function monthKey(ms: number): string {
+  const d = new Date(ms)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+
+/** 「全部」档的月份列表：本月起，到最远到期所在月；不足 12 个月补足，最多 120 个月 */
+function forecastMonths(now: number, dues: readonly number[]): string[] {
+  let lastMonth = monthKey(now)
+  for (const due of dues) {
+    const key = monthKey(due)
+    if (key > lastMonth) lastMonth = key
+  }
+  const cursor = new Date(now)
+  cursor.setDate(1)
+  cursor.setHours(0, 0, 0, 0)
+  const out: string[] = []
+  while (out.length < FORECAST_MAX_MONTHS) {
+    const key = monthKey(cursor.getTime())
+    if (out.length >= FORECAST_MIN_MONTHS && key > lastMonth) break
+    out.push(key)
+    cursor.setMonth(cursor.getMonth() + 1)
+  }
+  return out
+}
+
+/** 预测柱标签：按天标「月-日」（与「复习」图同款，年由 tooltip 补） */
+function monthDayLabel(ms: number): string {
   const d = new Date(ms)
   const p = (n: number) => String(n).padStart(2, '0')
-  if (barWidth >= 365 * 86_400_000) return `${d.getFullYear()}`
-  if (barWidth >= 25 * 86_400_000) return `${d.getFullYear()}-${p(d.getMonth() + 1)}`
   return `${p(d.getMonth() + 1)}-${p(d.getDate())}`
 }
 
-/** 预测柱 tooltip 区间文本：起止两端各格式化一次，按桶宽省略同侧重复 */
-function forecastRange(rs: number, re: number, barWidth: number): string {
+/** 预测柱 tooltip 文本：带年份与星期，避开「10-25」这种跨年就分不清的读法 */
+function fullDayLabel(ms: number): string {
+  const d = new Date(ms)
   const p = (n: number) => String(n).padStart(2, '0')
-  const fmt = (ms: number, withYear: boolean) => {
-    const d = new Date(ms)
-    const md = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
-    return withYear ? md : md.slice(5)
-  }
-  const withYear = barWidth >= 25 * 86_400_000
-  if (barWidth < 86_400_000) return `${fmt(rs, false)} ${String(new Date(rs).getHours()).padStart(2, '0')}:00 起`
-  return `${fmt(rs, withYear)} ~ ${fmt(re, withYear)}`
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}（周${'日一二三四五六'[d.getDay()]}）`
 }

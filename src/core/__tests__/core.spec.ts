@@ -553,7 +553,7 @@ describe('stats', () => {
     expect(s.reviews.reduce((acc, r) => acc + r.total, 0)).toBe(2) // undo 抵消后
     expect(s.stateCounts.new).toBe(1) // c2 是 d2 的 new 卡
     expect(s.heatmap.length).toBe(365)
-    expect(s.forecast.length).toBe(38) // 等宽自适应分桶，柱数不变
+    expect(s.forecast.length).toBe(365) // 按天：今天起一天一根
     const s2 = computeStats({
       desiredRetention: 0.9,
       cards,
@@ -566,7 +566,11 @@ describe('stats', () => {
     expect(s2.stateCounts.new).toBe(0)
   })
 
-  it('预测等宽分桶：year 档未来 365 天均分 38 桶，超视野/暂停/今天内到期不计', () => {
+  // 预测的口径与「复习」图对齐：近一年按天、全部按月。旧实现是 38 根等宽柱，
+  // 每根跨 9.6 天且把逾期整段丢掉——图上第一根（标签还写着今天）比首页「到期」大十几倍，
+  // 而且窗口每天往前滑，读数只增不减。下面三条钉住新口径的边界：按天的落点、逾期归入今天、
+  // 暂停与「一年以外」不画、按月至少 12 根。
+  it('预测按天：year 档今天起 365 根，逾期并进今天，暂停与一年以外不画', () => {
     const now = T0 + 10 * DAY
     const mk = (id: string, dueOffsetDay: number, suspended = false): Card => {
       const c = cardOf(id)
@@ -576,12 +580,13 @@ describe('stats', () => {
         step: null,
         stability: 5,
         difficulty: 5,
-        due: T0 + 10 * DAY + dueOffsetDay * DAY,
+        due: now + dueOffsetDay * DAY,
         lastReview: T0
       }
       return c
     }
-    const cards = [mk('f1', 100), mk('f2', 400), mk('f3', 50, true), mk('f4', 0)] // f2 超一年 f3 暂停 f4 今天内
+    // f2 到期在一年以外、f3 暂停，都不该进图
+    const cards = [mk('f1', 100), mk('f2', 400), mk('f3', 50, true), mk('f4', 0), mk('f5', -3)]
     const s = computeStats({
       desiredRetention: 0.9,
       cards,
@@ -591,15 +596,18 @@ describe('stats', () => {
       range: 'year',
       now
     })
-    expect(s.forecast.length).toBe(38)
-    expect(s.forecast.reduce((a, f) => a + f.count, 0)).toBe(1)
-    // f1 距窗口左界约 99.33 天，桶宽 365/38 ≈ 9.605 天 → 第 10 桶
-    expect(s.forecast[10].count).toBe(1)
-    expect(s.forecast[0].range).toMatch(/^09-11 ~ /) // 桶宽 <25 天时 range 不带年份
+    expect(s.forecast.length).toBe(365)
+    expect(s.forecast.reduce((a, f) => a + f.count, 0)).toBe(3) // f1 + 今天 f4 + 逾期 f5
+    // 今天这一根 = 今天到点的 f4 + 逾期的 f5，绝不把逾期藏掉
+    expect(s.forecast[0].count).toBe(2)
+    expect(s.forecast[100].count).toBe(1) // f1：距今天正好 100 天
+    expect(s.forecast[0].label).toBe('09-11')
+    expect(s.forecast[0].range).toContain('2026-09-11')
+    expect(s.forecast[0].range).toContain('逾期 1 张')
   })
 
-  it('预测等宽分桶：all 档最远到期减最早逾期均分，逾期进首柱、最远进末柱', () => {
-    const now = T0 + 10 * DAY
+  it('预测按月：all 档本月起至少 12 根，逾期并进本月', () => {
+    const now = T0 + 10 * DAY // 2026-09-11
     const mk = (id: string, dueDay: number): Card => {
       const c = cardOf(id)
       c.fsrs = {
@@ -612,7 +620,7 @@ describe('stats', () => {
       }
       return c
     }
-    const cards = [mk('g1', 2), mk('g2', 40), mk('g3', 100)] // 跨度 98 天，桶宽 98/38 ≈ 2.579 天
+    const cards = [mk('g1', -20), mk('g2', 40), mk('g3', 100)] // g1 逾期在上个月
     const s = computeStats({
       desiredRetention: 0.9,
       cards,
@@ -622,13 +630,14 @@ describe('stats', () => {
       range: 'all',
       now
     })
-    expect(s.forecast.length).toBe(38)
-    expect(s.forecast[0].count).toBe(1) // 最早逾期（g1）
-    // g2 offset 38 天 → floor(38/2.5789) = 14
-    expect(s.forecast[14].count).toBe(1)
-    expect(s.forecast[37].count).toBe(1) // 最远到期 clamp 末柱
+    expect(s.forecast.length).toBe(12) // 最远到期 12 月 → 不足 12 个月按 12 补齐
+    expect(s.forecast[0].label).toBe('2026-09')
+    expect(s.forecast[0].count).toBe(1) // 逾期的 g1 落到本月
+    expect(s.forecast[0].range).toContain('逾期 1 张')
+    expect(s.forecast[1].count).toBe(1) // g2：2026-10
+    expect(s.forecast[3].count).toBe(1) // g3：2026-12
     expect(s.forecast.reduce((a, f) => a + f.count, 0)).toBe(3)
-    // 同一批卡在 year 档：逾期 g1 不计；g2(10-21)、g3(12-19) 落入未来窗口
+    // 同一批卡在 year 档：逾期也进今天这一根，其余按天落点
     const sy = computeStats({
       desiredRetention: 0.9,
       cards,
@@ -638,21 +647,28 @@ describe('stats', () => {
       range: 'year',
       now
     })
-    expect(sy.forecast.reduce((a, f) => a + f.count, 0)).toBe(2)
+    expect(sy.forecast[0].count).toBe(1) // g1
+    expect(sy.forecast[30].count).toBe(1) // g2：10-11
+    expect(sy.forecast[90].count).toBe(1) // g3：12-10
   })
 
-  it('预测等宽分桶：无已调度卡时回退零柱', () => {
-    const s = computeStats({
-      desiredRetention: 0.9,
-      cards: [cardOf('h1')],
-      dailyAgg: new Map(),
-      deckId: null,
-      hiddenDeckIds: [],
-      range: 'all',
-      now: T0
-    })
-    expect(s.forecast.length).toBe(38)
-    expect(s.forecast.every((f) => f.count === 0)).toBe(true)
+  it('预测：无已调度卡时也给满横轴（按天 365 根 / 按月 12 根）', () => {
+    const mk = (range: 'year' | 'all') =>
+      computeStats({
+        desiredRetention: 0.9,
+        cards: [cardOf('h1')],
+        dailyAgg: new Map(),
+        deckId: null,
+        hiddenDeckIds: [],
+        range,
+        now: T0
+      })
+    const year = mk('year')
+    expect(year.forecast.length).toBe(365)
+    expect(year.forecast.every((f) => f.count === 0)).toBe(true)
+    const all = mk('all')
+    expect(all.forecast.length).toBe(12)
+    expect(all.forecast.every((f) => f.count === 0)).toBe(true)
   })
 
   it('间隔分段', () => {
